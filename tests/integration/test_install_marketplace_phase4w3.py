@@ -154,7 +154,7 @@ class TestFinalizePhase:
         from apm_cli.install.phases.finalize import run
 
         ctx = self._make_ctx(installed_count=2, logger=None)
-        with patch("apm_cli.commands.install._rich_success") as mock_success:
+        with patch("apm_cli.install.phases.finalize._rich_success") as mock_success:
             result = run(ctx)
         mock_success.assert_called_once()
         assert result.installed_count == 2
@@ -164,7 +164,7 @@ class TestFinalizePhase:
 
         mock_logger = MagicMock()
         ctx = self._make_ctx(installed_count=1, logger=mock_logger)
-        with patch("apm_cli.commands.install._rich_success") as mock_success:
+        with patch("apm_cli.install.phases.finalize._rich_success") as mock_success:
             run(ctx)
         mock_success.assert_not_called()
 
@@ -213,6 +213,7 @@ class TestFinalizePhase:
 
         diag = DiagnosticCollector()
         ctx = self._make_ctx(
+            installed_count=1,
             unpinned_count=1,
             installed_packages=[pkg],
             diagnostics=diag,
@@ -230,12 +231,30 @@ class TestFinalizePhase:
 
         diag = DiagnosticCollector()
         ctx = self._make_ctx(
+            installed_count=1,
             unpinned_count=2,
             installed_packages=[pkg],
             diagnostics=diag,
         )
         run(ctx)
         assert diag.has_diagnostics
+
+    def test_converged_run_repeats_no_unpinned_notice(self) -> None:
+        """#4184: a run that installed nothing repeats no unpinned warning."""
+        from apm_cli.install.phases.finalize import run
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        dep_ref = MagicMock()
+        dep_ref.reference = None
+        dep_ref.repo_url = "github.com/owner/dep1"
+        pkg = MagicMock()
+        pkg.dep_ref = dep_ref
+        diag = DiagnosticCollector()
+        ctx = self._make_ctx(
+            installed_count=0, unpinned_count=1, installed_packages=[pkg], diagnostics=diag
+        )
+        run(ctx)
+        assert not diag.has_diagnostics
 
     def test_unpinned_more_than_5_shows_and_more(self) -> None:
         from apm_cli.install.phases.finalize import run
@@ -252,6 +271,7 @@ class TestFinalizePhase:
 
         diag = DiagnosticCollector()
         ctx = self._make_ctx(
+            installed_count=7,
             unpinned_count=7,
             installed_packages=packages,
             diagnostics=diag,

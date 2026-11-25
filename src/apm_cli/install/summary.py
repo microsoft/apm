@@ -13,7 +13,6 @@ sources, locks, or filesystem fixtures.
 
 from __future__ import annotations
 
-from apm_cli.commands._helpers import _rich_blank_line
 from apm_cli.install.outcome import (
     InstallCommandOutcome,
     apply_install_command_outcome,
@@ -21,6 +20,7 @@ from apm_cli.install.outcome import (
     finalize_install_result,
 )
 from apm_cli.models.results import InstallResult
+from apm_cli.utils.themed_console import _rich_blank_line
 
 
 def _error_count(apm_diagnostics) -> int:

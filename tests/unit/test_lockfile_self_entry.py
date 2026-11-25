@@ -11,6 +11,7 @@ Covers:
 - is_semantically_equivalent honors the synthesized entry
 """
 
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import (
@@ -18,6 +19,8 @@ from apm_cli.deps.lockfile import (
     LockedDependency,
     LockFile,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +32,7 @@ def _make_lockfile_with_local_content() -> LockFile:
     lock = LockFile(
         lockfile_version="1",
         generated_at="2025-01-01T00:00:00+00:00",
-        apm_version="0.0.0-test",
+        apm_version="0.0.0",
     )
     # A real remote dependency at depth=1
     lock.add_dependency(
@@ -202,7 +205,7 @@ class TestRoundTripByteStability:
         lock = LockFile(
             lockfile_version="1",
             generated_at="2025-01-01T00:00:00+00:00",
-            apm_version="0.0.0-test",
+            apm_version="0.0.0",
         )
         lock.add_dependency(
             LockedDependency(

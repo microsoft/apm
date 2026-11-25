@@ -5,6 +5,8 @@ import yaml
 
 from apm_cli.utils.yaml_io import load_frontmatter
 
+pytestmark = pytest.mark.component
+
 
 def test_load_frontmatter_with_valid_line1_header(tmp_path):
     md_content = """---

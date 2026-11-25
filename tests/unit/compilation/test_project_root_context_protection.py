@@ -19,6 +19,7 @@ from apm_cli.compilation.distributed_compiler import (
     AGENTS_MD_GENERATED_MARKER as DISTRIBUTED_AGENTS_MARKER,
 )
 from apm_cli.compilation.distributed_compiler import DistributedAgentsCompiler
+from apm_cli.core.command_logger import CommandLogger
 
 pytestmark = pytest.mark.component
 
@@ -119,9 +120,11 @@ def test_validate_without_apm_content_explains_native_context_scope(
     assert sorted(path.name for path in tmp_path.iterdir()) == ["CLAUDE.md", "apm.yml"]
 
 
-def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
+def test_watch_reporting_surfaces_retained_outputs_and_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Watch mode must not hide a protected-root result."""
-    logger = Mock()
+    logger = CommandLogger("compile")
     result = Mock(
         warnings=["Protected AGENTS.md: hand-authored file will not be overwritten."],
         stats={
@@ -133,14 +136,17 @@ def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
     retained = _report_retained_watch_outputs(logger, result, dry_run=False)
 
     assert retained
-    logger.warning.assert_called_once()
-    assert "retained 1 hand-authored context file" in logger.progress.call_args.args[0]
-    assert "generated 1 other output file" in logger.progress.call_args.args[0]
+    out = " ".join("".join(capsys.readouterr()).split())
+    assert out.count("[!] Protected AGENTS.md: hand-authored file will not be overwritten.") == 1
+    assert "retained 1 hand-authored context file" in out
+    assert "generated 1 other output file" in out
 
 
-def test_watch_dry_run_reports_generated_and_retained_outputs() -> None:
+def test_watch_dry_run_reports_generated_and_retained_outputs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Watch dry-run reporting must describe every planned output outcome."""
-    logger = Mock()
+    logger = CommandLogger("compile")
     result = Mock(
         warnings=[],
         stats={
@@ -152,7 +158,7 @@ def test_watch_dry_run_reports_generated_and_retained_outputs() -> None:
     retained = _report_retained_watch_outputs(logger, result, dry_run=True)
 
     assert retained
-    message = logger.progress.call_args.args[0]
+    message = " ".join("".join(capsys.readouterr()).split())
     assert "Would generate 2 other output files" in message
     assert "retain 1 hand-authored context file" in message
 
@@ -183,9 +189,11 @@ def test_watch_recompile_retains_hand_authored_root_context(
     assert "generated 2 other output files" in progress_text
 
 
-def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
+def test_mixed_outcome_reports_retained_and_nested_skipped_outputs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """A mixed summary must not hide either non-write outcome."""
-    logger = Mock()
+    logger = CommandLogger("compile")
 
     _report_distributed_live_success(
         logger,
@@ -198,14 +206,16 @@ def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
         agents_generated=1,
     )
 
-    message = logger.success.call_args.args[0]
+    message = " ".join("".join(capsys.readouterr()).split())
     assert "retained 1 hand-authored context file" in message
     assert "skipped 1 nested Git repository placement" in message
 
 
-def test_no_write_outcome_reports_retained_and_nested_skipped_outputs() -> None:
+def test_no_write_outcome_reports_retained_and_nested_skipped_outputs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """A zero-write summary must retain all skip information."""
-    logger = Mock()
+    logger = CommandLogger("compile")
 
     _report_protected_no_write(
         logger,
@@ -216,7 +226,7 @@ def test_no_write_outcome_reports_retained_and_nested_skipped_outputs() -> None:
         [],
     )
 
-    message = logger.progress.call_args.args[0]
+    message = " ".join("".join(capsys.readouterr()).split())
     assert "Retained 2 hand-authored context files" in message
     assert "skipped 1 nested Git repository placement" in message
 
@@ -797,7 +807,8 @@ def test_distributed_compile_retains_hand_authored_nested_context(
         assert result.exit_code == 0, result.output
         output = " ".join(result.output.split())
         assert "Protected docs/AGENTS.md: hand-authored file will not be overwritten" in output
-        assert "Protected docs/CLAUDE.md: hand-authored file will not be overwritten" in output
+        # No generated docs/AGENTS.md means no docs/CLAUDE.md import to write (#3939).
+        assert "docs/CLAUDE.md" not in output
         assert "Orphaned" not in output
         assert (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
         assert (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8") == _MANUAL_CLAUDE
@@ -821,7 +832,7 @@ def test_distributed_compile_replaces_generated_nested_context(
     assert result.exit_code == 0, result.output
     assert "Protected" not in result.output
     assert "Docs rule v2." in (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8")
-    assert "Docs rule v2." in (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "@AGENTS.md" in (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 def test_nested_git_skip_precedes_hand_authored_protection(tmp_path: Path) -> None:

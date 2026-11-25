@@ -19,9 +19,11 @@ LOCAL = "src/apm_cli/install/phases/local_content.py"
 VALIDATION = "src/apm_cli/install/validation.py"
 DOWNLOADER = "src/apm_cli/deps/github_downloader.py"
 DRIFT = "src/apm_cli/install/drift.py"
-SERVICE = "src/apm_cli/install/service.py"
+LOCAL_VERDICT = "src/apm_cli/install/local_content_verdict.py"
 MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 REFERENCE = "src/apm_cli/models/dependency/reference.py"
+UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
+UNINSTALL_REANCHOR = "src/apm_cli/commands/uninstall/local_reanchor.py"
 
 
 def check_single_file_materialization(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -41,6 +43,7 @@ def check_single_file_materialization(provider: FactsProvider) -> tuple[Violatio
                 "read_local_package_source",
                 "materialize_local_package",
                 "materialize_local_package_for_replay",
+                "local_source_matches_copy",
             ),
         )
     )
@@ -61,8 +64,19 @@ def check_single_file_materialization(provider: FactsProvider) -> tuple[Violatio
                 "compute_package_hash",
             },
             "read_local_package_source": {"virtual_file_subdirectory", "load_frontmatter"},
+            # A copy is judged against the source image install normalizes (#5049).
+            "local_source_matches_copy": {
+                "compute_local_package_hash",
+                "_normalize_legacy_local_plugin_for_replay",
+                "verify_package_hash",
+            },
         },
-        SERVICE: {"_verify_frozen_local_content": {"compute_local_package_hash"}},
+        UNINSTALL_ENGINE: {"_restage_changed_local_survivors": {"local_source_matches_copy"}},
+        UNINSTALL_REANCHOR: {
+            "_require_fresh_copy": {"local_source_matches_copy"},
+            "refreshed_local_sources": {"local_source_matches_copy"},
+        },
+        LOCAL_VERDICT: {"local_content_reasons": {"compute_local_package_hash"}},
         MCP_VIEW: {
             "_package_manifest_path": {
                 "read_local_package_source",

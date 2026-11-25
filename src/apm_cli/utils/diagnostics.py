@@ -10,6 +10,7 @@ output when many packages are involved.
 import threading
 from dataclasses import dataclass
 
+from apm_cli.core.remediation import LOCAL_FILES_COLLIDE
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; tests patch apm_cli.utils.diagnostics._get_console
     _rich_echo,
@@ -207,17 +208,21 @@ class DiagnosticCollector:
         detail: str = "",
         severity: str = "warning",
     ) -> None:
-        """Record a policy violation (blocked dep, denied source, etc.)."""
+        """Record a policy violation (blocked dep, denied source, etc.).
+
+        A violation reported again by a later phase of the same command (the
+        same package, message and severity) is recorded once (#4307).
+        """
+        diagnostic = Diagnostic(
+            message=message,
+            category=CATEGORY_POLICY,
+            package=package,
+            detail=detail,
+            severity=severity,
+        )
         with self._lock:
-            self._diagnostics.append(
-                Diagnostic(
-                    message=message,
-                    category=CATEGORY_POLICY,
-                    package=package,
-                    detail=detail,
-                    severity=severity,
-                )
-            )
+            if diagnostic not in self._diagnostics:
+                self._diagnostics.append(diagnostic)
 
     def auth(self, message: str, package: str = "", detail: str = "") -> None:
         """Record an authentication diagnostic (credential resolution, fallback, EMU detection)."""
@@ -303,6 +308,25 @@ class DiagnosticCollector:
     def drift_count(self) -> int:
         """Return number of drift findings."""
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_DRIFT)
+
+    @property
+    def failed_package_count(self) -> int:
+        """Packages that failed, counted as the error summary counts them (#4703).
+
+        Each attributed package counts once, however many errors or critical
+        security findings it has (a package blocked for critical hidden
+        characters is recorded as a security finding, not an error, but it
+        was not deployed); each unattributed error counts on its own.
+        """
+        failed = [
+            d
+            for d in self._diagnostics
+            if d.category == CATEGORY_ERROR
+            or (d.category == CATEGORY_SECURITY and d.severity == "critical")
+        ]
+        return len({d.package for d in failed if d.package}) + sum(
+            1 for d in failed if not d.package and d.category == CATEGORY_ERROR
+        )
 
     @property
     def has_critical_security(self) -> bool:
@@ -460,7 +484,7 @@ class DiagnosticCollector:
         count = len(items)
         noun = "file" if count == 1 else "files"
         _rich_warning(f"  [!] {count} {noun} skipped -- local files exist, not managed by APM")
-        _rich_info("    Use 'apm install --force' to overwrite")
+        _rich_info(f"    {LOCAL_FILES_COLLIDE.sentence()}")
         # Per-dep attribution is now emitted inline by the integrate phase
         # (see services.integrate_package_primitives -- the
         # "(files unchanged)" annotation under each [+] header). The

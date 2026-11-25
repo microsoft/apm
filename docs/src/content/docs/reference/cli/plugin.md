@@ -8,7 +8,7 @@ sidebar:
 ## Synopsis
 
 ```bash
-apm plugin init [PROJECT_NAME] [-y] [--target TARGETS] [-v]
+apm plugin init [PROJECT_NAME] [-y] [--target TARGETS] [--format FORMAT | --claude-plugin] [-v]
 
 # Example
 apm plugin init my-skill --yes
@@ -30,7 +30,7 @@ The two common repo shapes for plugin authors -- **single-plugin** (one plugin p
 
 ### `apm plugin init`
 
-Scaffold a plugin authoring project. Writes `plugin.json` and an `apm.yml` with a `devDependencies` block in the current directory (or under `PROJECT_NAME/` if provided).
+Scaffold a plugin authoring project. Writes `plugin.json` and an `apm.yml` with a `devDependencies` block in the current directory (or under `PROJECT_NAME/` if provided). The `apm.yml` carries a commented `license:` line: APM does not choose a license for you, and `apm pack` warns until you set one.
 
 ```bash
 apm plugin init
@@ -40,20 +40,19 @@ apm plugin init my-skill --target copilot,claude --yes
 
 | Flag | Description |
 |---|---|
-| `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be non-empty kebab-case without path separators and must not be `..`. If a filesystem root has no directory name, APM uses `my-project`. |
+| `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be 1-64 lowercase letters, numbers, dots, or hyphens, begin and end with a letter or number, and not contain `..` or `--`. If a filesystem root has no directory name, APM uses `my-project`. |
 | `--yes`, `-y` | Skip interactive prompts and use auto-detected defaults. |
 | `--target` | Comma-separated target list (e.g. `copilot,claude,codex`). Skips the target prompt and writes selections directly. |
 | `--claude-plugin` | Scaffold the Claude-compatible layout. This is what `apm plugin init` writes with zero flags. |
 | `--format [plugin\|agent-plugin\|claude\|claude-plugin]` | `agent-plugin` scaffolds a portable [Agent Plugins v1](../pack/#agent-plugin-bundle---format-agent-plugin) manifest instead; `plugin`, `claude`, and `claude-plugin` all select the current Claude-compatible default. Mutually exclusive with `--claude-plugin`. |
+| `--version` | Plugin version written to `apm.yml` and `plugin.json` (default `1.0.0`, or `0.1.0` with `--yes`). |
+| `--author` | Plugin author (default: `git config user.name`). |
+| `--description` | Plugin description (default: auto-detected). |
 | `--verbose`, `-v` | Show detailed output. |
 
 ## Migration from `apm init --plugin`
 
-If you've used `apm init --plugin` before, run `apm plugin init` instead. Both scaffold the same Claude-compatible layout by default.
-
-The legacy `apm init --plugin` flag still works and still produces the same output, but prints a deprecation warning on stderr.
-
-Use `apm plugin init` for new plugin projects; keep the legacy flag only for compatibility scripts.
+`apm init --plugin` was removed in 0.37; see [Removed flags](../init/#removed-flags).
 
 ## Examples
 
@@ -74,7 +73,7 @@ One repo that ships a marketplace and the plugins it indexes side-by-side. Usefu
 
 ```bash
 mkdir agents-hub && cd agents-hub
-apm marketplace init --yes
+apm marketplace init
 apm plugin init review-bot --yes
 apm plugin init lint-bot --yes
 ```

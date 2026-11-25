@@ -19,6 +19,8 @@ from apm_cli.security.file_scanner import (
 )
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _is_safe_lockfile_path
 # ---------------------------------------------------------------------------
@@ -361,7 +363,7 @@ class TestProjectFileScan:
         payload.write_bytes(b"safe prefix\n\xe2\x80\xaepayload\xe2\x80\xac\n")
         (tmp_path / ".claude").symlink_to(outside, target_is_directory=True)
 
-        with pytest.raises(PathTraversalError, match="symlinked target root"):
+        with pytest.raises(PathTraversalError, match="symlinked path component"):
             scan_deployed_trees(tmp_path)
         assert b"\xe2\x80\xae" in payload.read_bytes()
 
@@ -375,7 +377,7 @@ class TestProjectFileScan:
         payload.write_bytes(b"safe prefix\n\xe2\x80\xaepayload\xe2\x80\xac\n")
         (tmp_path / ".claude").symlink_to(contained, target_is_directory=True)
 
-        with pytest.raises(PathTraversalError, match="symlinked target root"):
+        with pytest.raises(PathTraversalError, match="symlinked path component"):
             scan_deployed_trees(tmp_path)
         assert b"\xe2\x80\xae" in payload.read_bytes()
 

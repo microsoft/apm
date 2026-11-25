@@ -1,0 +1,115 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: fixture-org/pkg-a
+  name: pkg-a
+  host: github.com
+  resolved_commit: faa3a7ba3d5ed1829dddd33aae2abbaf5f3f46ba
+  version: 0.1.0
+  package_type: apm_package
+  content_hash: sha256:375eee75197e93e1537114869feb5dd9f2eb4c7cdca6624b1abd2374f8ddf783
+- repo_url: fixture-org/pkg-b
+  name: pkg-b
+  host: github.com
+  resolved_commit: 7da0834c0b1df1d1be88a0c48381082e241fdfc6
+  version: 0.1.0
+  package_type: apm_package
+  content_hash: sha256:fc8e12597a34d87bb2878578fa7fea1d810e91bbcaac869b51e0de3eb986e9d8
+- repo_url: fixture-org/bundle
+  name: bundle
+  host: github.com
+  resolved_commit: 4efda884acd77620fb5060b4235015e3dc133d43
+  version: 0.1.0
+  depth: 2
+  resolved_by: fixture-org/pkg-a
+  package_type: skill_bundle
+  deployed_files:
+  - .claude/skills/alpha
+  - .claude/skills/alpha/SKILL.md
+  - .claude/skills/beta
+  - .claude/skills/beta/SKILL.md
+  - .claude/skills/delta
+  - .claude/skills/delta/SKILL.md
+  - .claude/skills/gamma
+  - .claude/skills/gamma/SKILL.md
+  deployed_file_hashes:
+    .claude/skills/alpha/SKILL.md: sha256:90fba848e8f3c60cf011dc7eb6e2d17a6309be3b7b304c007eed3f52217cfa4e
+    .claude/skills/beta/SKILL.md: sha256:1d4847c85b72f6bf903ef965ba6f5160fc03f13c83595e451933213ce25902cc
+    .claude/skills/delta/SKILL.md: sha256:417fc95cc0dbc32a8f23b08e30c4b4431fbb148d5cebd703273478181600ad4d
+    .claude/skills/gamma/SKILL.md: sha256:eac2373783b35abbd1efabf5b46ef69ccb192dca36d623136b625de67b2f5084
+  content_hash: sha256:1fe9458d8019649e7b743601ba2a18c5216ba6d2874e226cf0e68963dfe2ac35
+  target_subset:
+  - claude
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/skills/alpha
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/alpha/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:90fba848e8f3c60cf011dc7eb6e2d17a6309be3b7b304c007eed3f52217cfa4e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/beta
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/beta/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:1d4847c85b72f6bf903ef965ba6f5160fc03f13c83595e451933213ce25902cc
+- kind: project-relative
+  target: claude
+  value: .claude/skills/delta
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/delta/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:417fc95cc0dbc32a8f23b08e30c4b4431fbb148d5cebd703273478181600ad4d
+- kind: project-relative
+  target: claude
+  value: .claude/skills/gamma
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/gamma/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:eac2373783b35abbd1efabf5b46ef69ccb192dca36d623136b625de67b2f5084

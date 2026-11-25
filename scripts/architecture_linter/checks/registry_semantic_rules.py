@@ -388,7 +388,7 @@ _MANIFEST_SCHEMA_OWNERS = (
 _MANIFEST_SCHEMA_PATTERN = r'get\(["\']\$schema["\']\)'
 
 
-_LIFECYCLE_DOC = "docs/src/content/docs/concepts/lifecycle.md"
+_LIFECYCLE_DOC = "docs/src/content/docs/concepts/how-apm-works.md"
 
 
 _LIFECYCLE_DOC_REQUIRED = "does not run aggregate"

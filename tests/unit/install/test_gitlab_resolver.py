@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestTryResolveGitlabDirectShorthand:
     """Tests for _try_resolve_gitlab_direct_shorthand."""

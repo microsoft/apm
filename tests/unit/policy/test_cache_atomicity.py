@@ -8,22 +8,29 @@ and metadata sidecar.  No torn writes, no truncated JSON, no partial YAML.
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlparse
+
+import pytest
 
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
     _cache_key,
     _get_cache_dir,
+    _policy_fingerprint,
     _read_cache,
     _read_cache_entry,
     _write_cache,
 )
 from apm_cli.policy.parser import load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+
+pytestmark = pytest.mark.component
 
 NUM_WRITERS = 16
 
@@ -84,6 +91,39 @@ class TestCacheAtomicity(unittest.TestCase):
             self.assertIsNotNone(final, "Final cache read returned None")
             self.assertTrue(final.found, "Final cache has no policy")
             self.assertTrue(final.cached, "Final cache not marked as cached")
+
+    @pytest.mark.windows_compat
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows open handles block os.replace")
+    def test_reader_holding_metadata_does_not_tear_the_pair(self):
+        """#4601: a reader's open handle must not leave a policy/metadata mismatch.
+
+        On Windows a file opened by ``open()`` cannot be the destination of
+        ``os.replace`` until it is closed. The handle here closes as soon as
+        the writer waits, like a concurrent ``_read_cache_entry`` finishing.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            _write_cache(repo_ref, _make_policy(1), root, chain_refs=[repo_ref])
+            meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+
+            reader = meta_file.open(encoding="utf-8")
+            try:
+                with patch(
+                    "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda _d: reader.close()
+                ):
+                    _write_cache(repo_ref, _make_policy(2), root, chain_refs=[repo_ref])
+            finally:
+                reader.close()
+
+            entry = _read_cache_entry(repo_ref, root)
+            self.assertIsNotNone(entry, "Cache pair torn by a reader's open handle")
+            self.assertEqual(entry.policy.name, "writer-2")
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            document = meta_file.with_name(f"{_cache_key(repo_ref)}.yml").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(meta["fingerprint"], _policy_fingerprint(document))
 
     def test_concurrent_writers_different_keys(self):
         """Parallel writes to DIFFERENT cache keys never interfere."""
@@ -186,6 +226,17 @@ class TestCacheAtomicity(unittest.TestCase):
             entry = _read_cache_entry(repo_ref, root)
             self.assertIsNotNone(entry)
             self.assertEqual(entry.policy.name, "writer-1")
+
+
+def test_a_read_only_decision_never_writes_the_policy_cache(tmp_path: Path) -> None:
+    from apm_cli.cache.paths import read_only_caches
+
+    with patch.dict("os.environ", {"APM_CACHE_DIR": str(tmp_path / "cache")}):
+        with read_only_caches():
+            _write_cache("contoso/.github", _make_policy(1), tmp_path, chain_refs=[])
+        assert not (tmp_path / "cache").exists()
+        _write_cache("contoso/.github", _make_policy(1), tmp_path, chain_refs=[])
+        assert (_get_cache_dir(tmp_path) / f"{_cache_key('contoso/.github')}.yml").is_file()
 
 
 if __name__ == "__main__":

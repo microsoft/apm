@@ -15,6 +15,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ._policy_http import policy_get
 from ._remote import _remote_url_parts
 from .parser import PolicyValidationError, load_policy
 from .schema import ApmPolicy
@@ -317,6 +318,8 @@ def _fetch_gitlab_ancestry(
         )
 
     ancestry_ref = _gitlab_ancestry_cache_ref(host, port, namespaces[0], candidate_repo)
+    # A pinned project resolves every namespace from the source, never the cache.
+    no_cache = no_cache or expected_hash is not None
     composed = (
         None
         if no_cache
@@ -454,6 +457,7 @@ def _fetch_from_gitlab_repo(
         return _gitlab_fetch_error_result(
             error,
             cache_entry=cache_entry,
+            unverified_pin=expected_hash if cache_entry_persisted else None,
             source_label=source_label,
             org=org,
             repo=repo,
@@ -498,6 +502,7 @@ def _gitlab_fetch_error_result(
     error: str,
     *,
     cache_entry: _CacheEntry | None,
+    unverified_pin: str | None = None,
     source_label: str,
     org: str,
     repo: str,
@@ -511,7 +516,13 @@ def _gitlab_fetch_error_result(
         return PolicyFetchResult(source=source_label, outcome="absent")
     if error.startswith("gitlab-status:410:"):
         _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port)
-    return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+    return _stale_fallback_or_error(
+        cache_entry,
+        error,
+        source_label,
+        "cache_miss_fetch_fail",
+        unverified_pin=unverified_pin,
+    )
 
 
 def _gitlab_content_result(
@@ -525,9 +536,9 @@ def _gitlab_content_result(
 ) -> PolicyFetchResult:
     """Parse, validate, and cache fetched GitLab policy content."""
     from .discovery import (
-        PolicyFetchResult,
         _compute_hash_normalized,
         _detect_garbage,
+        _malformed_refresh,
         _verify_hash_pin,
     )
 
@@ -542,16 +553,13 @@ def _gitlab_content_result(
     try:
         policy, warnings = load_policy(content)
     except PolicyValidationError as exc:
-        return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {exc}",
-            source=source_label,
-            outcome="malformed",
-            warnings=exc.warnings,
+        return _malformed_refresh(
+            cache_entry, f"Invalid policy in {repo_ref}: {exc}", source_label, exc.warnings
         )
 
     actual_hash = _compute_hash_normalized(content, expected_hash)
     if policy.extends is None:
-        _cache_gitlab_leaf_policy(repo_ref, policy, project_root, actual_hash, warnings)
+        _cache_gitlab_leaf_policy(repo_ref, policy, project_root, actual_hash, warnings, content)
     return _gitlab_fresh_policy_result(
         policy,
         source_label=source_label,
@@ -567,8 +575,9 @@ def _cache_gitlab_leaf_policy(
     project_root: Path,
     actual_hash: str,
     warnings: list[str],
+    content: str | bytes | None = None,
 ) -> None:
-    """Persist an unextended GitLab leaf through the canonical cache writer."""
+    """Persist an unextended GitLab leaf (and its fetched bytes) through the cache writer."""
     from .discovery import _write_cache
 
     _write_cache(
@@ -579,6 +588,7 @@ def _cache_gitlab_leaf_policy(
             "chain_refs": [repo_ref],
             "raw_bytes_hash": actual_hash,
             "warnings": warnings,
+            "raw_content": content,
         },
     )
 
@@ -647,6 +657,17 @@ def _fetch_gitlab_contents(
         if 300 <= resp.status_code < 400:
             return None, f"Refusing HTTP redirect ({resp.status_code}) from {api_url}"
         if resp.status_code != 200:
+            from ..core.auth_outcome import classify_auth_outcome
+
+            if classify_auth_outcome(host_kind="gitlab", response=resp).is_auth_failure:
+                return None, _gitlab_access_denied_error(
+                    auth_resolver,
+                    RuntimeError(f"{resp.status_code}: unauthorized"),
+                    host=host,
+                    org=org,
+                    port=port,
+                    repo_ref=repo_ref,
+                )
             return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
         return resp.text, None
     except requests.exceptions.Timeout:
@@ -676,30 +697,34 @@ def _authenticated_gitlab_request(
     project_path: str,
 ) -> requests.Response:
     """Run the GitLab REST request through the selected AuthResolver credential."""
+    from ..core.policy_fetch_ledger import note_fetch_attempt
+
+    note_fetch_attempt("gitlab")  # before the credential lookup
     from ..core.auth import AuthResolver
+    from ..core.auth_outcome import AuthAttemptFailed
 
     def _request(token: str | None, _git_env: dict[str, str]):
-        response = requests.get(
-            api_url,
-            headers=AuthResolver.gitlab_rest_headers(token),
-            timeout=10,
-            allow_redirects=False,
-        )
-        if response.status_code in (401, 403):
-            raise RuntimeError(f"{response.status_code}: unauthorized")
+        response = policy_get(api_url, headers=AuthResolver.gitlab_rest_headers(token))
+        if response.status_code != 200:
+            # The auth chain classifies the outcome and decides whether to
+            # escalate; non-auth outcomes return to the caller unchanged.
+            raise AuthAttemptFailed(response=response)
         return response
 
-    return auth_resolver.try_with_fallback(
-        host,
-        _request,
-        **{
-            "org": org,
-            "port": port,
-            "path": project_path,
-            "host_type": "gitlab",
-            "unauth_first": False,
-        },
-    )
+    try:
+        return auth_resolver.try_with_fallback(
+            host,
+            _request,
+            **{
+                "org": org,
+                "port": port,
+                "path": project_path,
+                "host_type": "gitlab",
+                "unauth_first": False,
+            },
+        )
+    except AuthAttemptFailed as failed:
+        return failed.response
 
 
 def _gitlab_access_denied_error(

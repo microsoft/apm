@@ -15,11 +15,11 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 SECRET = "mcp-chain-secret-sentinel"
+# Copilot shares Claude Code's project file, .mcp.json (#3866).
 JSON_CONFIGS = {
     "claude": (".mcp.json", "mcpServers"),
-    "vscode": (".vscode/mcp.json", "servers"),
     "cursor": (".cursor/mcp.json", "mcpServers"),
-    "copilot": (".github/mcp.json", "mcpServers"),
+    "copilot": (".mcp.json", "mcpServers"),
     "opencode": ("opencode.json", "mcp"),
 }
 

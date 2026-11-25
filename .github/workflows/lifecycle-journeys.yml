@@ -1,0 +1,339 @@
+name: Lifecycle Journeys Nightly
+
+# All 25 docs journeys (#4110) through the real CLI in the hermetic lifecycle
+# world, on Linux, Windows and macOS, plus the full tests/lifecycle suite on
+# Linux. PR and main-push CI run the lifecycle smoke subset (and
+# lifecycle-security.yml the Linux security cells); this is the only scheduled
+# run of every lifecycle witness. A scheduled failure opens
+# (or updates) one tracking issue; the next green scheduled run closes it.
+# Dispatch with `ref` set to a release-candidate commit on main or a release/*
+# branch to validate it before tagging; resolve-ref refuses any other commit.
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit on main or a release/* branch: SHA, branch or tag (empty: the default branch)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# Every job checks out the dispatched `ref`, which may be any commit, so no job
+# restores or saves a shared cache: code from that ref never writes a cache a
+# default-branch run would later restore.
+
+concurrency:
+  group: lifecycle-journeys-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # Every other checkout tests the commit this job resolves: the default
+  # branch head, or a dispatched ref that is a commit on main or a release/*
+  # branch. The dispatch input is read only here, through the environment.
+  resolve-ref:
+    name: Resolve the commit to test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Resolve the requested ref to a tracked commit
+        id: resolve
+        env:
+          REQUESTED_REF: ${{ inputs.ref }}
+          DEFAULT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          allowed="a commit on main or a release/* branch (a SHA, one of those branches, or a tag on them)"
+          if [ -z "$REQUESTED_REF" ]; then
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "[i] No ref requested; testing $DEFAULT_SHA"
+            exit 0
+          fi
+          case "$REQUESTED_REF" in
+            -* | *[!A-Za-z0-9._/-]*)
+              echo "::error::The requested ref is not a commit SHA, branch or tag name. Allowed: $allowed."
+              exit 1
+              ;;
+          esac
+          sha=$(git rev-parse --verify --quiet --end-of-options "$REQUESTED_REF^{commit}") \
+            || sha=$(git rev-parse --verify --quiet --end-of-options "refs/remotes/origin/$REQUESTED_REF^{commit}") \
+            || { echo "::error::Ref '$REQUESTED_REF' does not resolve to a commit in this repository. Allowed: $allowed."; exit 1; }
+          for branch in $(git for-each-ref --format='%(refname)' refs/remotes/origin/main refs/remotes/origin/release); do
+            if git merge-base --is-ancestor "$sha" "$branch"; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              echo "[+] Testing $sha from ${branch#refs/remotes/origin/}"
+              exit 0
+            fi
+          done
+          echo "::error::Ref '$REQUESTED_REF' ($sha) is not on main or a release/* branch. Allowed: $allowed."
+          exit 1
+
+  journeys:
+    name: Lifecycle Journeys (${{ matrix.os }})
+    needs: resolve-ref
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run every lifecycle journey
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=10 -m "not live" tests/lifecycle/journeys/test_journeys.py
+
+      # Every generated journey witness must report on Linux (#4586); the other
+      # operating systems may skip platform-bound steps, so they do not require it.
+      - name: Require a receipt from every journey witness
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/journeys/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
+
+  lifecycle-full:
+    name: Lifecycle Full Suite (Linux)
+    needs: resolve-ref
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install Unix shell startup test runtimes
+        run: bash scripts/ci-apt-install.sh fish zsh
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      # The one job that runs the Codex native plugin cell for real (#4154):
+      # pinned to the production floor (MINIMUM_CODEX_VERSION) and required
+      # through APM_REQUIRE_CODEX, so a missing Codex fails instead of skipping.
+      - name: Install the pinned Codex CLI
+        run: npm install -g @openai/codex@0.163.0
+
+      # The journeys job above covers tests/lifecycle/journeys on every OS.
+      - name: Run the full lifecycle suite
+        env:
+          APM_E2E_TESTS: "1"
+          APM_REQUIRE_CODEX: "1"
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 4 --dist loadgroup --durations=20 -m "not live" \
+            --ignore=tests/lifecycle/journeys tests/lifecycle
+
+      # This job runs every required witness under tests/lifecycle outside journeys
+      # (promise witnesses and the generated security, replay and machine rows), so
+      # each must have reported a receipt (#4586); the journeys job above requires the
+      # journey family. The PR lifecycle smoke shards (ci.yml) and
+      # gate-machine-nightly.yml run subsets and do not set
+      # APM_LIFECYCLE_RECEIPTS_REQUIRED.
+      - name: Require a receipt from every required witness
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/,!tests/lifecycle/journeys/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
+
+  # The install engine parity suite (#5002) on Windows: the PR Lifecycle Smoke
+  # shards and lifecycle-full run it on Linux only. Cells that inject faults
+  # through sitecustomize or SIGKILL skip themselves on Windows.
+  engine-parity-windows:
+    name: Engine Parity (Windows)
+    needs: resolve-ref
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run the engine parity suite
+        env:
+          APM_E2E_TESTS: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=20 -m "not live" \
+            tests/lifecycle/scenarios/test_engine_parity.py \
+            tests/lifecycle/scenarios/test_engine_parity_doubts.py \
+            tests/lifecycle/scenarios/test_engine_parity_invariants.py
+
+  # PR integration shards keep only the per-group sample of the linter session
+  # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
+  # here, nightly and on every release-candidate dispatch.
+  architecture-cache-full-matrix:
+    name: Architecture Cache Full Matrix (Linux)
+    needs: resolve-ref
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Replay the full owner mutation matrix through the session cache
+        env:
+          PYTEST_PERF: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -m benchmark \
+            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix
+
+  signal:
+    name: Lifecycle Journeys Nightly Signal
+    needs: [journeys, lifecycle-full, engine-parity-windows, architecture-cache-full-matrix]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RESULT: ${{ needs.journeys.result != 'success' && needs.journeys.result || needs.lifecycle-full.result != 'success' && needs.lifecycle-full.result || needs.engine-parity-windows.result != 'success' && needs.engine-parity-windows.result || needs.architecture-cache-full-matrix.result }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const MARKER = '<!-- apm-lifecycle-journeys-nightly -->';
+            const LABEL = 'ci/lifecycle-journeys-nightly';
+            const { owner, repo } = context.repo;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const failed = process.env.RESULT !== 'success';
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: LABEL });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner, repo, name: LABEL, color: 'D93F0B',
+                description: 'Nightly lifecycle journeys signal',
+              });
+            }
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: LABEL, per_page: 100,
+            });
+            const issue = open.find((item) => !item.pull_request && (item.body || '').includes(MARKER));
+            if (failed) {
+              const body = [
+                MARKER,
+                'The nightly lifecycle run (journeys on any OS, or the full Linux suite) is failing.',
+                '',
+                `- Run: [${context.runNumber}](${runUrl})`,
+                `- Head SHA: \`${context.sha}\``,
+                `- Result: ${process.env.RESULT}`,
+                '',
+                'Each failing journey prints its step, the oracle that failed and the step transcript.',
+              ].join('\n');
+              if (issue) {
+                await github.rest.issues.update({ owner, repo, issue_number: issue.number, body });
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number, body: `Still failing: ${runUrl}`,
+                });
+              } else {
+                await github.rest.issues.create({
+                  owner, repo, title: '[ci] Nightly lifecycle journeys are failing', body, labels: [LABEL],
+                });
+              }
+            } else if (issue) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number, body: `Recovered: ${runUrl}`,
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed',
+              });
+            }

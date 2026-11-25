@@ -598,10 +598,12 @@ def test_unrecorded_hidden_unicode_payload_cannot_pass_ci_audit(
     assert content_integrity["passed"] is False
     assert f"unicode: {_HIDDEN_SKILL}" in content_integrity["details"]
     assert _check(payload, "drift")["passed"] is False
+    # Audit renders from verified locked content, so the unclaimed file with
+    # the hidden payload conflicts with what the package actually deploys.
     assert _drift_entries(payload) == [
         {
             "inline_diff": "",
-            "kind": "unrecorded",
+            "kind": "unmanaged-conflict",
             "package": "",
             "path": _HIDDEN_SKILL,
         }

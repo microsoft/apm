@@ -21,14 +21,16 @@ import filecmp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
     copy_skill_to_target,
-    should_compile_instructions,
-    validate_skill_name,
 )
 from apm_cli.integration.targets import TargetProfile
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,93 +87,9 @@ def _make_target(
 # ---------------------------------------------------------------------------
 
 
-class TestValidateSkillNameFallthrough:
-    """Cover the fallthrough return at line 129."""
-
-    def test_single_hyphen_only(self) -> None:
-        """A single hyphen hits the invalid-chars check first."""
-        is_valid, _ = validate_skill_name("-")
-        assert not is_valid
-        # Either leading-hyphen or the fallthrough error
-        assert not is_valid
-
-    def test_digit_only_is_valid(self) -> None:
-        """Single digit is a valid skill name."""
-        is_valid, _ = validate_skill_name("3")
-        assert is_valid
-
-    def test_mixed_case_triggers_uppercase_error(self) -> None:
-        """Uppercase letter returns specific error before fallthrough."""
-        is_valid, msg = validate_skill_name("MySkill")
-        assert not is_valid
-        assert "lowercase" in msg
-
-    def test_underscore_triggers_underscore_error(self) -> None:
-        """Underscore returns specific error before fallthrough."""
-        is_valid, msg = validate_skill_name("my_skill")
-        assert not is_valid
-        assert "underscore" in msg.lower()
-
-    def test_space_triggers_space_error(self) -> None:
-        """Space returns specific error."""
-        is_valid, msg = validate_skill_name("my skill")
-        assert not is_valid
-        assert "space" in msg.lower()
-
-    def test_special_char_triggers_invalid_chars_error(self) -> None:
-        """Special character returns 'invalid characters' error."""
-        is_valid, msg = validate_skill_name("my@skill")
-        assert not is_valid
-        assert "invalid character" in msg.lower()
-
-
 # ---------------------------------------------------------------------------
 # should_compile_instructions
 # ---------------------------------------------------------------------------
-
-
-class TestShouldCompileInstructions:
-    """Cover lines 258, 260, 264."""
-
-    def test_instructions_type_compiles(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.APM_PACKAGE)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.INSTRUCTIONS,
-        ):
-            assert should_compile_instructions(pi) is True
-
-    def test_hybrid_type_compiles(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.HYBRID)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.HYBRID,
-        ):
-            assert should_compile_instructions(pi) is True
-
-    def test_skill_type_does_not_compile(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.CLAUDE_SKILL)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.SKILL,
-        ):
-            assert should_compile_instructions(pi) is False
-
-    def test_prompts_type_does_not_compile(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.APM_PACKAGE)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.PROMPTS,
-        ):
-            assert should_compile_instructions(pi) is False
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +357,41 @@ class TestPromoteSubSkillsManagedFiles:
         logger.warning.assert_called()
         assert n >= 0
 
+    @pytest.mark.parametrize("previous_owner", ["other-pkg", None])
+    def test_overwrite_warning_names_previous_owner(
+        self, tmp_path: Path, previous_owner: str | None
+    ) -> None:
+        """Replacement names known owners and tells users how to avoid the overlap."""
+        skills_dir = tmp_path / ".apm" / "skills"
+        sub = skills_dir / "my-skill"
+        sub.mkdir(parents=True)
+        (sub / "SKILL.md").write_text("# skill", encoding="utf-8")
+
+        target_root = tmp_path / ".github" / "skills"
+        existing = target_root / "my-skill"
+        existing.mkdir(parents=True)
+        (existing / "SKILL.md").write_text("# different", encoding="utf-8")
+
+        logger = MagicMock()
+
+        # owned_by says a *different* package owns this skill
+        n, _deployed = SkillIntegrator._promote_sub_skills(
+            skills_dir,
+            target_root,
+            "parent-pkg",
+            warn=True,
+            owned_by={"my-skill": previous_owner},
+            logger=logger,
+        )
+        previous = "'other-pkg'" if previous_owner else "another package"
+        logger.warning.assert_called_once_with(
+            "Skill 'my-skill' from 'parent-pkg' replaced overlapping files "
+            f"from {previous}; separately owned assets were preserved "
+            "-- remove one package to avoid this"
+        )
+        assert n == 1
+        assert (existing / "SKILL.md").read_text(encoding="utf-8") == "# skill"
+
 
 # ---------------------------------------------------------------------------
 # _promote_sub_skills_standalone -- dedup via seen_skill_dirs (lines 761-762)
@@ -479,6 +432,46 @@ class TestPromoteSubSkillsStandaloneDedup:
             )
         # Logger.progress called for dedup skip on second target
         logger.progress.assert_called()
+
+    def test_plugin_manifest_subset_promotes_only_selected_nested_skill(
+        self, tmp_path: Path
+    ) -> None:
+        """--skill path filters plugin-manifest sub-skills during promotion."""
+        from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+        from apm_cli.models.apm_package import PackageType
+
+        plugin_root = tmp_path / "skills-repo"
+        selected_skill = plugin_root / "skills" / "productivity" / "grill-me"
+        other_skill = plugin_root / "skills" / "writing" / "summarize-me"
+        selected_skill.mkdir(parents=True)
+        other_skill.mkdir(parents=True)
+        (selected_skill / "SKILL.md").write_text("# Grill Me", encoding="utf-8")
+        (other_skill / "SKILL.md").write_text("# Summarize Me", encoding="utf-8")
+
+        manifest = {
+            "name": "skills-repo",
+            "skills": [
+                "skills/productivity/grill-me",
+                "skills/writing/summarize-me",
+            ],
+        }
+        _map_plugin_artifacts(plugin_root, plugin_root / ".apm", manifest)
+
+        pkg_info = _make_package_info(plugin_root, package_type=PackageType.MARKETPLACE_PLUGIN)
+        target = _make_target(name="claude", root_dir=".claude", auto_create=True)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result = SkillIntegrator().integrate_package_skill(
+            pkg_info,
+            project_root,
+            targets=[target],
+            skill_subset=("skills/productivity/grill-me",),
+        )
+
+        assert result.sub_skills_promoted == 1
+        assert (project_root / ".claude" / "skills" / "grill-me" / "SKILL.md").exists()
+        assert not (project_root / ".claude" / "skills" / "summarize-me" / "SKILL.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1097,6 +1090,27 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
         assert "'skills:' in apm.yml" in warning_msg
         mock_warn.assert_not_called()
 
+    def test_star_selection_on_a_package_without_skills_errors(self, tmp_path: Path, capfd) -> None:
+        """``skills: ["*"]`` keeps the named no-match error when nothing is available."""
+        pkg_dir = tmp_path / "instr-pkg"
+        pkg_dir.mkdir()
+        dep_ref = MagicMock()
+        dep_ref.is_virtual = False
+        dep_ref.get_unique_key.return_value = "owner/instr-pkg"
+        pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
+
+        count, deployed = SkillIntegrator()._promote_sub_skills_standalone(
+            pi,
+            tmp_path,
+            targets=[_make_target(name="copilot", root_dir=".github")],
+            skill_subset=("*",),
+        )
+
+        captured = capfd.readouterr()
+        out = " ".join((captured.out + captured.err).split())
+        assert (count, deployed) == (0, [])
+        assert "matched no available skills. Requested: *. Available: (none)." in out
+
     def test_missing_skills_directory_errors_without_crashing(self, tmp_path: Path) -> None:
         """An absent source directory is represented as an empty available set."""
         available = SkillIntegrator._skill_names_in_directory(tmp_path / "missing")
@@ -1142,3 +1156,48 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
             )
 
         mock_warn.assert_not_called()
+
+
+class TestPairedNameFilterPerSkillsRoot:
+    """#3763: each skills root receives only the skills paired with its targets."""
+
+    @staticmethod
+    def _pairing():
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        return merge_edge_pairings(
+            [(["alpha"], ["claude"]), (["gamma"], ["copilot"]), (["delta"], ["cursor"])]
+        )
+
+    def test_targets_sharing_a_root_receive_the_union_of_their_skills(self, tmp_path):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        targets = [KNOWN_TARGETS[name] for name in ("claude", "copilot", "cursor")]
+        roots = SkillIntegrator._skill_root_target_names(
+            targets, lambda target: tmp_path / target.skills_rel_root
+        )
+        shared = roots[(tmp_path / ".agents" / "skills").resolve()]
+        assert set(shared) == {"copilot", "cursor"}
+
+        tokens = SkillIntegrator._paired_name_filter(None, self._pairing(), shared)
+        assert {"gamma", "delta"} <= set(tokens)
+        assert "alpha" not in tokens
+
+    def test_unselected_root_gets_nothing_and_no_pairing_keeps_the_filter(self):
+        assert SkillIntegrator._paired_name_filter(None, self._pairing(), ("gemini",)) == (
+            frozenset()
+        )
+        base = {"alpha", "gamma"}
+        assert SkillIntegrator._paired_name_filter(base, None, ("claude",)) is base
+
+    def test_paired_filter_narrows_but_never_widens_the_source_plan(self):
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        pairing = merge_edge_pairings([(None, ["claude"]), (["alpha"], ["copilot"])])
+        assert SkillIntegrator._paired_name_filter({"alpha", "gamma"}, pairing, ("claude",)) == {
+            "alpha",
+            "gamma",
+        }
+        assert SkillIntegrator._paired_name_filter({"gamma"}, pairing, ("copilot",)) == (
+            frozenset()
+        )

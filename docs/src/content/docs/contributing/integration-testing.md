@@ -38,25 +38,42 @@ APM uses a tiered approach to integration testing:
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: two shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
-- **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks both shard results independently and fails if either is missing, skipped, cancelled, or failed.
+- **Duration**: five shards each have a hard 20-minute timeout, including setup and cleanup; a balanced shard is expected to use under 60 percent of it, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
+- **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks every shard result independently and fails if any is missing, skipped, cancelled, or failed.
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
-- **Sharding**: `scripts.lifecycle_smoke_sharding` delegates balancing to pytest-split while keeping each composite `xdist_group` intact. Member counts are scheduling weights, not measured durations. The two shards are disjoint and their union is the unchanged required selection.
-- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
-- **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, required, and two sharded selections. It verifies their set relationships, both shards' timeout and worker bounds, the aggregate's failure behavior, the full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
-- **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
+- **Sharding**: `scripts.ci_sharding` balances the shards by the measured lifecycle smoke durations in `.github/ci-durations/lifecycle-smoke.json` while keeping each module and composite `xdist_group` intact. The shards are disjoint and their union is the unchanged required selection.
+- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh` over `tests/integration/`. The hermetic shards and the network lane together run every non-`live` test, so the complete lifecycle family remains exercised.
+- **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, required, and every sharded selection. It verifies their set relationships, each shard's timeout and worker bounds, the aggregate's failure behavior, the full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
+- **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection, and `APM_TEST_LOCK_COMMIT` (`hold:<marker>` or `kill`) to stop a command at its lockfile commit point. These are internal test controls, not user-facing APM settings.
 - **Source and ownership fixtures**: downloader stubs must return real `PackageInfo` and `ResolvedReference` values and materialize each package at the requested path, including staging directories. Native MCP cleanup tests must generate managed baselines through the real writer, then prove both authorized removal and unchanged bytes on unverifiable or foreign entries. Keep successful transitive-service, frozen replay, and exact-byte assertions; a mock-error exit is not success.
-- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
-- **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
+- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger/` (one JSON file per row, such as `bugs/<issue>.json`, so concurrent PRs do not conflict) maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
+- **Spine state machine**: `tests/lifecycle/machines/test_m_spine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, prune, update, lock, compile and frozen sequences through the lifecycle driver (`python -m apm_cli.cli` on PR, the packaged binary on the nightly). The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. Every command, including those the shared helpers run, is followed by `check_cross_cutting`, so each step keeps I1-I9 and earns receipts; per-rule write-set snapshots stay as before. The mandatory spine replays once per world; later examples restore that post-spine world in place. PR shards run 4 derandomized examples per variant; the nightly explores 25 (`APM_SPINE_MAX_EXAMPLES=25`).
+- **GATE state machine**: `tests/lifecycle/machines/test_m_gate.py` drives the lifecycle driver (`python -m apm_cli.cli` on PR, the packaged binary on the nightly) through declare, approve, deny, revoke, org-policy tightening, install, `install --frozen`, update, uninstall, prune and `audit --ci` for hook, LSP and native-plugin content, at project scope and at user scope with `APM_HOME` outside `HOME`. After every step `check_cross_cutting` (`tests/lifecycle/oracles.py`) checks lock/deployed agreement, idempotence, frozen/audit agreement, gate monotonicity (relative to the model: after each successful mutating step nothing is deployed that current approvals and policy do not allow), write sets, ASCII output, failure atomicity, exit codes and duplicated output. A cell that fails on `main` is a strict expected failure naming its tracking issue. Every step emits a `cell:` event; the mandatory spine must cover `tests/quality/gate_cell_obligations.json`, and a recorded mutant that skips the approval check must fail the machine. PR shards run 4 derandomized examples per scope; `.github/workflows/gate-machine-nightly.yml` builds the binary and explores 25 fresh examples per scope (`APM_LIFECYCLE_DRIVER=binary`, `APM_GATE_MAX_EXAMPLES=25`).
+- **Lifecycle family core**: `tests/lifecycle/` holds the shared pieces: a pure reference model (`model/state.py`, `model/expected.py`), a driver (`driver.py`, `APM_LIFECYCLE_DRIVER=engine|binary`), the cross-cutting oracle (`oracles.py`) and receipts (`receipts.py`). Each oracle law that applies to a step and passes writes one receipt; only the oracle module may write receipts. `tests/quality/promise_obligations.json` lists every obligation as `required`, with the witness test that must earn its receipt (checked inside the lifecycle shards), or in the `baseline` with the lane that will cover it. A new obligation must be in one of the two lists, and the 0.37 release needs an empty baseline.
+- **Docs journeys**: `tests/lifecycle/journeys/test_journeys.py` replays the 25 journeys of `index.yaml` (one YAML file per journey; the schema is the module docstring) through the driver and applies output oracles O1-O13 plus `check_cross_cutting`. Golden journeys carry `lifecycle_smoke`; `.github/workflows/lifecycle-journeys.yml` runs all of them nightly on Linux, Windows and macOS, plus the full `tests/lifecycle` suite on Linux (PR and push CI run only the smoke subset), and on dispatch for a release-candidate `ref`, which must be a commit on `main` or a `release/*` branch (a first `resolve-ref` job refuses anything else before any checkout). Regenerate goldens with `python tests/lifecycle/journeys/regen_goldens.py`.
 - **Frozen under-recording**: the required smoke scenario and the generated model's mandatory project replay add a local skill without refreshing the lockfile, require frozen refusal with unchanged lockfile bytes, repair with ordinary install, and verify two byte-stable frozen replays. The scenario uses `ApmLifecycleRunner` in an isolated environment. It does not promise filesystem rollback: the new skill is deployed before refusal.
 - **Frozen local dependencies**: `test_frozen_local_path_lifecycle.py` uses the selected installed CLI to check direct and transitive source changes before deployment, including portable identities for packages inside the consumer project. It covers a fresh consumer with a separate empty cache, unchanged lock and managed bytes on refusal, preserved unrelated cache content, and recovery by restoring the source or explicitly accepting it with a normal install. This is separate from the root project's under-recording scenario above.
 - **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
-- **Run it locally** (repeat with shard `2` to cover the full required selection):
+- **Run it locally** (repeat with shards `2` and `3` to cover the full required selection):
   ```bash
   APM_E2E_TESTS=1 uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-    -p scripts.lifecycle_smoke_sharding --lifecycle-shard 1 \
+    -p scripts.ci_sharding --shard-count 3 --shard-index 1 \
+    --shard-durations .github/ci-durations/linux-x86_64.json \
     -n 4 --dist loadgroup --durations=20 \
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+  ```
+
+### 3b. **Owner Surface Check** (required on every PR)
+- **Location**: `.github/workflows/owner-surface.yml`, selection in `scripts/owner_surface.py`.
+- **Purpose**: run, on every pull request, the slice of the merge-time integration suite that an owner or install-path change can break. Owner-guard and install regressions then show on the PR, not on `main`.
+- **Trigger**: a change to `src/apm_cli/install/*`, `src/apm_cli/deps/lockfile*`, `.apm/architecture/*`, `scripts/architecture_linter/*`, `tests/integration/test_architecture_*.py`, `tests/integration/test_install_*.py`, or any file an owner registry selector names.
+- **Slice**: owner-rule mutation cases and `test_architecture_*.py` files that name a changed file or an affected owner, guard or rule; plus every `test_install_*.py` file for install-path changes. It runs hermetic tests in 3 duration-balanced shards (target under 10 min).
+- **Result**: `Owner Surface Check` always reports and is required by `gate` in every context. It passes when no owner surface changed (the slice steps are skipped) and on merge_group and merge trains (as the `owner` tier), where the full suite runs.
+- **Run it locally**:
+  ```bash
+  python3 -m scripts.owner_surface plan --base origin/main --out /tmp/changed.txt
+  APM_E2E_TESTS=1 uv run --extra dev python -m scripts.owner_surface run \
+    --base origin/main --changed /tmp/changed.txt -- -n 4 --dist loadgroup
   ```
 
 ### 4. **Live Guardrailing Hero** (scheduled/manual)
@@ -65,6 +82,13 @@ APM uses a tiered approach to integration testing:
 - **Scope**: project initialization, two GitHub-backed installs, compile/deploy, and prompt startup through the built Linux x64 binary
 - **Trigger**: one `ci-runtime.yml` invocation on schedule or manual dispatch that fails the workflow on error (`continue-on-error` is not set); never pull requests or the generic integration script
 - **Selection mechanism**: the explicit test node with `-m live`; collection gates remain owned by `tests/integration/conftest.py`
+
+### 5. **Real Harness** (nightly, manual, native-plugin PRs; not required)
+- **Location**: `scripts/real_harness/probe.py`, `.github/workflows/real-harness.yml`; harness pins are npm lockfiles under `scripts/real_harness/npm/`
+- **Purpose**: Prove that pinned Claude Code and Copilot CLI releases actually load a plugin APM installs natively, not only that the files exist
+- **Cells**: harness x environment (TUI in tmux, git worktree, `-p`) x scope (user, project), plus Claude diagnostic cells (second session, absolute path, no folder trust, native `claude plugin install`, worktree branches), and two #1120 cells: two packages whose native plugins ship the same skill name, and the same plugin name from two packages (refused)
+- **Evidence**: the plugin's SessionStart hook marker, its stdio MCP server's JSON-RPC log, the skill in the `claude -p` init event or `copilot skill list`. Claude never reaches a model; Copilot sessions need the `real-harness` environment token, available only to schedule and dispatch runs on main, so those cells report BLOCKED elsewhere
+- **Verdicts**: `scripts/real_harness/expected.json` records each cell's expected verdict, known bugs included. `probe.py check` fails on any divergence except BLOCKED; a fix flips its cells
 
 ## Running Tests Locally
 
@@ -212,6 +236,57 @@ Contributor commands, ready pull requests, merge queue runs, and final
 validation are strict. Do not pass the internal provisional flag manually;
 remove `provisional` metadata after remeasurement and review.
 
+### Test corpus ratchets
+
+Three no-growth ratchets keep the test corpus from getting worse. Each
+records today's debt in a baseline and fails only on new debt. A baseline
+entry whose test or module is gone or fixed is reported as stale (`[i]`) and
+never fails, so parallel cleanups do not conflict. Baselines are sorted JSON
+with one entry per line; entries may only be removed.
+
+1. **Duplicate tests** (`scripts/check_exact_test_duplicates.py`, baseline
+   `tests/quality/exact_test_duplicates.json`). Each test body is hashed as a
+   normalized AST (`ast-body-v1`: docstrings, comments and formatting ignored,
+   literals kept). A test whose body equals another test's body, or whose
+   `Class::name` also exists in another file, fails unless the baseline lists
+   it. Fix: delete the copy, parametrize it, or rename it after the distinct
+   contract it checks.
+2. **Classification and placement** (`tests/quality/test_test_taxonomy.py`,
+   baseline `tests/quality/test_taxonomy_baseline.json`). A module with no
+   behavioral marker, a `unit` module under `tests/integration`, or a
+   `tests/unit` module that spawns processes fails unless listed. Fix: add the
+   marker, or move the module.
+3. **Promise links** (same contract and baseline). Every new test module
+   names the promises it protects in its module-level `pytestmark`, using ids
+   from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
+   `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
+   invariants, `P-LAW-<id>` lifecycle laws and `P-DOC-<id>` documented-surface
+   promises. Add a missing promise to the
+   catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
+   first be declared in the catalog's `families`; undeclared families fail.
+
+```python
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
+```
+
+`scripts/check_test_assertions.py` (baseline
+`tests/quality/assertion_quality_baseline.json`) ratchets per-file counts the
+same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
+component or e2e tests that assert no user-visible output, exit code or durable
+state, AQ004 tests that patch a symbol defined in an owner module they import,
+and AQ006 e2e modules that do not drive the real CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner`, the
+`apm_binary_path` or `apm_engine_command` fixtures, or the lifecycle `driver`).
+
+For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
+--report-equal-copies` lists equal copies that are safe to delete. A copy
+qualifies only if body, decorators, fixtures, class context, module bindings and
+CI lane all match its kept twin. The report never fails and never edits files.
+
+Moving a listed test or module to another directory under the same name keeps
+its allowance and is reported as moved. Prune stale or moved duplicate entries
+with `--update-baseline`; edit stale or moved taxonomy entries by hand.
+
 ### Keeping fixtures portable
 
 Keep transport selection and authentication owners real in download tests;
@@ -254,10 +329,14 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 # Run only a marker family
 uv run pytest tests/integration -m requires_github_token -v
 
-# Run the bounded generated lifecycle model with a real local apm command
-APM_E2E_TESTS=1 APM_BINARY_PATH="$(command -v apm)" \
-  uv run --extra dev pytest -q \
-  tests/integration/test_generated_lifecycle_state_machine.py
+# Run the spine state machine (python -m apm_cli.cli; no binary needed)
+uv run --extra dev pytest -q tests/lifecycle/machines/test_m_spine.py
+
+# Run the GATE state machine (python -m apm_cli.cli; no binary needed)
+uv run --extra dev pytest -q tests/lifecycle/machines/test_m_gate.py
+
+# Run the lifecycle family core and its obligation ratchet
+uv run --extra dev pytest -q tests/lifecycle tests/quality/test_promise_obligations.py
 ```
 
 ### Hermetic lifecycle fixtures
@@ -444,26 +523,34 @@ environment end-to-end; for local iteration prefer the direct
 ### GitHub Actions Workflow
 
 **On PR and merge queue:**
-1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
+1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds the global coverage floor (`Coverage Combine (Linux)`) and Linux smoke, integration, and release-validation gates. Integration runs in up to 16 shards planned like the release pipeline's, in about 16-18 minutes.
 
 Architecture ratchet contracts and the real architecture-scaling test run in
 separate Linux jobs, each with the same five-minute setup-to-cleanup limit.
 Their test selections, scaling threshold and environment opt-ins are unchanged.
-The `Test Architecture Ratchets` aggregate succeeds only when both jobs succeed;
-failure, cancellation, skipping or a missing result fails it. This remains a
-diagnostic check outside `merge-gate.yml`'s `EXPECTED_CHECKS`, not a new required
-merge gate. A passing test summary does not override a cancelled job.
+The required `Test Architecture Ratchets` aggregate gates only the contracts
+job; failure, cancellation, skipping or a missing result fails it.
+`merge-gate.yml` requires it at PR time and on `merge_group`, because it runs the
+`tests/quality` guards, including the merge-time topology checks. The
+wall-clock scaling ratio stays a separate, non-required `Architecture Scaling
+(Linux)` check, since timing asserts flake. A passing test summary does not
+override a cancelled job.
 
-The required Windows compatibility gate selects `windows_compat` tests within
-`tests/unit` and `tests/integration`, with `APM_E2E_TESTS=1` for marked real-CLI
-contracts. It runs only that marker subset, not the full integration suite.
-Its collection guard requires a non-empty subset, not a fixed test count.
-Every module under those roots must import on Windows before marker deselection.
+`gate` also requires `Spec conformance gate` and its three `Spec tests (N/3)`
+shards on every pull request and merge group. `spec-conformance.yml` has no
+`paths:` filter, so these checks always run.
+
+The required Windows compatibility gate runs the full Windows unit suite through
+`scripts/ci_selections.py`, the same selection main push runs, then the
+`windows_compat` tests in `tests/integration` with `APM_E2E_TESTS=1` for marked
+real-CLI contracts. It runs only that integration marker subset, not the full
+integration suite. Its collection guard requires a non-empty subset, not a fixed
+test count. Every module under those roots must import on Windows before marker deselection.
 Import Unix-only modules such as `pwd` or `fcntl` inside the helpers that need
 them, not at module scope. The collection guard checks this with Unix-only
 standard modules unavailable, even on Linux and macOS.
 The nested collection subprocess has a 300-second hard timeout: pytest must
-import and collect both roots before applying the marker, including on release
+import and collect the whole root before applying the marker, including on release
 runners sharing CPU with other test workers. Plugin autoload remains disabled,
 and a collection timeout fails the check rather than skipping it.
 Collection proves a test is selected; a successful Windows job provides
@@ -506,14 +593,16 @@ skill. The local fixture covers both an independent skill and a separately
 installed skill from the plugin; the network-backed case uses the same assertions.
 Cleanup wording is not the lifecycle contract.
 
-Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The ten-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
+Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The 20-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
 Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.
 
 **Releasing:** push a `v*` tag, as before. `scripts/release_plan.py` picks how
 much the run validates:
-- **push** (push to `main`): unit tests and Linux/Windows binaries.
+- **push** (push to `main`): unit tests and Linux/Windows binaries. The Windows
+  installer runs alongside two duration-balanced unit shards. All three must
+  succeed before the Windows binary is built or uploaded.
 - **full** (nightly schedule or `repository_dispatch`): every lane. A green
   full run is promotion evidence for its SHA.
 - **promoted** (tag whose SHA already has a green full run on `main`): builds,
@@ -523,6 +612,32 @@ much the run validates:
 For the fast path, dispatch `manual-build-release` on the `main` commit, wait
 for it to finish green, then tag that commit. Nothing publishes without a
 green full validation of the exact SHA.
+
+The tag must point at a commit on `main` or a `release/*` branch. Any other
+tag fails the plan before anything builds or publishes; if the plan cannot
+reach the GitHub compare API, it fails too, and you re-run the job.
+
+If a published stable release never reached PyPI, re-publish it from its tag
+without re-running validation:
+
+```bash
+gh api repos/microsoft/apm/dispatches -f event_type=publish-existing-tag \
+  -F 'client_payload[tag]=vX.Y.Z'
+```
+
+The run refuses a tag that is not a published stable GitHub release, or whose
+version is already on PyPI.
+
+On qualifying PRs and merge groups, `Spec conformance gate` requires three
+serial pytest shards on isolated runners plus the statement check. Only the
+statement job's full collection is used to regenerate `CONFORMANCE.{json,md}`.
+On every PR, `Windows Compatibility Gate` requires three shards on parallel
+Windows runners (units with four xdist workers, then serial `windows_compat`
+integration); `Lifecycle Smoke (Linux)` and the two
+`Build & Test` shards are split the same way. The seeds in
+`.github/ci-durations/` (`windows-unit`, `windows-compat`, `linux-unit`,
+`spec-conformance`, and `linux-x86_64` for lifecycle smoke) weight the current
+pytest collection; they are not lists of tests to run.
 
 **Full-run lanes:**
 - **Linux x86_64 and arm64**: hermetic integration (`not live and not
@@ -534,13 +649,13 @@ green full validation of the exact SHA.
 - **Network lane** (Linux x86_64): `requires_github_token or
   requires_network_integration`, re-running only failed tests up to twice.
 - **Windows**: `scripts/windows/test-integration.ps1`.
-- **macOS**: still one job per architecture. Apple Silicon runs the unit suite
-  plus `lifecycle_smoke or windows_compat or platform_sensitive`; Intel runs
-  `windows_compat or platform_sensitive`. Mark OS-, filesystem- or
+- **macOS**: Intel is one job running `windows_compat or platform_sensitive`.
+  Apple Silicon runs the unit suite in its own job, in parallel with the build
+  job that runs `lifecycle_smoke or windows_compat or platform_sensitive`. Mark OS-, filesystem- or
   shell-sensitive integration tests `platform_sensitive`.
 
 `create-release` requires a pushed tag and every release-bound lane. Only a
-promoted tag may skip integration.
+promoted tag may skip integration and the Apple Silicon unit job.
 
 The existing unprivileged `PR Binary Smoke (Linux)` job also runs
 `tests/integration/test_audit_workspace_identity_lifecycle.py` against its built
@@ -559,17 +674,115 @@ release qualification or change required checks.
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
 
+### Tier 1 and Tier 2 on every push to main
+
+`main-push-gate.yml` runs the whole PR gate suite (`ci.yml`, including every
+Lifecycle Smoke shard), the full integration suite (`ci-integration.yml`,
+every shard) and the lifecycle security cells (`lifecycle-security.yml`) on
+each push to `main`. Its `main-push-gate` job fails the run when any tier job
+fails, so a red `main` shows on the commit. It is not a required check and
+never saves caches to the `main` scope.
+
+`lifecycle-security.yml` runs `tests/lifecycle/security` on Linux and then
+requires a receipt from every security witness. Pull requests run it when they
+touch `src/apm_cli/`, `tests/lifecycle/`, the receipt ratchet, `pyproject.toml`
+or `uv.lock`; it is not a required check. The security cells run on Linux
+only; Windows and macOS run only the nightly journeys.
+
+### Merge-train proof
+
+`merge-train.yml` proves one exact merge result before it lands. Push the
+merged tree (main plus the queued PRs) to a `queue/*` branch and read the
+single `train-gate` check at that SHA:
+
+| Ref | Runs | Time |
+|---|---|---|
+| `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml), `spec` (spec-conformance.yml) and `owner` (owner-surface.yml) | about 30-35 min |
+| `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
+
+`guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
+`Lint` job), the architecture ratchet contracts, every other `tests/quality`
+module and the NOTICE check. The ratchets compare against the merge base with
+`main`; a `Queue-Base: <sha>` trailer must name exactly that commit. A full
+train runs every check the `merge_group` gate requires. `train-gate` passes only
+when every job is green, or when every failure is inherited: `gate.py` collects the
+failing pytest node ids from the failed jobs' logs and subtracts the
+`train-failures.json` of the newest base probe (`queue/b<sha12>/p0-full`). It then
+publishes the run's own `train-failures.json`. A cancelled job, or a failure
+without node ids, is never excused.
+
+Strict known cells must cite open issues. Pull requests check the committed
+snapshot (`tests/quality/known_cell_issue_states.json`) only. A train's `guard`
+checks the live GitHub state, fail-closed. Every `main` push and a daily run
+check it in `.github/workflows/known-cells-live.yml`, outside the main push gate:
+a failure there is a ledger-state red (an issue changed state), not a code red,
+and opens one tracking issue. An API outage or a closed issue never reds open
+pull requests.
+
+Queue refs are real branches: only write-access users can push them, and every
+job tests the triggering commit. Train jobs restore caches (including `main`'s)
+read-only and never save one. After `train-gate` reports, the `cleanup` job
+deletes the train branch, so push it again to re-run (a manual dispatch with
+`--ref <queue branch>` works only while the branch exists).
+
+A green `train-gate` found by SHA alone is not a full proof: the same SHA can
+also carry a guard-only run. A full proof is a successful merge-train run on the
+`-full` branch (`queue/t<id>/p<k>-full` or `queue/b<sha12>/p0-full`) at that
+exact SHA:
+
+```bash
+git push origin HEAD:refs/heads/queue/t0001/p1-full
+gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
+  --commit "$(git rev-parse HEAD)" --json conclusion,url
+```
+
+The run must show `"conclusion": "success"`; cite its `url` as the proof.
+
+`scripts/merge_queue/` composes these trains automatically (shadow mode: it
+builds and proves trains but never merges). It reads PRs labeled `queue:ready`
+with an `apm-queue-ticket` marker comment, builds `queue-build/t<id>` through
+the merges API, publishes the prefix refs, and logs `would-land` events:
+
+```bash
+python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
+python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
+```
+
+A red train is classified by `scripts/merge_queue/classify.py`:
+- the earliest red guard prefix ejects its PR;
+- an infra failure is rerun once, and a second infra failure halts launches;
+- a failure attributable to one member's files ejects that member;
+- any other failure is rerun once (a flake lands), then bisected by halves.
+
+An ejected PR re-enters only with a new head.
+
+Landing is off by default. `--land` (`scripts/merge_queue/landing.py`) also
+admin-merges proven trains in launch order with
+`gh pr merge --merge --admin --match-head-commit`. It does so only when main's
+tree is the tree the member was proven on, and the merge commit must carry the
+proven tree. Any drift, or a merge to main that the runner did not make, HALTs
+landing and records the reason in `landing.json`; trains keep testing. Two
+failed admin probes in a row pause landing until elevation returns.
+Before merging, `closure.py` requires the issues GitHub will close
+(`closingIssuesReferences` plus closing keywords in commit messages) to equal the
+ticket's `fixes`; a mismatch ejects the train unmerged. After the merge it closes
+any fix GitHub left open and retargets stacked PRs.
+
 ### Windows unit hang diagnostics
 
-The Windows full-unit step in `.github/workflows/build-release.yml` runs:
+The Windows unit steps in `.github/workflows/build-release.yml` and the PR
+`Windows Compatibility Gate` run the selection owned by `scripts/ci_selections.py`:
 
 ```sh
-uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal -vv --tb=short --show-capture=no --no-showlocals
+uv run --frozen python -m scripts.ci_selections windows-unit [--shard-count N --shard-index I]
 ```
+
+which runs `pytest tests/unit tests/test_console.py -n 4 --dist worksteal -vv --tb=short --show-capture=no --no-showlocals`.
 
 `PYTHONUNBUFFERED=1` keeps named test starts and outcomes visible while the suite runs. Captured test output and local-variable dumps remain disabled. These diagnostics identify candidate unfinished tests, not stack frames or the exact blocked phase; an outcome can appear before fixture teardown completes.
 
-The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. Test selection and parallelism are unchanged. The PR-time `windows_compat` gate exercises live name visibility during setup, call, and teardown after a failed call.
+The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. The PR-time gate exercises live name visibility during setup, call, and teardown after a failed call.
 
 ### GitHub Actions Authentication
 
@@ -649,12 +862,12 @@ Promotion integration tests run on:
 ## Benefits
 
 ### **Speed vs Confidence Balance**
-- **Smoke tests**: Fast feedback (2-3 min) on every change
-- **E2E tests**: High confidence (15 min) only when shipping
+- **Smoke tests**: Fast feedback (2-3 min) in the merge queue and on runtime changes
+- **E2E tests**: High confidence (15 min) in the merge queue and promotion runs
 
 ### **Cost Efficiency**
 - Smoke tests use no API credits
-- E2E tests only run on releases (minimizing API usage)
+- E2E tests run in the merge queue and promotion runs, not on every PR push (minimizing API usage)
 - Manual workflow dispatch for test builds without publishing
 
 ### **Platform Coverage**
@@ -701,6 +914,14 @@ Promotion integration tests run on:
    needs.
 3. Update the CI matrix if the runtime introduces new platform
    support.
+
+### Lifecycle family: add a row or a machine rule
+
+1. Name the promise ids, for example `P-INV-I4` or `P-LAW-<property>`. Every id must resolve in `tests/quality/promise-catalog.json`; the row loader rejects any other id.
+2. For a fixed command sequence, add a row to `tests/lifecycle/replay/rows/` (copy `core_gate_row.yaml`) with `promises`, `world`, `given`, `when` and `then` (`exit`, `deployed: expected`, `announce`). `RowReplay` (`tests/lifecycle/rows.py`) runs every step through the driver and `check_cross_cutting`, and compares the final world with `expected_deployed`.
+3. For a transition that must hold from many states, add a rule to the matching state machine. Each rule builds an `Operation` (`oracles.operation_for(args)`) and calls `check_cross_cutting`; never write receipts yourself.
+4. If a step fails on `main`, open a neutral tracking issue and add a `known_cells` entry (law, tracking issue, step, `match`). It is a strict expected failure; never skip the step.
+5. Run the row red first: use a recorded mutant (`entry_point=`), or remove the oracle call and check that its obligations show up uncovered. Then move the obligations it covers from `baseline` to `required` in `tests/quality/promise_obligations.json`, with the row's test as witness.
 
 ### For New Features:
 1. Add a smoke test for compilation/validation.

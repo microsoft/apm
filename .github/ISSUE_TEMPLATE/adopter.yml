@@ -1,0 +1,54 @@
+name: Add my organization to ADOPTERS.md
+description: List your organization or project as an APM adopter. A maintainer opens the pull request for you.
+title: "[ADOPTER] "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for using APM! Fill in what you are comfortable sharing. A maintainer
+        will open the ADOPTERS.md pull request and ask you to confirm the wording.
+        Only share what your organization has approved for public listing.
+  - type: input
+    id: organization
+    attributes:
+      label: Organization
+      description: The name approved for public listing, or an anonymous industry description (for example "A global insurer").
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type (optional)
+      multiple: true
+      options:
+        - End-User Organization
+        - CNCF End-User Member
+        - Service Provider
+        - Consultancy
+        - Project
+        - Contributor
+  - type: dropdown
+    id: level
+    attributes:
+      label: Adoption level (optional)
+      options:
+        - Production
+        - Dev/Test
+        - Trialing
+        - Evaluating
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A short, factual statement approved for publication. "Uses APM." is enough.
+      placeholder: Uses APM to package and distribute agent skills across teams.
+    validations:
+      required: true
+  - type: checkboxes
+    id: permission
+    attributes:
+      label: Permission
+      options:
+        - label: My organization permits listing this name and wording publicly.
+          required: true

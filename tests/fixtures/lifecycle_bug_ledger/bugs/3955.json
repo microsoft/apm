@@ -1,0 +1,19 @@
+{
+  "issue": 3955,
+  "summary": "Local bundle packaging and authored MCP config assertions exceed row vocabulary.",
+  "failure_modes": [
+    "ownership",
+    "reference"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_mcp_lifecycle.py::test_bundle_mcp_claims_survive_unrelated_mcp_installs",
+    "tests/integration/test_local_bundle_mcp_lifecycle.py::test_bundle_mcp_is_recorded_baseline_and_survives_unrelated_installs",
+    "tests/integration/test_local_bundle_mcp_lifecycle.py::test_forged_bundle_provenance_cannot_hide_a_denied_server_from_audit",
+    "tests/integration/test_local_bundle_mcp_lifecycle.py::test_plain_audit_and_ci_agree_on_an_edited_bundle_file",
+    "tests/integration/test_local_bundle_mcp_lifecycle.py::test_user_scope_bundle_mcp_is_recorded_in_the_user_lock",
+    "tests/integration/test_local_bundle_mcp_lifecycle.py::test_user_scope_bundle_reads_grants_from_the_user_manifest"
+  ]
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,10 @@ from jsonschema import Draft202012Validator
 from apm_cli.agent_plugins import load_agent_plugin
 from apm_cli.bundle.agent_plugin_exporter import export_agent_plugin_bundle
 from apm_cli.bundle.packer import pack_bundle
+from apm_cli.core.remediation import PACK_LOCKFILE_MISSING
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+pytestmark = pytest.mark.component
 
 _SCHEMA_DIR = Path(__file__).parent.parent / "fixtures" / "schemas"
 _PLUGIN_SCHEMA_PATH = _SCHEMA_DIR / "agent-plugins-v1.0.0-plugin.schema.json"
@@ -195,7 +199,7 @@ def test_agent_bundle_rejects_nonportable_components_before_output_commit(
         for surface in ("agents", "commands", "instructions", "extensions", "hooks", "lsp")
     )
     assert "apm pack --format claude-plugin" in message
-    assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
+    assert "not carried by 'agent-plugin'; pack with '--format claude-plugin'" in message
     assert not build.exists()
 
 
@@ -338,8 +342,8 @@ def test_agent_bundle_lsp_only_failure_does_not_steer_to_claude(tmp_path: Path) 
 
     message = str(exc_info.value)
     assert "lsp" in message
-    assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
-    assert "Use 'apm pack --format claude-plugin'" not in message
+    assert "not carried by 'agent-plugin'; pack with '--format claude-plugin'" in message
+    assert "apm pack --format claude-plugin" not in message
     assert not build.exists()
 
 
@@ -447,6 +451,26 @@ def test_agent_bundle_rejects_unrepresentable_resolved_mcp(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match=r"mcpServers\.unsafe\.command"):
         export_agent_plugin_bundle(project, tmp_path / "build")
+
+
+def test_agent_bundle_rejects_claude_plugin_root_mcp(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    _write_lockfile(
+        project,
+        mcp_configs={
+            "synthdb": {
+                "name": "synthdb",
+                "registry": False,
+                "transport": "stdio",
+                "command": "node",
+                "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/server.js"],
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match=r"'synthdb'.*CLAUDE_PLUGIN_ROOT"):
+        export_agent_plugin_bundle(project, tmp_path / "build")
+    assert not (tmp_path / "build").exists()
 
 
 def test_agent_bundle_rejects_nonconforming_manifest_name(tmp_path: Path) -> None:
@@ -668,3 +692,37 @@ def test_agent_bundle_archives_are_reproducible(
     )
 
     assert first.bundle_path.read_bytes() == second.bundle_path.read_bytes()
+
+
+_DECLARED_DEPS = {
+    "apm": "  apm:\n    - acme/tools\n",
+    "mcp": "  mcp:\n    - name: srv\n      registry: false\n      transport: stdio\n      command: srv\n",
+    "lsp": (
+        "  lsp:\n    - name: kit-lsp\n      command: kit-ls\n"
+        "      extensionToLanguage:\n        .kit: kit\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_DECLARED_DEPS))
+def test_agent_bundle_without_lockfile_refuses_declared_dependencies(
+    tmp_path: Path, kind: str
+) -> None:
+    """Only a dependency-free project packs without a lock; none is dropped (#3994)."""
+    project = _write_agent_project(tmp_path / "project")
+    (project / "apm.lock.yaml").unlink()
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "dependencies:\n" + _DECLARED_DEPS[kind],
+        encoding="utf-8",
+    )
+    with pytest.raises(FileNotFoundError, match=re.escape(PACK_LOCKFILE_MISSING.clause())):
+        export_agent_plugin_bundle(project, tmp_path / "build")
+    assert not (tmp_path / "build").exists()
+
+
+def test_agent_bundle_without_lockfile_packs_a_dependency_free_project(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    (project / "apm.lock.yaml").unlink()
+    result = export_agent_plugin_bundle(project, tmp_path / "build")
+    assert "apm.lock.yaml" in result.files

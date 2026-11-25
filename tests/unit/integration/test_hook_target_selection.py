@@ -6,12 +6,17 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.component
 
 
 class _NoopSkillIntegrator:
@@ -62,6 +67,7 @@ def test_codex_only_dep_does_not_leak_hooks_to_claude(tmp_path: Path) -> None:
     result = integrate_package_primitives(
         _package_info(package_path),
         project,
+        skill_subset=None,
         targets=[_hook_only_target("claude"), _hook_only_target("codex")],
         integrators=IntegratorBundle(
             prompt=None,
@@ -77,6 +83,7 @@ def test_codex_only_dep_does_not_leak_hooks_to_claude(tmp_path: Path) -> None:
         diagnostics=DiagnosticCollector(),
         package_name="codex-only-hooks",
         dep_target_subset=["codex"],
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     assert result["hooks"] == 1

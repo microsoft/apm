@@ -18,6 +18,12 @@ from git import Actor, Repo
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
+# These cases mock the cached checkout and the copy into apm_modules, so there
+# are no copied bytes to check; real copies are checked in test_checkout_verify.
+_COPIES_ARE_MOCKED = patch(
+    "apm_cli.deps.github_downloader.require_verified_copy", new=lambda *_a, **_k: None
+)
+
 # ---------------------------------------------------------------------------
 # Helpers to build a minimal downloader without full __init__ setup
 # ---------------------------------------------------------------------------
@@ -345,13 +351,14 @@ class TestDownloadVirtualFilePackage:
 # ---------------------------------------------------------------------------
 
 
+@_COPIES_ARE_MOCKED
 class TestDownloadSubdirectoryPersistentCache:
     def _make_dep_ref(self, repo_url: str = "owner/repo") -> MagicMock:
         dep_ref = MagicMock()
         dep_ref.repo_url = repo_url
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "packages/my-pkg"
-        dep_ref.reference = "main"
+        dep_ref.reference = None  # the default-branch cache path
         dep_ref.get_unique_key.return_value = "owner/repo@main"
         dep_ref.to_github_url.return_value = f"https://gitlab.com/{repo_url}"
         return dep_ref
@@ -444,6 +451,73 @@ class TestDownloadSubdirectoryPersistentCache:
         assert "GIT_CONFIG_VALUE_1" not in cache_env
         assert "GIT_CONFIG_PARAMETERS" not in cache_env
         assert "GIT_HTTP_EXTRAHEADER" not in cache_env
+        call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
+        assert "locked_sha" in call_kwargs
+
+    def test_persistent_cache_hit_https_uses_downloader_git_env(self, tmp_path):
+        """A secure remote hands the downloader's own Git env to the cache."""
+        dep_ref = self._make_dep_ref("spiritt/tenants/spiritt/agent-cfg")
+
+        cached_checkout = tmp_path / "cached"
+        pkg_dir = cached_checkout / "packages" / "my-pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_bytes(b"name: my-pkg\nversion: 1.0.0\n")
+        actor = Actor("APM Test", "apm-test@example.invalid")
+        cached_repo = Repo.init(cached_checkout)
+        cached_repo.index.add(["packages/my-pkg/apm.yml"])
+        cached_repo.index.commit("seed cache", author=actor, committer=actor)
+
+        target_path = tmp_path / "target"
+        target_path.mkdir()
+
+        dl = _make_downloader()
+        dl.shared_clone_cache = None
+        # A distinct per-remote credential: it must reach the cache env, so a
+        # dropped resolver result cannot hide behind the empty downloader env.
+        per_remote_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Bearer per-remote-sentinel",
+        }
+        dl.auth_resolver.uses_public_github_anonymous_first.return_value = False
+        dl.auth_resolver.git_env_for_remote.return_value = per_remote_env
+        persistent_cache = MagicMock()
+        persistent_cache.get_checkout.return_value = cached_checkout
+        dl.persistent_git_cache = persistent_cache
+
+        with (
+            patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
+            patch("apm_cli.deps.github_downloader.Repo") as mock_repo_cls,
+            patch("apm_cli.utils.path_security.ensure_path_within"),
+            patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch("apm_cli.utils.file_ops.robust_copytree"),
+            patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+        ):
+            mock_result = MagicMock()
+            mock_result.is_valid = True
+            mock_result.package = MagicMock()
+            mock_result.package_type = MagicMock()
+            mock_validate.return_value = mock_result
+            mock_repo_cls.return_value.head.commit.hexsha = "abc123def456" * 3 + "ab"
+
+            dl.download_subdirectory_package(dep_ref=dep_ref, target_path=target_path)
+
+        assert persistent_cache.get_checkout.call_args.args[0] == (
+            "https://gitlab.com/spiritt/tenants/spiritt/agent-cfg"
+        )
+        call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        env = call_kwargs["env"]
+        assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer per-remote-sentinel"
+        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        assert env != dl._git_env_dict()
+        resolver = dl.auth_resolver
+        assert resolver.git_env_for_remote.call_args.args[0] in (
+            resolver.resolve_for_dep.return_value,
+            resolver.resolve_for_remote.return_value,
+        )
+        assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
+        assert "locked_sha" in call_kwargs
 
     def test_persistent_cache_miss_falls_through(self, tmp_path):
         """Lines 1088-1090: cache.get_checkout raises -> falls through to clone."""
@@ -473,6 +547,7 @@ class TestDownloadSubdirectoryPersistentCache:
         mock_sparse.assert_called()
 
 
+@_COPIES_ARE_MOCKED
 class TestDownloadWholeRepositoryPersistentCache:
     def test_cache_identity_preserves_full_nested_gitlab_path(self, tmp_path):
         from apm_cli.models.apm_package import DependencyReference
@@ -544,6 +619,7 @@ class TestDownloadWholeRepositoryPersistentCache:
         assert "GIT_HTTP_EXTRAHEADER" not in cache_env
 
 
+@_COPIES_ARE_MOCKED
 class TestDownloadWholeRepositoryPersistentCacheAgentPluginRejection:
     """Regression test: a rejected Agent Plugin on the cache fast path must not
     leave a partially-populated target_path on disk.
@@ -693,7 +769,7 @@ class TestDownloadSubdirCommitShaBranch:
         dep_ref.repo_url = "owner/repo"
         dep_ref.host = "github.com"
         dep_ref.virtual_path = "sub/pkg"
-        dep_ref.reference = "abc1234def5678901234567890123456789012"  # 40 hex chars
+        dep_ref.reference = "abc1234def567890123456789012345678901234"  # 40 hex chars
 
         target = tmp_path / "target"
         target.mkdir()

@@ -28,10 +28,13 @@ SOURCES = (
     "GITHUB_APM_PAT",
     "GITHUB_PERSONAL_ACCESS_TOKEN",
 )
-CONFIG = PurePosixPath(".github/mcp.json")
+CONFIG = PurePosixPath(".mcp.json")
 RUNTIME_CONFIGS = {"copilot": CONFIG, "cursor": PurePosixPath(".cursor/mcp.json")}
 INSTALL = ("install", "--runtime", "copilot", "--no-policy", "--parallel-downloads", "0")
 USER_SERVER = {"command": "user-command", "args": ["keep-me"]}
+# Runtimes whose project file (.mcp.json, Claude Code rules) re-renders an
+# APM-written entry when only the install environment changed the render.
+REFRESHES_ENVIRONMENT = frozenset({"copilot"})
 
 
 def _run(
@@ -126,10 +129,16 @@ def test_installed_auto_auth_uses_selected_source(
     before = config_path.read_bytes()
     changed_env = {**env, "GITHUB_COPILOT_PAT": "changed-precedence-sentinel"}
     repeated = _run(apm_binary_path, project.root, changed_env, runtime=runtime)
+    outputs = [first, repeated]
+    if runtime in REFRESHES_ENVIRONMENT:
+        assert _authorization(project.root, runtime) == ["Bearer ${GITHUB_COPILOT_PAT}"]
+        _assert_no_secret(project.root, [*tokens.values(), "changed-precedence-sentinel"], runtime)
+        before = config_path.read_bytes()
+        outputs.append(_run(apm_binary_path, project.root, changed_env, runtime=runtime))
     assert config_path.read_bytes() == before
     for secret in [*tokens.values(), "changed-precedence-sentinel"]:
         if secret:
-            assert secret not in first.stdout + first.stderr + repeated.stdout + repeated.stderr
+            assert all(secret not in result.stdout + result.stderr for result in outputs)
 
 
 def test_global_install_keeps_runtime_auth_outside_project(
@@ -270,22 +279,26 @@ def test_registry_provenance_survives_install_reinstall_and_repair(
         )
         first = LifecycleStateSnapshot.capture(project.root, config_paths=(config_path,))
         changed_env = {**env, "GITHUB_COPILOT_PAT": "new-higher-priority-token"}
+        repaired_expected = (
+            "Bearer ${GITHUB_COPILOT_PAT}" if not any(manifest_headers.values()) else expected
+        )
+        if runtime == "cursor" and not any(manifest_headers.values()):
+            repaired_expected = "Bearer ${env:GITHUB_COPILOT_PAT}"
         repeat_result = _run(apm_binary_path, project.root, changed_env, runtime=runtime)
         repeated = LifecycleStateSnapshot.capture(project.root, config_paths=(config_path,))
-        assert repeated.semantic_bytes == first.semantic_bytes
-        assert repeated.files == first.files
-        assert repeated.lockfile_bytes == first.lockfile_bytes
+        if runtime in REFRESHES_ENVIRONMENT:
+            # The APM-written entry follows the new credential source at once.
+            assert _authorization(project.root, runtime) == [repaired_expected]
+        else:
+            assert repeated.semantic_bytes == first.semantic_bytes
+            assert repeated.files == first.files
+            assert repeated.lockfile_bytes == first.lockfile_bytes
         # Existing entries are preserved, not migrated; explicitly remove only
         # the affected server before applying the documented repair procedure.
         config = _config(project.root, runtime)
         del config["mcpServers"][SERVER]
         (project.root / config_path).write_text(json.dumps(config), encoding="utf-8")
         repair_result = _run(apm_binary_path, project.root, changed_env, runtime=runtime)
-        repaired_expected = (
-            "Bearer ${GITHUB_COPILOT_PAT}" if not any(manifest_headers.values()) else expected
-        )
-        if runtime == "cursor" and not any(manifest_headers.values()):
-            repaired_expected = "Bearer ${env:GITHUB_COPILOT_PAT}"
         assert _authorization(project.root, runtime) == [repaired_expected]
         _assert_no_secret(
             project.root,
@@ -367,9 +380,7 @@ def test_dictionary_registry_headers_install_and_repeat(
                 {"name": SERVER, "registry": registry.url, "headers": manifest_headers},
             ),
         )
-        config_path = PurePosixPath(
-            ".github/mcp.json" if runtime == "copilot" else ".cursor/mcp.json"
-        )
+        config_path = RUNTIME_CONFIGS[runtime]
         path = project.root / config_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -400,5 +411,11 @@ def test_dictionary_registry_headers_install_and_repeat(
         first = LifecycleStateSnapshot.capture(project.root, config_paths=(config_path,))
         _run(apm_binary_path, project.root, {**env, "GITHUB_TOKEN": "changed-ambient"}, *args)
         repeated = LifecycleStateSnapshot.capture(project.root, config_paths=(config_path,))
+        if runtime in REFRESHES_ENVIRONMENT and expected == "registry-default":
+            # A newly available token now authenticates the APM-written entry.
+            headers = json.loads(path.read_text(encoding="utf-8"))["mcpServers"][SERVER]["headers"]
+            assert headers["Authorization"] == "Bearer ${GITHUB_TOKEN}"
+            assert "changed-ambient" not in path.read_text(encoding="utf-8")
+            return
         assert repeated.files == first.files
         assert repeated.lockfile_bytes == first.lockfile_bytes

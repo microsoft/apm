@@ -6,8 +6,8 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
+import os
 import shutil  # noqa: F401
-from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -16,109 +16,20 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     decode_url_path_segments,
-    ensure_path_within,
     parse_url_path_segments,
-    safe_rmtree,
     validate_path_segments,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # ensure_path_within
 # ---------------------------------------------------------------------------
 
 
-class TestEnsurePathWithin:
-    """Unit tests for the ensure_path_within containment check."""
-
-    def test_path_inside_base_passes(self, tmp_path):
-        child = tmp_path / "apm_modules" / "owner" / "repo"
-        child.mkdir(parents=True)
-        result = ensure_path_within(child, tmp_path / "apm_modules")
-        assert result == child.resolve()
-
-    def test_dotdot_escape_raises(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        bad = base / ".." / "etc"
-        with pytest.raises(PathTraversalError):
-            ensure_path_within(bad, base)
-
-    def test_deep_dotdot_escape_raises(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        bad = base / "owner" / "repo" / ".." / ".." / ".." / "secrets"
-        with pytest.raises(PathTraversalError):
-            ensure_path_within(bad, base)
-
-    def test_base_itself_passes(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        result = ensure_path_within(base, base)
-        assert result == base.resolve()
-
-    def test_absolute_outside_raises(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        with pytest.raises(PathTraversalError):
-            ensure_path_within(Path("/tmp/evil"), base)
-
-    def test_symlink_escape_raises(self, tmp_path):
-        """Symlink inside base pointing outside should be caught."""
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        outside = tmp_path / "outside_target"
-        outside.mkdir()
-        link = base / "evil_link"
-        link.symlink_to(outside)
-        with pytest.raises(PathTraversalError):
-            ensure_path_within(link, base)
-
-
 # ---------------------------------------------------------------------------
 # safe_rmtree
 # ---------------------------------------------------------------------------
-
-
-class TestSafeRmtree:
-    """Unit tests for the safe_rmtree wrapper."""
-
-    def test_removes_directory_inside_base(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        target = base / "owner" / "repo"
-        target.mkdir(parents=True)
-        (target / "file.txt").write_text("content")
-
-        safe_rmtree(target, base)
-        assert not target.exists()
-
-    def test_refuses_to_remove_outside_base(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        outside = tmp_path / "SAFE_DELETE_ME"
-        outside.mkdir()
-        (outside / "proof.txt").write_text("do not delete")
-
-        bad_path = base / ".." / "SAFE_DELETE_ME"
-        with pytest.raises(PathTraversalError):
-            safe_rmtree(bad_path, base)
-
-        # Verify the directory was NOT deleted
-        assert outside.exists()
-        assert (outside / "proof.txt").read_text() == "do not delete"
-
-    def test_refuses_traversal_in_package_name(self, tmp_path):
-        """Simulates the MSRC PoC: attacker/repo/../../../SAFE_DELETE_ME."""
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        victim = tmp_path / "SAFE_DELETE_ME"
-        victim.mkdir()
-        (victim / "proof.txt").write_text("critical data")
-
-        evil_path = base / "attacker" / "repo" / ".." / ".." / ".." / "SAFE_DELETE_ME"
-        with pytest.raises(PathTraversalError):
-            safe_rmtree(evil_path, base)
-
-        assert victim.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -422,61 +333,155 @@ class TestDependencyParseTraversalRejection:
 # ---------------------------------------------------------------------------
 
 
-class TestGetInstallPathContainment:
-    """Verify get_install_path() rejects paths that escape apm_modules/."""
+# ---------------------------------------------------------------------------
+# filesystem_containment(): the filesystem-aware containment calculation
+# ---------------------------------------------------------------------------
 
-    def test_normal_package_path(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        dep = DependencyReference.parse("owner/repo")
-        path = dep.get_install_path(base)
-        assert path == base / "owner" / "repo"
 
-    def test_traversal_in_virtual_path_raises(self, tmp_path):
-        """Even if parse-time validation is bypassed, get_install_path catches it."""
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        dep = DependencyReference(repo_url="owner/repo")
-        dep.is_virtual = True
-        # Need enough ../s to escape: owner/repo/../../../../esc  → 2 up from subdir + 2 more
-        dep.virtual_path = "../../../../etc/passwd"
-        with pytest.raises(PathTraversalError):
-            dep.get_install_path(base)
+class TestFilesystemContainment:
+    """Case and Unicode spellings of a root are judged by directory identity."""
 
-    def test_traversal_in_repo_url_raises(self, tmp_path):
-        """repo_url with .. should be caught by get_install_path."""
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        dep = DependencyReference(repo_url="owner/repo/../../..")
-        dep.is_virtual = False
-        with pytest.raises(PathTraversalError):
-            dep.get_install_path(base)
+    def test_child_of_the_root_is_contained(self, tmp_path):
+        from apm_cli.utils.path_security import filesystem_containment
 
-    def test_ado_normal_path(self, tmp_path):
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        dep = DependencyReference.parse("https://dev.azure.com/myorg/myproject/_git/myrepo")
-        path = dep.get_install_path(base)
-        assert "myorg" in str(path)
-        assert path.resolve().is_relative_to(base.resolve())
+        root = tmp_path / "project"
+        (root / "bin").mkdir(parents=True)
+        assert filesystem_containment(root / "bin", root) is True
 
-    def test_local_path_dotdot_basename_raises(self, tmp_path):
-        """Crafted local_path with '..' basename must be caught."""
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        dep = DependencyReference(repo_url="unused")
-        dep.is_local = True
-        dep.local_path = "/some/path/.."
-        with pytest.raises(PathTraversalError):
-            dep.get_install_path(base)
+    def test_sibling_of_the_root_is_outside(self, tmp_path):
+        from apm_cli.utils.path_security import filesystem_containment
 
-    def test_local_path_dot_basename_raises(self, tmp_path):
-        """Path('.').name returns '' on some platforms — guard handles it."""
-        base = tmp_path / "apm_modules"
-        base.mkdir()
-        dep = DependencyReference(repo_url="unused")
-        dep.is_local = True
-        dep.local_path = "."
-        # Path(".").name is "" which is in our reject set
-        with pytest.raises(PathTraversalError):
-            dep.get_install_path(base)
+        root = tmp_path / "project"
+        root.mkdir()
+        (tmp_path / "tools").mkdir()
+        assert filesystem_containment(tmp_path / "tools", root) is False
+
+    def test_unicode_case_variant_of_the_root_is_contained(self, tmp_path, monkeypatch):
+        import os
+
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project-\u0390"
+        root.mkdir()
+        variant = tmp_path / "PROJECT-\u03aa\u0301"
+        variant.mkdir(exist_ok=True)
+        # Stand in for a case-insensitive volume, where both spellings are one directory.
+        monkeypatch.setattr(os.path, "samefile", lambda *_args: True)
+        assert filesystem_containment(variant / "bin", root) is True
+
+    def test_unverifiable_case_variant_is_unknown(self, tmp_path, monkeypatch):
+        import os
+
+        from apm_cli.utils.path_security import filesystem_containment
+
+        # Spellings no lexical or normcase fast path folds together, on any platform.
+        root = tmp_path / "project-\u0390"
+        root.mkdir()
+        variant = tmp_path / "PROJECT-\u03aa\u0301"
+
+        def _unverifiable(*_args):
+            raise PermissionError("cannot stat")
+
+        monkeypatch.setattr(os.path, "samefile", _unverifiable)
+        assert filesystem_containment(variant / "bin", root) is None
+
+
+def test_the_refusal_names_a_link_as_printable_ascii() -> None:
+    """A link name with control characters is rendered printable before display (#5215)."""
+    from apm_cli.utils.path_security import symlinked_deploy_refusal
+
+    message = symlinked_deploy_refusal("skills\x1b[31m\u202e")
+
+    assert message.isascii() and message.isprintable()
+    assert "\x1b" not in message and "\u202e" not in message
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component(): a Windows junction below the base is a link (#5229)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junction_below_the_base_counts_as_a_link(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _winapi.CreateJunction(str(outside), str(base / "agents"))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is True
+    assert has_symlink_component(base, base / "agents" / ".." / "a.md") is True
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junctioned_base_itself_is_not_flagged(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    real = tmp_path / "real"
+    (real / "agents").mkdir(parents=True)
+    base = tmp_path / "junction-base"
+    _winapi.CreateJunction(str(real), str(base))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is False
+
+
+def _reparse_stat(tag: int):
+    """A directory lstat result carrying a reparse point with *tag* (Windows fields)."""
+    import stat
+    from types import SimpleNamespace
+
+    return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400, st_reparse_tag=tag)
+
+
+@pytest.mark.parametrize(
+    ("tag", "linked"),
+    [(0xA000001D, True), (0xA0000003, True), (0x9000001A, False)],
+    ids=["lx-symlink", "junction", "data-only-cloud-file"],
+)
+def test_a_name_surrogate_reparse_point_below_the_base_counts_as_a_link(
+    tmp_path, monkeypatch, tag: int, linked: bool
+) -> None:
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(tag) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / "a.md") is linked
+
+
+def test_stepping_back_over_a_name_surrogate_reparse_point_counts_as_a_link(
+    tmp_path, monkeypatch
+) -> None:
+    """``..`` after a junction is judged like ``..`` after a symbolic link."""
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(0xA0000003) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / ".." / "a.md") is True

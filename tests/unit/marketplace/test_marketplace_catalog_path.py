@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import pytest
 from click.testing import CliRunner
@@ -18,6 +19,8 @@ from click.testing import CliRunner
 from apm_cli.marketplace import client as mp_client
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.marketplace.source_identity import admit_marketplace_catalog_path
+
+pytestmark = pytest.mark.component
 
 CATALOG = {"name": "frontend", "plugins": [{"name": "fe-skill", "source": "./plugins/fe"}]}
 
@@ -193,7 +196,7 @@ class TestMarketplaceAddPath:
                 f"acme-{audience}",
             )
             assert result.exit_code == 0, result.output
-            assert f"Marketplace 'acme-{audience}' registered (1 plugins)" in result.output
+            assert f"Marketplace 'acme-{audience}' registered (1 plugin)" in result.output
 
         registered = {entry["name"]: entry for entry in _registered()}
         assert registered["acme-frontend"]["path"] == "catalogs/frontend/marketplace.json"
@@ -305,7 +308,7 @@ class TestMarketplaceAddPath:
         )
         result = CliRunner().invoke(marketplace, ["update", "acme-backend"])
         assert result.exit_code == 0, result.output
-        assert "Marketplace 'acme-backend' updated (1 plugins)" in result.output
+        assert "Marketplace 'acme-backend' updated (1 plugin)" in result.output
 
         browse = CliRunner().invoke(marketplace, ["browse", "acme-backend"])
         assert browse.exit_code == 0, browse.output
@@ -335,14 +338,25 @@ class TestMarketplaceAddPath:
         [entry] = _registered()
         assert entry["path"] == "catalogs/backend/marketplace.json"
 
-    def test_re_adding_without_path_keeps_silent_replace(self, tmp_path: Path) -> None:
+    def test_re_adding_another_catalog_under_an_alias_needs_yes(self, tmp_path: Path) -> None:
+        repos = []
         for audience in ("one", "two"):
             repo = tmp_path / audience
             repo.mkdir()
             (repo / "marketplace.json").write_text(json.dumps(CATALOG), encoding="utf-8")
-            result = _invoke_add(str(repo), "--name", "acme")
-            assert result.exit_code == 0, result.output
-            assert "Replacing marketplace" not in result.output
+            repos.append(repo)
+        assert _invoke_add(str(repos[0]), "--name", "acme").exit_code == 0
+
+        refused = _invoke_add(str(repos[1]), "--name", "acme")
+        assert refused.exit_code == 1, refused.output
+        assert "--yes" in refused.output
+        [entry] = _registered()
+        assert Path(MarketplaceSource.from_dict(entry).local_path).name == "one"
+
+        replaced = _invoke_add(str(repos[1]), "--name", "acme", "--yes")
+        assert replaced.exit_code == 0, replaced.output
+        [entry] = _registered()
+        assert Path(MarketplaceSource.from_dict(entry).local_path).name == "two"
 
     def test_bare_re_add_over_a_path_registration_warns(self, tmp_path: Path) -> None:
         # Losing a catalog chosen with --path is never silent, even when the
@@ -369,7 +383,7 @@ class TestMarketplaceAddPath:
 class TestGithubContentsUrl:
     def test_catalog_path_is_encoded_and_ref_preserved(self) -> None:
         from types import SimpleNamespace
-        from urllib.parse import parse_qs, urlsplit
+        from urllib.parse import parse_qs
 
         source = MarketplaceSource(
             name="acme",
@@ -388,7 +402,7 @@ class TestGithubContentsUrl:
 
     def test_raw_contents_path_is_encoded_and_ref_preserved(self) -> None:
         from types import SimpleNamespace
-        from urllib.parse import parse_qs, urlsplit
+        from urllib.parse import parse_qs
 
         url = mp_client._github_raw_contents_url(
             SimpleNamespace(api_base="https://ghe.example.com/api/v3/"),

@@ -22,9 +22,10 @@ from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.component]
 
 
 @pytest.fixture(autouse=True)
@@ -95,6 +96,7 @@ def _install(
     return integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=[KNOWN_TARGETS[target_name] for target_name in target_names],
         integrators=IntegratorBundle(
             prompt=None,
@@ -109,6 +111,7 @@ def _install(
         diagnostics=DiagnosticCollector(),
         package_name=package_info.package.name,
         dep_target_subset=dep_target_subset,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
 
@@ -168,7 +171,9 @@ def test_consumer_target_contraction_retires_the_dropped_target(tmp_path: Path) 
 
     result = _install(claude_pkg, project_root, targets, dep_target_subset=["codex"])
 
-    assert result["hooks"] == 1
+    # The codex registration is already on disk, so it is adopted, not
+    # re-integrated (#4184); contraction only retires the claude side.
+    assert result["hooks"] == 0
     claude_settings = project_root / ".claude" / "settings.json"
     assert not claude_settings.exists() or not _hooks(claude_settings)
     assert set(_hooks(project_root / ".codex" / "hooks.json")) == {"SessionStart", "SubagentStart"}

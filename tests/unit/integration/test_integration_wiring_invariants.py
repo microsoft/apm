@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _INTEGRATION_SCRIPT = _REPO_ROOT / "scripts" / "test-integration.sh"
 _INTEGRATION_CONFTEST = _REPO_ROOT / "tests" / "integration" / "conftest.py"

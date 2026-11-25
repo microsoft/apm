@@ -1,12 +1,12 @@
 """Tests for the apm init command."""
 
+import contextlib
 import json  # noqa: F401
 import os
-import re
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -365,7 +365,9 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 # Consumer next-steps surface (Wave 3 v3 noun-verb teach)
                 assert "apm install" in result.output
-                assert "apm run" in result.output
+                # No experimental step, and ASCII-only chrome (#3994).
+                assert "apm run" not in result.output
+                assert result.output.isascii()
                 assert "apm plugin init" in result.output
                 assert "apm marketplace init" in result.output
                 assert "https://microsoft.github.io/apm" in result.output
@@ -736,6 +738,18 @@ class TestInitTargetPrompt:
             assert "claude" in data["targets"]
             assert "cursor" in data["targets"]
 
+    def test_init_target_flag_persists_canonical_alias(self):
+        """--target agy persists the canonical antigravity name (#3842)."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes", "--target", "agy"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            data = yaml.safe_load(Path("apm.yml").read_text(encoding="utf-8"))
+            assert data["targets"] == ["antigravity"]
+
     def test_init_target_flag_invalid(self):
         """S5b: --target invalid, exit code non-zero, error message."""
         with self.runner.isolated_filesystem():
@@ -923,6 +937,48 @@ class TestToggleInputParser:
         assert err is not None
 
 
+@contextlib.contextmanager
+def _agentrc_on_path(path):
+    """Put an ``agentrc`` stub on PATH outside the project, or hide any installed one.
+
+    A real PATH change exercises the helper owner itself, so git resolution
+    keeps finding the real git and its process-wide cache stays clean.
+    """
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    with tempfile.TemporaryDirectory() as bin_dir:
+        if path is None:
+            entries = [
+                entry
+                for entry in entries
+                if not any((Path(entry) / f"agentrc{ext}").exists() for ext in ("", ".exe", ".cmd"))
+            ]
+        else:
+            stub = Path(bin_dir) / ("agentrc.exe" if sys.platform == "win32" else "agentrc")
+            stub.write_bytes(b"stub\n")
+            stub.chmod(0o755)
+            entries = [bin_dir, *entries]
+        with patch.dict(os.environ, {"PATH": os.pathsep.join(entries)}):
+            yield
+
+
+def test_agentrc_probe_never_poisons_the_git_executable_cache(tmp_path, monkeypatch):
+    """Simulating agentrc on PATH must not leak into git resolution (release-gate pollution)."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.utils import git_env
+
+    git_env.reset_git_cache()
+    monkeypatch.chdir(tmp_path)
+    with _agentrc_on_path("/usr/bin/agentrc"):
+        result = CliRunner().invoke(cli, ["init", "--yes", "demo"])
+    assert result.exit_code == 0, result.output
+    # init swallows a failed git call, so assert on the cache itself; compare
+    # resolved paths because Windows drive-qualifies the cached value.
+    assert git_env._git_executable is not None
+    assert Path(git_env._git_executable).resolve() != Path("/usr/bin/agentrc").resolve()
+
+
 class TestInitAgentrcSuggestion:
     """Tests for #518: apm init suggests agentrc in Next Steps panel."""
 
@@ -943,33 +999,25 @@ class TestInitAgentrcSuggestion:
     def test_agentrc_in_path_no_instructions_shows_next_step(self):
         """When agentrc is in PATH and no instructions exist, prepend step."""
         with self.runner.isolated_filesystem():
-            with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
+            with _agentrc_on_path("/usr/bin/agentrc"):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
             assert "agentrc init" in result.output
 
-    def test_agentrc_not_in_path_no_instructions_shows_tip(self):
-        """When agentrc NOT in PATH and no instructions, show tip line."""
-        _url_re = re.compile(r"https?://[^\s\[\]<>'\"]+")
+    def test_agentrc_not_in_path_prints_no_tip(self):
+        """When agentrc is NOT in PATH, the default init path names no third-party tool (#4089)."""
         with self.runner.isolated_filesystem():
-            with patch("apm_cli.commands.init.shutil.which", return_value=None):
+            with _agentrc_on_path(None):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
-            assert "agentrc" in result.output
-            urls = [urlparse(m) for m in _url_re.findall(result.output)]
-            assert any(
-                u.scheme == "https"
-                and u.hostname == "github.com"
-                and u.path.startswith("/microsoft/agentrc")
-                for u in urls
-            ), "agentrc URL not found in output"
+            assert "agentrc" not in result.output
 
     def test_agentrc_suppressed_when_copilot_instructions_exist(self):
         """When .github/copilot-instructions.md exists, no agentrc mention."""
         with self.runner.isolated_filesystem():
             Path(".github").mkdir()
             Path(".github/copilot-instructions.md").write_text("# My instructions\n")
-            with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
+            with _agentrc_on_path("/usr/bin/agentrc"):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
@@ -978,7 +1026,7 @@ class TestInitAgentrcSuggestion:
         """When AGENTS.md exists, no agentrc mention."""
         with self.runner.isolated_filesystem():
             Path("AGENTS.md").write_text("# Agents\n")
-            with patch("apm_cli.commands.init.shutil.which", return_value=None):
+            with _agentrc_on_path(None):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
@@ -988,7 +1036,7 @@ class TestInitAgentrcSuggestion:
         with self.runner.isolated_filesystem():
             Path(".github").mkdir()
             Path(".github/instructions").mkdir()
-            with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
+            with _agentrc_on_path("/usr/bin/agentrc"):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
@@ -996,7 +1044,7 @@ class TestInitAgentrcSuggestion:
     def test_agentrc_in_path_step_is_after_install(self):
         """agentrc init step appears after 'apm install' but before other steps."""
         with self.runner.isolated_filesystem():
-            with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
+            with _agentrc_on_path("/usr/bin/agentrc"):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
             agentrc_pos = result.output.find("agentrc init")
@@ -1006,10 +1054,10 @@ class TestInitAgentrcSuggestion:
             assert agentrc_pos > install_pos
 
     def test_agentrc_suppressed_in_plugin_mode(self):
-        """When invoked via 'apm init --plugin', no agentrc mention."""
+        """When invoked via 'apm plugin init', no agentrc mention."""
         with self.runner.isolated_filesystem():
-            with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes", "my-plugin"])
+            with _agentrc_on_path("/usr/bin/agentrc"):
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes", "my-plugin"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
 
@@ -1214,7 +1262,7 @@ class TestInitMetadataFlags:
             os.chdir(tmp_dir)
             try:
                 result = self.runner.invoke(
-                    cli, ["init", "my-plugin", "--plugin", "--yes", "--version", "2.0.0"]
+                    cli, ["plugin", "init", "my-plugin", "--yes", "--version", "2.0.0"]
                 )
 
                 assert result.exit_code == 0
@@ -1354,6 +1402,20 @@ class TestInitMetadataFlags:
 
                 assert result.exit_code == 0, result.output
                 assert self._read_yaml()["author"] == ""
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_apply_implies_discover(self):
+        """`init --apply` runs discovery instead of demanding --discover (#3994)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                with patch("apm_cli.commands.init.run_discover") as run_discover:
+                    result = self.runner.invoke(cli, ["init", "--apply", "--yes"])
+
+                assert result.exit_code == 0, result.output
+                assert run_discover.call_args.kwargs["write"] is True
+                assert not Path("apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)
 

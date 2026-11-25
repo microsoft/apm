@@ -38,6 +38,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -337,6 +339,7 @@ class TestCoworkCleanupSyncRemove:
                 managed_files={"cowork://skills/foo/SKILL.md"},
                 prefix="cowork://skills/",
                 targets=None,
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
             )
 
         # -- verify: the file was deleted ---
@@ -397,6 +400,7 @@ class TestCoworkCleanupOrphanFlow:
                 dep_key="some-org/skill-pack",
                 targets=None,
                 diagnostics=diagnostics,
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
                 failed_path_retained=False,  # orphan cleanup path
             )
 
@@ -480,8 +484,9 @@ class TestCoworkUninstallSyncIntegration:
             result = integrator.sync_integration(
                 apm_package,
                 project_root,
-                managed_files={"cowork://skills/demo-skill"},
+                managed_files={"cowork://skills/demo-skill", "cowork://skills/demo-skill/SKILL.md"},
                 targets=[cowork_target],
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
             )
 
         # -- verify: the skill directory was deleted ---
@@ -490,11 +495,14 @@ class TestCoworkUninstallSyncIntegration:
             "sync_integration did not handle the cowork:// entry. "
             "This is the PR #926 uninstall regression."
         )
-        assert result["files_removed"] == 1
+        # The member file and its directory (#3701).
+        assert result["files_removed"] == 2
         assert result["errors"] == 0
 
-    def test_uninstall_cowork_with_resolver_none_skips_gracefully(self, tmp_path: Path) -> None:
-        """When OneDrive is unavailable, cowork entries are skipped (not error)."""
+    def test_uninstall_cowork_with_resolver_none_skips_gracefully(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When OneDrive is unavailable, cowork entries are kept and retained for retry."""
         from unittest.mock import MagicMock
 
         from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -519,26 +527,28 @@ class TestCoworkUninstallSyncIntegration:
         apm_package.get_apm_dependencies.return_value = []
 
         integrator = SkillIntegrator()
+        messages: list[str] = []
+        monkeypatch.setattr(
+            DiagnosticCollector,
+            "render_summary",
+            lambda self, *_a, **_kw: messages.extend(d.message for d in self._diagnostics),
+        )
 
-        with (
-            patch(
-                "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
-                return_value=None,
-            ),
-            patch(
-                "apm_cli.utils.console._rich_warning",
-            ) as mock_warn,
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
         ):
             result = integrator.sync_integration(
                 apm_package,
                 project_root,
                 managed_files={"cowork://skills/demo-skill"},
                 targets=[cowork_target],
+                evidence=no_evidence(project_root),
             )
 
-        # Entry skipped, not counted as error.
+        # Nothing deleted; the entry is retained for a later run (#3701).
         assert result["files_removed"] == 0
-        assert result["errors"] == 0
+        assert result["errors"] == 1
 
         # Warning must have been emitted.
-        mock_warn.assert_called_once()
+        assert len([m for m in messages if "OneDrive path not detected" in m]) == 1

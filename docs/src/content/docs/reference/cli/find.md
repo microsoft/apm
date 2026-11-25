@@ -21,14 +21,14 @@ apm find <PATH> [OPTIONS]
 
 The command is **read-only**. It performs zero network requests, zero auth calls, and zero file writes. It never modifies `apm.lock.yaml` or any deployed file.
 
-When multiple packages deployed the same file (common for shared harness files such as `AGENTS.md` or `CLAUDE.md` written by several contributors), `apm find` lists all of them, one per line.
+When multiple packages deployed the same file, `apm find` lists all of them, one per line. Compiled root files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are written by `apm compile`, not recorded as deployments, so `apm find` does not trace them; trace the instruction files they include.
 
 ## Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source` | off | After each package name, print the OCI image URI, git remote URL, or local path that is the origin of that package on the same line. |
-| `--path` | off | After each package name, print the full dependency chain from that package up to the root (same output as `apm deps why`). |
+| `--source` | off | After each package name, print the origin of that package on the same line: the OCI image URI, the local path, or the package with its locked ref, tag, or short commit (`owner/repo@ref`). |
+| `--path` | off | After each package name, print the full dependency chain from `apm.yml` down to that package (same walker as `apm deps why`). |
 
 ## Examples
 
@@ -53,7 +53,7 @@ apm find .github/copilot-instructions.md --source
 Output:
 
 ```
-owner/repo  https://github.com/owner/repo.git@abc1234
+owner/repo  owner/repo@v1.0.0
 ```
 
 ### Show full dependency chain
@@ -69,12 +69,12 @@ owner/repo
   apm.yml -> owner/repo
 ```
 
-### Multi-contributor file (AGENTS.md / CLAUDE.md)
+### File deployed by several packages
 
-Shared harness files can be contributed by more than one package. All contributors are listed:
+Every package that recorded the path is listed:
 
 ```bash
-apm find AGENTS.md
+apm find .agents/skills/shared/SKILL.md
 ```
 
 Output:
@@ -84,16 +84,16 @@ owner/repo-a
 owner/repo-b
 ```
 
-Combine with `--source` to see where each contributor came from:
+Combine with `--source` to see where each one came from:
 
 ```bash
-apm find AGENTS.md --source
+apm find .agents/skills/shared/SKILL.md --source
 ```
 
 Output:
 
 ```
-owner/repo-a  https://github.com/owner/repo-a.git@def5678
+owner/repo-a  owner/repo-a@main
 owner/repo-b  oci://ghcr.io/owner/repo-b:v1.2.0
 ```
 

@@ -10,15 +10,16 @@ import os
 from pathlib import Path
 from typing import ClassVar
 
-import click
-
+from ...core.command_logger import library_logger
+from ...core.deprecations import deprecation_message
 from ...core.token_manager import GitHubTokenManager
+from ...mcp_transport import canonical_remote_transport
 from ...models.dependency.mcp import TrustedEnvLiteral
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname, unambiguous_https_hostname
 from ._mcp_runtime_args import process_v01_value_hint_arg
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .base import (
     _ENV_PLACEHOLDER_RE,
     _ENV_VAR_RE,
@@ -45,6 +46,7 @@ class CopilotClientAdapter(MCPClientAdapter):
     _client_label: str = "Copilot CLI"
     target_name: str = "copilot"
     mcp_servers_key: str = "mcpServers"
+    remote_shape = remote_shape_row("copilot")
 
     # Wording for the post-install env-var diagnostics, so subclasses that
     # reuse them (Claude Code) name their own config file and launch command.
@@ -122,11 +124,9 @@ class CopilotClientAdapter(MCPClientAdapter):
             str: Path to the MCP configuration file.
         """
         if self.user_scope:
-            configured_home = os.environ.get("COPILOT_HOME", "").strip()
-            copilot_home = (
-                Path(configured_home).expanduser() if configured_home else Path.home() / ".copilot"
-            )
-            return str(copilot_home / "mcp-config.json")
+            from ...integration.targets import resolve_user_root
+
+            return str(resolve_user_root("copilot") / "mcp-config.json")
         return str(self.project_root / ".github" / "mcp.json")
 
     def update_config(self, config_updates):
@@ -189,7 +189,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             bool: True if successful, False otherwise.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         try:
@@ -212,7 +212,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             return True
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False
 
     def _begin_env_tracking(self, server_url, server_name, server_info=None) -> object:
@@ -359,7 +359,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         def _emit_separator_once():
             nonlocal emitted_any
             if not emitted_any:
-                click.echo("")
+                library_logger().blank_line()
                 emitted_any = True
 
         if cls._security_upgraded_keys:
@@ -368,7 +368,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             noun = "variable" if count == 1 else "variables"
             affected = ", ".join(visible)
             _emit_separator_once()
-            _rich_warning(
+            library_logger().warning(
                 f"Security improvement: {count} environment {noun} previously stored as "
                 f"plaintext in {cls._runtime_config_label} are now resolved at runtime.\n"
                 f"    Affected: {affected}\n"
@@ -390,7 +390,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             count = len(sorted_unset)
             noun = "variable" if count == 1 else "variables"
             _emit_separator_once()
-            _rich_warning(
+            library_logger().warning(
                 f"{cls._client_label} will resolve {count} environment {noun} at runtime "
                 f"that {'is' if count == 1 else 'are'} not currently set: "
                 f"{', '.join(sorted_unset)}.\n"
@@ -409,10 +409,10 @@ class CopilotClientAdapter(MCPClientAdapter):
             count = len(servers)
             noun = "server" if count == 1 else "servers"
             _emit_separator_once()
-            _rich_warning(
-                f"Deprecated: <VAR> placeholder syntax used in {count} {noun} "
-                f"({', '.join(servers)}). Migrate to ${{VAR}} in apm.yml. "
-                f"<VAR> support will be removed in v1.0.",
+            library_logger().warning(
+                deprecation_message(
+                    "mcp-angle-var", count=count, noun=noun, servers=", ".join(servers)
+                ),
                 symbol="warning",
             )
         cls._install_run_summary_emitted = True
@@ -452,7 +452,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         # but route values through the env-var translation/resolution pipeline
         # so secrets are not baked into the persisted config when the harness
         # supports runtime substitution (Copilot CLI).
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["command"] = raw["command"]
             if raw.get("cwd") is not None:
@@ -486,27 +486,15 @@ class CopilotClientAdapter(MCPClientAdapter):
             # URL error path when no remote is usable.
             remote = self._select_remote_with_url(remotes) or remotes[0]
 
-            # Validate transport_type from registry: default to "http" when
-            # missing/empty, raise ValueError for unsupported values. Mirrors
-            # the VS Code adapter check introduced in PR #656 so registry data
-            # with, e.g. transport_type="grpc" fails loudly instead of silently
-            # producing a garbage config.
-            transport = (remote.get("transport_type") or "").strip()
-            if not transport:
-                transport = "http"
-            elif transport not in ("sse", "http", "streamable-http"):
-                raise ValueError(
-                    f"Unsupported remote transport '{transport}' for Copilot. "
-                    f"Server: {server_info.get('name', 'unknown')}. "
-                    f"Supported transports: http, sse, streamable-http."
-                )
-
-            # Copilot CLI writes "type": "http" for all remote servers so
-            # authentication flows (headers) are consistent regardless of the
-            # underlying transport advertised by the registry.
+            server_name = server_info.get("name", "unknown")
+            transport = canonical_remote_transport(
+                remote, runtime_label="Copilot", server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
             config = {
-                "type": "http",
-                "url": (remote.get("url") or "").strip(),
+                **shape.render(transport, (remote.get("url") or "").strip()),
                 "tools": ["*"],  # Required by Copilot CLI specification
                 "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
             }

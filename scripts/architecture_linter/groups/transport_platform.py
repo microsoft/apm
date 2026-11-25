@@ -1,14 +1,45 @@
 """Thin rule catalog for transport/platform architecture checks."""
 
+from scripts.architecture_linter.checks.transport_archive_limits import (
+    RULES as _ARCHIVE_LIMIT_RULES,
+)
+from scripts.architecture_linter.checks.transport_auth_outcome import (
+    COLLECTORS as _AUTH_OUTCOME_COLLECTORS,
+)
+from scripts.architecture_linter.checks.transport_auth_outcome import (
+    RULES as _AUTH_OUTCOME_RULES,
+)
 from scripts.architecture_linter.checks.transport_auth_platform import (
     COLLECTORS as _AUTH_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_auth_platform import RULES as _AUTH_RULES
+from scripts.architecture_linter.checks.transport_authenticated_egress import (
+    RULES as _EGRESS_RULES,
+)
 from scripts.architecture_linter.checks.transport_cache_cleanup import RULES as _CLEANUP_RULES
 from scripts.architecture_linter.checks.transport_cache_identity import (
     COLLECTORS as _CACHE_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_cache_identity import RULES as _CACHE_RULES
+from scripts.architecture_linter.checks.transport_cached_repo_git import (
+    RULES as _CACHED_REPO_GIT_RULES,
+)
+from scripts.architecture_linter.checks.transport_checkout_verify import (
+    RULES as _CHECKOUT_VERIFY_RULES,
+)
+from scripts.architecture_linter.checks.transport_credential_value_rendering import (
+    RULES as _CREDENTIAL_RENDERING_RULES,
+)
+from scripts.architecture_linter.checks.transport_deploy_store import RULES as _DEPLOY_STORE_RULES
+from scripts.architecture_linter.checks.transport_egress_route import (
+    RULES as _EGRESS_ROUTE_RULES,
+)
+from scripts.architecture_linter.checks.transport_external_executables import (
+    RULES as _EXTERNAL_EXECUTABLE_RULES,
+)
+from scripts.architecture_linter.checks.transport_github_credential_class import (
+    RULES as _GITHUB_CREDENTIAL_CLASS_RULES,
+)
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
 )
@@ -18,17 +49,29 @@ from scripts.architecture_linter.checks.transport_ls_remote_tags import (
 from scripts.architecture_linter.checks.transport_ls_remote_tags import (
     RULES as _LS_REMOTE_TAG_RULES,
 )
+from scripts.architecture_linter.checks.transport_marketplace_catalog_credentials import (
+    RULES as _CATALOG_CREDENTIAL_RULES,
+)
 from scripts.architecture_linter.checks.transport_network_and_runtime import (
     COLLECTORS as _NETWORK_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_network_and_runtime import (
     RULES as _NETWORK_RULES,
 )
+from scripts.architecture_linter.checks.transport_origin_bounded_redirect import (
+    RULES as _REDIRECT_RULES,
+)
+from scripts.architecture_linter.checks.transport_proxy_http_token import (
+    RULES as _PROXY_HTTP_TOKEN_RULES,
+)
 from scripts.architecture_linter.checks.transport_revision_pins import (
     COLLECTORS as _REVISION_PIN_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_revision_pins import (
     RULES as _REVISION_PIN_RULES,
+)
+from scripts.architecture_linter.checks.transport_rmtree_link_safety import (
+    RULES as _RMTREE_LINK_RULES,
 )
 from scripts.architecture_linter.checks.transport_sparse_and_updates import (
     COLLECTORS as _SPARSE_COLLECTORS,
@@ -39,16 +82,31 @@ from scripts.architecture_linter.checks.transport_sparse_and_updates import (
 
 RULES = (
     _AUTH_RULES
+    + _AUTH_OUTCOME_RULES
+    + _EGRESS_RULES
+    + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
+    + _RMTREE_LINK_RULES
+    + _DEPLOY_STORE_RULES
+    + _CACHED_REPO_GIT_RULES
+    + _CHECKOUT_VERIFY_RULES
     + _SPARSE_RULES
     + _GITLAB_SPARSE_RULES
     + _REVISION_PIN_RULES
     + _LS_REMOTE_TAG_RULES
     + _NETWORK_RULES
+    + _REDIRECT_RULES
+    + _CREDENTIAL_RENDERING_RULES
+    + _ARCHIVE_LIMIT_RULES
+    + _GITHUB_CREDENTIAL_CLASS_RULES
+    + _PROXY_HTTP_TOKEN_RULES
+    + _CATALOG_CREDENTIAL_RULES
+    + _EXTERNAL_EXECUTABLE_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS
+    + _AUTH_OUTCOME_COLLECTORS
     + _CACHE_COLLECTORS
     + _SPARSE_COLLECTORS
     + _REVISION_PIN_COLLECTORS

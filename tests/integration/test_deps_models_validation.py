@@ -756,7 +756,10 @@ class TestDownloadVirtualFilePackage:
         )
         file_content = b"# Review prompt\nSome content."
         with (
-            patch.object(dl, "_resolve_commit_sha_for_ref", return_value="abc123"),
+            patch(
+                "apm_cli.cache.commit_reachability.admit_ref_commit",
+                return_value=("abc123" + "0" * 34,) * 2,
+            ),
             patch.object(dl, "download_raw_file", return_value=file_content),
         ):
             pkg_info = dl.download_virtual_file_package(dep, tmp_path / "out")
@@ -928,7 +931,7 @@ class TestTrySparseCheckout:
                 "apm_cli.deps.github_downloader.get_git_executable",
                 return_value=sensitive_path,
             ),
-            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=failed),
+            patch("subprocess.run", return_value=failed),
         ):
             ok = dl._try_sparse_checkout(dep, tmp_path / "clone", "skills/brand", "main")
 
@@ -992,19 +995,6 @@ class TestResolveGitReference:
 
 class TestCloseRepoAndDebug:
     """_close_repo and _debug utility functions."""
-
-    def test_close_repo_none_is_noop(self) -> None:
-        from apm_cli.deps.github_downloader import _close_repo
-
-        _close_repo(None)  # must not raise
-
-    def test_close_repo_calls_clear_cache_and_close(self) -> None:
-        from apm_cli.deps.github_downloader import _close_repo
-
-        mock_repo = MagicMock()
-        _close_repo(mock_repo)
-        mock_repo.git.clear_cache.assert_called_once()
-        mock_repo.close.assert_called_once()
 
     def test_debug_suppressed_when_env_not_set(self, capsys: pytest.CaptureFixture) -> None:
         from apm_cli.deps.github_downloader import _debug

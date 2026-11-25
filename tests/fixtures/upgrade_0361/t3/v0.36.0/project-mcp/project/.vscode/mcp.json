@@ -1,0 +1,33 @@
+{
+  "servers": {
+    "io.github.apm-fixture/heal-registry": {
+      "type": "http",
+      "url": "https://registry-sse.example.invalid/sse",
+      "headers": {}
+    },
+    "heal-sse": {
+      "type": "sse",
+      "url": "https://sse.example.invalid/sse",
+      "headers": {}
+    },
+    "heal-http": {
+      "type": "http",
+      "url": "https://http.example.invalid/mcp",
+      "headers": {}
+    },
+    "heal-streamable": {
+      "type": "streamable-http",
+      "url": "https://streamable.example.invalid/mcp",
+      "headers": {}
+    },
+    "heal-stdio": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "server.js"
+      ],
+      "cwd": "/srv/heal-fixture"
+    }
+  },
+  "inputs": []
+}

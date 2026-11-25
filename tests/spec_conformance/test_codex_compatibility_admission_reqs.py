@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from apm_cli.codex_plugins.client import CodexNativeClient, CodexNativeError
+from apm_cli.codex_plugins.client import CodexNativeClient
 from apm_cli.codex_plugins.snapshot import prepare_snapshot
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.drift import _make_integrators
@@ -53,7 +53,9 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         install_path=source,
         dependency_ref=DependencyReference.parse("owner/example"),
     )
-    ctx = SimpleNamespace(dry_run=False, codex_native_plugins={}, blocked_executables=[])
+    ctx = SimpleNamespace(
+        dry_run=False, frozen=False, codex_native_plugins={}, blocked_executables=[]
+    )
 
     def forbidden(*args: object, **kwargs: object) -> None:
         raise AssertionError("admission must not launch a native client")
@@ -66,6 +68,7 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         "managed_files": set(),
         "diagnostics": DiagnosticCollector(),
         "package_name": "owner/example",
+        "skill_subset": None,
         "scope": InstallScope.USER,
         "ctx": ctx,
     }
@@ -74,10 +77,13 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
 
 @pytest.mark.req("req-sc-009")
 def test_codex_consumer_denies_unapproved_manifest_referenced_mcp(codex_admission: tuple) -> None:
-    """The real approval owner must deny referenced native MCP before queueing."""
+    """The real approval owner must deny referenced native MCP before queueing.
+
+    An unapproved bundle is parked (#4154): nothing is queued or deployed.
+    """
     package, home, options, ctx = codex_admission
-    with pytest.raises(CodexNativeError, match="allowExecutables"):
-        integrate_package_primitives(package, home, allow_executables={}, **options)
+    result = integrate_package_primitives(package, home, allow_executables={}, **options)
+    assert not result.get("native_plugin")
     assert ctx.codex_native_plugins == {}
     assert list(home.iterdir()) == []
 

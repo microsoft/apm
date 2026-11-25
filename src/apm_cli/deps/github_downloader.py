@@ -12,13 +12,14 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
-import git  # noqa: F401  -- re-exported; tests patch apm_cli.deps.github_downloader.git
 import requests
-from git import RemoteProgress, Repo
-from git.exc import GitCommandError
 
+from ..cache.cached_repo import validate_cached_links
+from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
+from ..cache.commit_reachability import name_a_lost_admitted_commit
+from ..cache.git_cache import dir_size, raise_if_tampered
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -45,7 +46,6 @@ from ..utils.git_sparse import (
     apply_sparse_cone,
     materialize_tracked_symlinks,
     sparse_checkout_active,
-    validate_materialized_symlinks,
 )
 from ..utils.github_host import (
     default_host,
@@ -54,11 +54,13 @@ from ..utils.github_host import (
 from .bare_cache import (
     bare_clone_with_fallback,
     clone_with_fallback,
+    fetch_commit_worktree,
     fetch_sha_into_bare,
     materialize_from_bare,
 )
-from .carried_license import carry_licenses, read_repository_license
+from .carried_license import carry_licenses, checked_license
 from .download_strategies import DownloadDelegate
+from .git_lazy import bind_git_name, git_command_error
 from .git_remote_ops import (
     parse_ls_remote_output,
     semver_sort_key,
@@ -72,6 +74,9 @@ from .transport_selection import (
 )
 from .virtual_file import materialize_virtual_file_package
 
+if TYPE_CHECKING:
+    from git import Repo
+
 _log = logging.getLogger(__name__)
 
 # Public docs anchor for the cross-protocol fallback caveat surfaced by the
@@ -79,7 +84,7 @@ _log = logging.getLogger(__name__)
 # `--allow-protocol-fallback` section (Starlight site defined in
 # docs/astro.config.mjs).
 _PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
+    "https://microsoft.github.io/apm/consumer/install-packages/#transport-selection"
 )
 
 
@@ -110,91 +115,88 @@ def _rmtree(path) -> None:
     robust_rmtree(path, ignore_errors=True)
 
 
-def _dir_size_bytes(path: Path) -> int:
-    """Return the total on-disk size of a directory tree in bytes.
+def _git_progress_reporter_class() -> type:
+    """Return ``GitProgressReporter``, defining it (and importing GitPython) on first use."""
+    cls = globals().get("GitProgressReporter")
+    if cls is not None:
+        return cls
+    RemoteProgress = bind_git_name(globals(), "RemoteProgress")
 
-    Best-effort: silently skips files that disappear or cannot be
-    stat-ed mid-walk (e.g. transient .git lock files). Uses ``lstat``
-    so symlinks contribute the size of the link itself, never the
-    target -- this keeps the measurement bounded to the directory
-    tree and matches :func:`apm_cli.cache.git_cache._dir_size`. Used
-    only for verbose-mode perf diagnostics (#1433) -- never gates
-    behavior.
-    """
-    total = 0
-    try:
-        for dirpath, _dirnames, filenames in os.walk(str(path)):
-            for fname in filenames:
-                fpath = os.path.join(dirpath, fname)
-                try:
-                    total += os.lstat(fpath).st_size
-                except OSError:
-                    continue
-    except OSError:
-        return 0
-    return total
+    class GitProgressReporter(RemoteProgress):
+        """Report git clone progress to Rich Progress."""
+
+        def __init__(self, progress_task_id=None, progress_obj=None, package_name=None):
+            super().__init__()
+            self.task_id = progress_task_id
+            self.progress = progress_obj
+            self.package_name = package_name  # Keep consistent name throughout download
+            self.last_op = None
+            self.disabled = False  # Flag to stop updates after download completes
+
+        def update(self, op_code, cur_count, max_count=None, message=""):
+            """Called by GitPython during clone operations."""
+            if not self.progress or self.task_id is None or self.disabled:
+                return
+
+            # Keep the package name consistent - don't change description to git operations
+            # This keeps the UI clean and scannable
+
+            # Update progress bar naturally - let it reach 100%
+            if max_count and max_count > 0:
+                # Determinate progress (we have total count)
+                self.progress.update(
+                    self.task_id,
+                    completed=cur_count,
+                    total=max_count,
+                    # Note: We don't update description - keep the original package name
+                )
+            else:
+                # Indeterminate progress (just show activity)
+                self.progress.update(
+                    self.task_id,
+                    total=100,  # Set fake total for indeterminate tasks
+                    completed=min(cur_count, 100) if cur_count else 0,
+                    # Note: We don't update description - keep the original package name
+                )
+
+            self.last_op = cur_count
+
+        def _get_op_name(self, op_code):
+            """Convert git operation code to human-readable name."""
+            from git import RemoteProgress
+
+            # Extract operation type from op_code
+            if op_code & RemoteProgress.COUNTING:
+                return "Counting objects"
+            elif op_code & RemoteProgress.COMPRESSING:
+                return "Compressing objects"
+            elif op_code & RemoteProgress.WRITING:
+                return "Writing objects"
+            elif op_code & RemoteProgress.RECEIVING:
+                return "Receiving objects"
+            elif op_code & RemoteProgress.RESOLVING:
+                return "Resolving deltas"
+            elif op_code & RemoteProgress.FINDING_SOURCES:
+                return "Finding sources"
+            elif op_code & RemoteProgress.CHECKING_OUT:
+                return "Checking out files"
+            else:
+                return "Cloning"
+
+    GitProgressReporter.__qualname__ = "GitProgressReporter"
+    globals()["GitProgressReporter"] = GitProgressReporter
+    return GitProgressReporter
 
 
-class GitProgressReporter(RemoteProgress):
-    """Report git clone progress to Rich Progress."""
-
-    def __init__(self, progress_task_id=None, progress_obj=None, package_name=None):
-        super().__init__()
-        self.task_id = progress_task_id
-        self.progress = progress_obj
-        self.package_name = package_name  # Keep consistent name throughout download
-        self.last_op = None
-        self.disabled = False  # Flag to stop updates after download completes
-
-    def update(self, op_code, cur_count, max_count=None, message=""):
-        """Called by GitPython during clone operations."""
-        if not self.progress or self.task_id is None or self.disabled:
-            return
-
-        # Keep the package name consistent - don't change description to git operations
-        # This keeps the UI clean and scannable
-
-        # Update progress bar naturally - let it reach 100%
-        if max_count and max_count > 0:
-            # Determinate progress (we have total count)
-            self.progress.update(
-                self.task_id,
-                completed=cur_count,
-                total=max_count,
-                # Note: We don't update description - keep the original package name
-            )
-        else:
-            # Indeterminate progress (just show activity)
-            self.progress.update(
-                self.task_id,
-                total=100,  # Set fake total for indeterminate tasks
-                completed=min(cur_count, 100) if cur_count else 0,
-                # Note: We don't update description - keep the original package name
-            )
-
-        self.last_op = cur_count
-
-    def _get_op_name(self, op_code):
-        """Convert git operation code to human-readable name."""
-        from git import RemoteProgress
-
-        # Extract operation type from op_code
-        if op_code & RemoteProgress.COUNTING:
-            return "Counting objects"
-        elif op_code & RemoteProgress.COMPRESSING:
-            return "Compressing objects"
-        elif op_code & RemoteProgress.WRITING:
-            return "Writing objects"
-        elif op_code & RemoteProgress.RECEIVING:
-            return "Receiving objects"
-        elif op_code & RemoteProgress.RESOLVING:
-            return "Resolving deltas"
-        elif op_code & RemoteProgress.FINDING_SOURCES:
-            return "Finding sources"
-        elif op_code & RemoteProgress.CHECKING_OUT:
-            return "Checking out files"
-        else:
-            return "Cloning"
+def __getattr__(name: str) -> Any:
+    # GitPython names stay module attributes (stable patch targets such as
+    # ``apm_cli.deps.github_downloader.Repo``) but import only on first use, so
+    # building a downloader on a no-op install never loads GitPython.
+    if name in ("git", "Repo", "RemoteProgress", "GitCommandError"):
+        return bind_git_name(globals(), name)
+    if name == "GitProgressReporter":
+        return _git_progress_reporter_class()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class GitHubPackageDownloader:
@@ -315,7 +317,7 @@ class GitHubPackageDownloader:
         backend = backend_for(dep_ref, self.auth_resolver)
         if backend.is_github_family or backend.kind == "ado":
             return repository_url
-        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref, token="")
+        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref)
 
     def _cache_git_env(
         self, dep_ref: DependencyReference, remote_url: str | None = None
@@ -348,8 +350,6 @@ class GitHubPackageDownloader:
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
             )
         if auth_ctx is None:
             auth_ctx = self.auth_resolver.resolve_for_remote(
@@ -400,6 +400,7 @@ class GitHubPackageDownloader:
                     locked_sha=locked_sha,
                     env=attempt_env,
                     sparse_paths=sparse_paths,
+                    label=dep_ref.get_unique_key(),
                 )
 
             checkout = self.auth_resolver.try_with_fallback(
@@ -424,6 +425,7 @@ class GitHubPackageDownloader:
                     remote_url=None if cache_remote == repository_url else cache_remote,
                 ),
                 sparse_paths=sparse_paths,
+                label=dep_ref.get_unique_key(),
             )
         resolver = getattr(self, "_tiered_resolver", None)
         if (
@@ -649,8 +651,10 @@ class GitHubPackageDownloader:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
+        extra = {} if redirect_base is None else {"redirect_base": redirect_base}
         return self._strategies.resilient_get(
             url,
             headers,
@@ -659,6 +663,7 @@ class GitHubPackageDownloader:
             stream=stream,
             retry_throttles=retry_throttles,
             allow_netrc=allow_netrc,
+            **extra,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:
@@ -669,18 +674,11 @@ class GitHubPackageDownloader:
         self,
         repo_ref: str,
         use_ssh: bool = False,
-        dep_ref: DependencyReference = None,
-        token: str | None = None,
-        auth_scheme: str = "basic",
+        *,
+        dep_ref: DependencyReference,
     ) -> str:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.build_repo_url(
-            repo_ref,
-            use_ssh=use_ssh,
-            dep_ref=dep_ref,
-            token=token,
-            auth_scheme=auth_scheme,
-        )
+        return self._strategies.build_repo_url(repo_ref, use_ssh=use_ssh, dep_ref=dep_ref)
 
     def _clone_with_fallback(
         self,
@@ -690,7 +688,7 @@ class GitHubPackageDownloader:
         dep_ref: DependencyReference = None,
         verbose_callback=None,
         **clone_kwargs,
-    ) -> Repo:
+    ) -> "Repo":
         """Thin delegate to :func:`bare_cache.clone_with_fallback` (kept on the class so test patches still work)."""
         return clone_with_fallback(
             self._execute_transport_plan,
@@ -699,7 +697,7 @@ class GitHubPackageDownloader:
             progress_reporter=progress_reporter,
             dep_ref=dep_ref,
             verbose_callback=verbose_callback,
-            repo_cls=Repo,
+            repo_cls=bind_git_name(globals(), "Repo"),
             **clone_kwargs,
         )
 
@@ -783,6 +781,23 @@ class GitHubPackageDownloader:
             known_sha=known_sha,
             sparse_paths=sparse_paths,
         )
+
+    def _require_commit_in_bare(
+        self, bare_path: Path, sha: str | None, dep_ref: "DependencyReference"
+    ) -> None:
+        """Fetch admitted full commit *sha* into a cached bare that predates it (#5199).
+
+        A no-op for a ref that is not a full commit, or when the bare holds it.
+        Raises ``RuntimeError`` when it cannot be fetched, so no other commit is
+        ever checked out in its place.
+        """
+        if not sha or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            return
+        if not self._fetch_sha_into_bare(bare_path, sha, dep_ref=dep_ref):
+            raise RuntimeError(
+                f"The cached clone of {dep_ref.repo_url} does not hold the admitted "
+                f"commit {sha[:12]} and it could not be fetched."
+            )
 
     def _fetch_sha_into_bare(
         self,
@@ -1058,14 +1073,16 @@ class GitHubPackageDownloader:
         # Determine the ref to use
         ref = dep_ref.reference or "main"
 
-        # Resolve the commit SHA cheaply BEFORE the file download. This is one
-        # short HTTP call (Accept: application/vnd.github.sha returns just the
-        # 40-char SHA in the body) and the result is propagated into PackageInfo
-        # so the lockfile and per-dep header can render the SHA suffix instead
-        # of just the ref name. On non-GitHub hosts or any failure this returns
-        # None and we fall back to ref-name only -- the install never fails on
-        # SHA resolution.
-        resolved_commit = self._resolve_commit_sha_for_ref(dep_ref, ref)
+        # Resolve and admit the commit BEFORE the file download. A declared
+        # ref is fetched by its admitted commit, never by name, and the commit
+        # is propagated into PackageInfo so the lockfile records it. A ref
+        # that names no origin branch or tag, or an unreachable commit,
+        # raises CommitNotReachableError. An undeclared ref keeps the
+        # default-branch fallback and records the commit when the cheap
+        # commits API returns one.
+        from ..cache.commit_reachability import admit_ref_commit
+
+        fetch_ref, resolved_commit = admit_ref_commit(self, dep_ref, ref)
 
         # Update progress - downloading
         if progress_obj and progress_task_id is not None:
@@ -1076,7 +1093,7 @@ class GitHubPackageDownloader:
         # sparse-Git fallback and use its observed commit for lock provenance.
         api_throttle: GitHubThrottleError | None = None
         try:
-            file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
+            file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, fetch_ref)
         except GitHubThrottleError as throttle:
             api_throttle = throttle
         except RuntimeError as e:
@@ -1088,7 +1105,7 @@ class GitHubPackageDownloader:
             fetched = self._strategies.download_github_file_via_throttle_fallback(
                 dep_ref,
                 dep_ref.virtual_path,
-                ref,
+                fetch_ref,
                 api_throttle,
             )
             file_content = fetched.content
@@ -1166,7 +1183,6 @@ class GitHubPackageDownloader:
                     dep_ref.repo_url,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
                 )
                 setup_env = self.auth_resolver.build_public_github_anonymous_git_env(
                     base_env=self.git_env,
@@ -1196,7 +1212,6 @@ class GitHubPackageDownloader:
                             dep_ref.repo_url,
                             use_ssh=False,
                             dep_ref=dep_ref,
-                            token="",
                         )
                         winning_url = authenticated_url
                     git_env = git_network_env(
@@ -1264,13 +1279,10 @@ class GitHubPackageDownloader:
 
             # Resolve per-dependency auth via AuthResolver.
             dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
             auth_url = self._build_repo_url(
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=dep_auth_scheme,
             )
             if dep_auth_ctx is not None:
                 env = self.auth_resolver.git_env_for_remote(
@@ -1384,6 +1396,9 @@ class GitHubPackageDownloader:
 
         # WS3 (#1116): try persistent cross-run cache first.
         # Build a canonical URL for cache key derivation.
+        from ..cache.commit_reachability import admit_fetch_ref
+
+        ref = admit_fetch_ref(self, dep_ref, ref)  # before any cache, bare or clone fetch
         _persistent_cache = self.persistent_git_cache
         _persistent_checkout: Path | None = None
         _resolved_sha_for_cache: str | None = None
@@ -1394,9 +1409,9 @@ class GitHubPackageDownloader:
                 # calling get_checkout so the cache skips its internal
                 # ls-remote. Same pattern as the non-subdir path at
                 # line ~1604 which passes locked_sha=resolved.
-                try:
-                    _resolved = self.resolve_git_reference(dep_ref)
-                    _resolved_sha_for_cache = _resolved.resolved_commit
+                try:  # An admitted ref is already its commit; never resolve it again.
+                    _resolved = None if ref else self.resolve_git_reference(dep_ref)
+                    _resolved_sha_for_cache = _resolved.resolved_commit if _resolved else ref
                 except Exception:
                     _resolved_sha_for_cache = None
                 # Sparse-cone (#1433): keying the persistent shard by
@@ -1413,7 +1428,9 @@ class GitHubPackageDownloader:
                     locked_sha=_resolved_sha_for_cache,
                     sparse_paths=[subdir_path],
                 )
-            except Exception:
+            except Exception as exc:
+                # A read-only reader reports a tampered cache instead of cloning past it.
+                raise_if_tampered(exc)
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
 
@@ -1425,15 +1442,15 @@ class GitHubPackageDownloader:
 
         temp_dir = None
         shared_bare_path: Path | None = None
-        # WS2 path resolves the SHA from the BARE so we don't pay
-        # rev-parse twice (or open the working-tree Repo unnecessarily).
-        # See design.md sec 5.5: _ws2_resolved_commit threads the SHA past
-        # the generic Repo(temp_clone_path).head.commit.hexsha block below.
+        # WS2 resolves the SHA from the bare and a persistent hit from its
+        # verified shard, so neither re-reads the working tree's mutable HEAD
+        # (design.md sec 5.5: this threads the SHA past the block below).
         _ws2_resolved_commit: str | None = None
         try:
             if _persistent_checkout is not None:
                 # WS3: persistent cache hit -- use the cached checkout directly.
                 temp_clone_path = _persistent_checkout
+                _ws2_resolved_commit = _persistent_checkout.parent.name
                 if _perf_logger is not None and getattr(_perf_logger, "verbose", False):
                     _sha_short = (
                         (ref or "")[:12] if ref and re.match(r"^[a-f0-9]{7,40}$", ref) else ""
@@ -1445,12 +1462,13 @@ class GitHubPackageDownloader:
                         sparse_paths=[subdir_path],
                     )
                     _perf_logger.materialize_result(
+                        _dep_display,
                         sparse_applied=sparse_checkout_active(
                             "git",
                             _persistent_checkout,
                             env=self._git_env_dict(),
                         ),
-                        consumer_size_bytes=_dir_size_bytes(_persistent_checkout),
+                        consumer_size_bytes=dir_size(_persistent_checkout),
                     )
             elif use_shared:
                 # WS2 (#1126): shared cache holds BARE clones keyed by
@@ -1470,6 +1488,8 @@ class GitHubPackageDownloader:
                         ref=ref,
                         is_commit_sha=bool(is_commit_sha),
                     )
+                    # Under the cache lock, before the bare is shared (#5199).
+                    self._require_commit_in_bare(bare_target, ref, dep_ref)
 
                 def _shared_bare_fetch_fn(existing_bare: Path, ref_or_sha: str) -> bool:
                     # get_or_clone passes `ref` here; for SHA pins it is the SHA.
@@ -1541,12 +1561,13 @@ class GitHubPackageDownloader:
                     ) from e
                 if _perf_logger is not None and getattr(_perf_logger, "verbose", False):
                     _perf_logger.materialize_result(
+                        _dep_display,
                         sparse_applied=sparse_checkout_active(
                             "git",
                             temp_clone_path,
                             env=self._git_env_dict(),
                         ),
-                        consumer_size_bytes=_dir_size_bytes(temp_clone_path),
+                        consumer_size_bytes=dir_size(temp_clone_path),
                     )
             else:
                 # Legacy per-dep clone path (no shared cache).
@@ -1571,7 +1592,9 @@ class GitHubPackageDownloader:
 
                     package_display_name = subdir_path.split("/")[-1]
                     progress_reporter = (
-                        GitProgressReporter(progress_task_id, progress_obj, package_display_name)
+                        _git_progress_reporter_class()(
+                            progress_task_id, progress_obj, package_display_name
+                        )
                         if progress_task_id and progress_obj
                         else None
                     )
@@ -1634,12 +1657,8 @@ class GitHubPackageDownloader:
 
             if not source_subdir.is_dir():
                 raise RuntimeError(f"Path '{subdir_path}' is not a directory")
-            validate_materialized_symlinks(
-                "git",
-                temp_clone_path,
-                [subdir_path],
-                env=self._git_env_dict(),
-            )
+            _env, _scope = self._git_env_dict(), [subdir_path]
+            validate_cached_links(temp_clone_path, _scope, _env)
 
             # Create target directory
             target_path.mkdir(parents=True, exist_ok=True)
@@ -1651,18 +1670,16 @@ class GitHubPackageDownloader:
 
             # Copy subdirectory contents to target (retry on transient
             # file-lock errors caused by antivirus scanning on Windows).
-            from ..utils.file_ops import robust_copy2, robust_copytree
+            from ..utils.file_ops import robust_copy_entry
 
             for item in source_subdir.iterdir():
-                src = source_subdir / item.name
-                dst = target_path / item.name
-                if src.is_dir():
-                    robust_copytree(src, dst)
-                else:
-                    robust_copy2(src, dst)
+                robust_copy_entry(source_subdir / item.name, target_path / item.name)
+            require_verified_copy(
+                target_path, temp_clone_path, _ws2_resolved_commit, subdir_path, _env
+            )
             # Sparse cones keep ancestor-directory files, so read the repository
             # licence before cleanup; it is written after validation (#3556).
-            repository_license = read_repository_license(temp_clone_path, subdir_path)
+            repository_license = checked_license(temp_clone_path, subdir_path, _ws2_resolved_commit)
 
             # Capture commit SHA; close the Repo object immediately so its file
             # handles are released before _rmtree() runs in the finally block.
@@ -1717,8 +1734,8 @@ class GitHubPackageDownloader:
 
         # Get the resolved reference for metadata
         resolved_ref = ResolvedReference(
-            original_ref=ref or "default",
-            ref_name=ref or "default",
+            original_ref=dep_ref.reference or "default",
+            ref_name=dep_ref.reference or "default",
             ref_type=GitReferenceType.BRANCH,
             resolved_commit=resolved_commit,
         )
@@ -1783,6 +1800,7 @@ class GitHubPackageDownloader:
             progress_obj=progress_obj,
         )
 
+    @name_a_lost_admitted_commit
     def download_package(
         self,
         repo_ref: Union[str, "DependencyReference"],
@@ -1868,8 +1886,10 @@ class GitHubPackageDownloader:
                 "Set PROXY_REGISTRY_URL or use explicit Artifactory FQDN syntax."
             )
 
-        # Regular package download (existing logic)
-        resolved_ref = self.resolve_git_reference(dep_ref)
+        # Regular package download: a declared commit is admitted before resolution can fetch it.
+        from ..cache.commit_reachability import admit_and_resolve, admitted_full_commit
+
+        resolved_ref = admit_and_resolve(self, dep_ref)
 
         # Create target directory if it doesn't exist
         target_path.mkdir(parents=True, exist_ok=True)
@@ -1897,18 +1917,14 @@ class GitHubPackageDownloader:
                 )
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
-                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
-                from ..utils.file_ops import robust_copy2, robust_copytree
+                validate_cached_links(_cached, None, self._git_env_dict())
+                from ..utils.file_ops import robust_copy_entry
 
                 for item in _cached.iterdir():
                     if item.name == ".git":
                         continue
-                    src = _cached / item.name
-                    dst = target_path / item.name
-                    if src.is_dir():
-                        robust_copytree(src, dst)
-                    else:
-                        robust_copy2(src, dst)
+                    robust_copy_entry(_cached / item.name, target_path / item.name)
+                require_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)
@@ -1946,7 +1962,8 @@ class GitHubPackageDownloader:
                 if target_path.exists():
                     _rmtree(target_path)
                 raise
-            except Exception:
+            except Exception as exc:
+                raise_if_tampered(exc)
                 # Any cache failure -> fall back to network clone.
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
@@ -1958,15 +1975,12 @@ class GitHubPackageDownloader:
         package_display_name = repo_segments[-1] if repo_segments else dep_ref.repo_url
 
         try:
-            # Clone the repository using fallback authentication methods
-            # Use shallow clone for performance if we have a specific commit
+            progress_reporter = (
+                _git_progress_reporter_class()(progress_task_id, progress_obj, package_display_name)
+                if progress_task_id and progress_obj
+                else None
+            )
             if resolved_ref.ref_type == GitReferenceType.COMMIT:
-                # For commits, we need to clone and checkout the specific commit
-                progress_reporter = (
-                    GitProgressReporter(progress_task_id, progress_obj, package_display_name)
-                    if progress_task_id and progress_obj
-                    else None
-                )
                 self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,
@@ -1975,13 +1989,18 @@ class GitHubPackageDownloader:
                     verbose_callback=verbose_callback,
                 )
                 checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
-            else:
-                # For branches and tags, we can use shallow clone
-                progress_reporter = (
-                    GitProgressReporter(progress_task_id, progress_obj, package_display_name)
-                    if progress_task_id and progress_obj
-                    else None
+            elif dep_ref.reference or admitted_full_commit(resolved_ref):
+                # A named ref (#5138) or the default branch (#5199): its admitted
+                # commit, fetched shallowly by commit
+                fetch_commit_worktree(
+                    self._execute_transport_plan,
+                    dep_ref.repo_url,
+                    target_path,
+                    dep_ref=dep_ref,
+                    sha=resolved_ref.resolved_commit,
+                    verbose_callback=verbose_callback,
                 )
+            else:
                 self._clone_with_fallback(
                     dep_ref.repo_url,
                     target_path,
@@ -1998,13 +2017,14 @@ class GitHubPackageDownloader:
 
             # Links become their Git-object content while .git exists (#3457).
             materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
+            require_verified_checkout(target_path, resolved_ref.resolved_commit)
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"
             if git_dir.exists():
                 _rmtree(git_dir)
 
-        except (GitCommandError, subprocess.CalledProcessError) as e:
+        except (git_command_error(), subprocess.CalledProcessError) as e:
             # Check if this might be a private repository access issue
             if "Authentication failed" in str(e) or "remote: Repository not found" in str(e):
                 error_msg = f"Failed to clone repository {dep_ref.repo_url}. "

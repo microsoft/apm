@@ -10,12 +10,18 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
+from ...core.remediation import DEPENDENCY_ALIAS_INVALID, PACKAGE_DIRECTORY_COLLISION
+from ...utils.github_host import default_host
 from ...utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .object_fields import parse_alias_override
 
 if TYPE_CHECKING:
     from ...install.resolution_staging import ResolutionStagingSession
     from .reference import DependencyReference
+
+_DUPLICATE_PACKAGE_DIRECTORIES = PACKAGE_DIRECTORY_COLLISION.bind(
+    fix="inspect the duplicates under apm_modules/ and keep the intended package"
+)
 
 
 class MaterializationPathCollisionError(ValueError):
@@ -123,13 +129,17 @@ def build_materialization_path(
         except PathTraversalError as exc:
             raise PathTraversalError(
                 f"Invalid dependency alias {alias!r}: unsafe destination {result}. "
-                "Inspect the alias path without removing its target, choose a separate "
-                "package directory, and rerun apm install."
+                + DEPENDENCY_ALIAS_INVALID.bind(
+                    fix="inspect the alias path without removing its target and choose "
+                    "a separate package directory for the alias in apm.yml"
+                ).sentence()
             ) from exc
         if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):
             raise PathTraversalError(
                 f"Invalid dependency alias {alias!r}: destination resolves to apm_modules itself. "
-                "Choose a separate package directory and rerun apm install."
+                + DEPENDENCY_ALIAS_INVALID.bind(
+                    fix="choose a separate package directory for the alias in apm.yml"
+                ).sentence()
             )
         return result
 
@@ -211,6 +221,67 @@ def nested_materialization_pairs(
         for inner_path, inner in located
         if outer_path in inner_path.parents
     ]
+
+
+class MaterializationSlots:
+    """Claim ``apm_modules`` directories so distinct packages never share one.
+
+    The layout is host-blind, so ``owner/repo`` from two hosts (or two
+    dependencies with the same ``alias:``) map to one directory. Resolution
+    claims each package's directory before fetching it; a second, distinct
+    identity on a claimed directory is a manifest error, not a race (#3696).
+    Local sources keep sharing their slots (#3401): two local claimants are
+    never a collision. Comparison is case-folded like the nesting check.
+    """
+
+    def __init__(self, apm_modules_dir: Path) -> None:
+        self._modules_dir = apm_modules_dir
+        self._claims: dict[str, list[tuple[DependencyReference, DependencyReference | None]]] = {}
+
+    def claim(
+        self,
+        dependency: DependencyReference,
+        parent: DependencyReference | None = None,
+    ) -> str | None:
+        """Claim *dependency*'s directory; describe a distinct package already on it.
+
+        *parent* is the declaring package, or ``None`` for a root declaration.
+        """
+        try:
+            path = build_materialization_path(dependency, self._modules_dir)
+        except (ValueError, PathTraversalError):
+            return None
+        claimants = self._claims.setdefault(path.as_posix().casefold(), [])
+        identity = dependency.get_unique_key()
+        is_local = dependency.ownership_reference.is_local
+        for other, other_parent in claimants:
+            if other.get_unique_key() == identity:
+                return None
+            if not (is_local and other.ownership_reference.is_local):
+                relative = PurePosixPath(
+                    "apm_modules", *_relative_parts(path, self._modules_dir)
+                ).as_posix()
+                return (
+                    f"{_declaration_label(other, other_parent)} and "
+                    f"{_declaration_label(dependency, parent)} are different packages "
+                    f"that would both install to {relative}. Remove one of them, or set "
+                    "'alias:' on one so it installs to its own directory."
+                )
+        claimants.append((dependency, parent))
+        return None
+
+
+def _declaration_label(dependency: DependencyReference, parent: DependencyReference | None) -> str:
+    """Return a host-qualified declaration label with its declaring parent."""
+    dependency = dependency.ownership_reference
+    label = dependency.get_identity()
+    if not dependency.is_local:
+        host = (dependency.host or default_host()).lower()
+        if not label.lower().startswith((f"{host}/", f"{host}:")):
+            label = f"{host}/{label}"
+    if parent is not None:
+        label = f"{label} (required by {parent.ownership_reference.get_identity()})"
+    return label
 
 
 def _relative_parts(desired: Path, apm_modules_dir: Path) -> tuple[str, ...]:
@@ -328,8 +399,7 @@ def find_case_equivalent_materialization_path(
             rendered = ", ".join(match.as_posix() for match in matches)
             raise MaterializationPathCollisionError(
                 "Found multiple package directories for one dependency: "
-                f"{rendered}. Inspect the duplicates under apm_modules/, "
-                "keep the intended package, and run 'apm install' again."
+                f"{rendered}. {_DUPLICATE_PACKAGE_DIRECTORIES.sentence()}"
             )
         return apm_modules_dir.joinpath(*matches[0].parts) if matches else None
 
@@ -349,8 +419,7 @@ def find_case_equivalent_materialization_path(
             rendered = ", ".join(str(match) for match in matches)
             raise MaterializationPathCollisionError(
                 "Found multiple package directories for one dependency: "
-                f"{rendered}. Inspect the duplicates under apm_modules/, "
-                "keep the intended package, and run 'apm install' again."
+                f"{rendered}. {_DUPLICATE_PACKAGE_DIRECTORIES.sentence()}"
             )
         if not matches:
             return None
@@ -413,8 +482,10 @@ def _relocate_case_components(
                 if index == leaf:
                     raise MaterializationPathCollisionError(
                         "Package directory casing collides between "
-                        f"{source} and {target}. Inspect both directories, "
-                        "keep the intended package, and run 'apm install' again."
+                        f"{source} and {target}. "
+                        + PACKAGE_DIRECTORY_COLLISION.bind(
+                            fix="inspect both directories and keep the intended package"
+                        ).sentence()
                     )
                 source_parent, target_parent = source, target
                 continue

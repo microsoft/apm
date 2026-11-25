@@ -1,0 +1,76 @@
+"""Gate removal rows for KIND mcp: p-exec's stdio MCP server entry (#4107).
+
+The entry lives in a shared config file (``.mcp.json``, or
+``~/.copilot/mcp-config.json`` at user scope), so the removal edits the file
+instead of deleting it: the replay asserts the entry itself is gone, and the
+obligation's snapshot fact is that the other scope keeps its bytes.
+"""
+
+from __future__ import annotations
+
+from tests.lifecycle.known import KnownFailure
+from tests.lifecycle.security.gate_slices import GateRow, GateSlice
+
+_PROJECT = ({"project": (".mcp.json",)}, {"home": (".copilot", ".claude")})
+_USER = ({"home": (".copilot/mcp-config.json",)}, {"project": (".mcp.json", ".github")})
+_ALL = (
+    "definition-changed",
+    "local-deny",
+    "org-deny",
+    "org-enables-gate",
+    "policy-dep-deny",
+    "revoke-approval",
+)
+_LOCAL = ("definition-changed", "local-deny", "revoke-approval")
+_BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
+_XFAIL: dict[str, KnownFailure] = {}
+# A bundle approval pins the whole bundle digest: a changed definition reads as
+# a bundle that is not approved yet.
+_ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}
+_SMOKE = {"G|update|local-deny|mcp"}
+
+# G path -> (changes with a row, (surface files, other-scope prefixes))
+_MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
+# User scope discovers no org policy (docs/src/content/docs/enterprise/apm-policy.mdx;
+# core/scope.policy_discovery_uses_git_remote); user-scope org policy is #3703.
+_USER_UNGOVERNED = "user scope is not governed by org policy (#3703)"
+_UNGOVERNED = {
+    f"G|marketplace-install|{change}|mcp": _USER_UNGOVERNED
+    for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+}
+
+_PATHS = {
+    "install": (_ALL, _PROJECT),
+    "frozen": (_ALL, _PROJECT),
+    "update": (_ALL, _PROJECT),
+    "uninstall-prune-rebuild": (_ALL, _PROJECT),
+    "audit-ci": (_ALL, _PROJECT),
+    "dry-run": (("local-deny", "org-deny", "revoke-approval"), _PROJECT),
+    "install-g": (_LOCAL, _USER),
+    "frozen-g": (_LOCAL, _USER),
+    # gate_paths/bundle_install.py: the MCP server of the local bundle p-exec:bundle.
+    "bundle-install": (_BUNDLE, _PROJECT),
+    # gate_paths/marketplace_install.py: p-exec@lifecycle-market at user scope. A
+    # git-served package cannot be redefined in place: definition-changed is residual.
+    "marketplace-install": (_MARKETPLACE, _USER),
+}
+
+SLICE = GateSlice(
+    kind="mcp",
+    package="p-exec",
+    target="copilot",
+    rows=tuple(
+        GateRow(
+            f"G|{path}|{change}|mcp",
+            surface=surface,
+            shared=True,
+            announce=_ANNOUNCE.get(f"G|{path}|{change}|mcp"),
+            unchanged=unchanged,
+            smoke=f"G|{path}|{change}|mcp" in _SMOKE,
+            xfail=_XFAIL.get(f"G|{path}|{change}|mcp"),
+            ungoverned=_UNGOVERNED.get(f"G|{path}|{change}|mcp", ""),
+        )
+        for path, (changes, (surface, unchanged)) in _PATHS.items()
+        for change in changes
+    ),
+)

@@ -43,9 +43,13 @@ def _runner(apm_binary_path: Path) -> ApmLifecycleRunner:
     )
 
 
-def _instruction(name: str) -> str:
-    """Return a valid observable instruction source document."""
-    return f"---\napplyTo: '**'\ndescription: Lifecycle contract fixture {name}\n---\n# {name}\n"
+def _instruction(name: str, apply_to: str = "**") -> str:
+    """Return a valid observable instruction source document.
+
+    Claude loads ``**`` instructions from compiled AGENTS.md (#3939); a
+    path-scoped ``apply_to`` keeps the ``.claude/rules/`` file observable.
+    """
+    return f"---\napplyTo: '{apply_to}'\ndescription: Lifecycle contract fixture {name}\n---\n# {name}\n"
 
 
 def _dependency_rows(project_root: Path) -> dict[str, dict[str, object]]:
@@ -103,6 +107,7 @@ def _create_git_lifecycle_project(
     mcp_dependencies: tuple[dict[str, object], ...] = (),
     lsp_dependencies: tuple[dict[str, object], ...] = (),
     targets: tuple[str, ...] = ("copilot",),
+    instruction_apply_to: str = "**",
 ) -> _GitLifecycleProject:
     """Create an isolated consumer and real local-Git configuration package."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
@@ -116,7 +121,7 @@ def _create_git_lifecycle_project(
     package_factory.add_instruction(
         source_package,
         f"{source_name}-instruction",
-        _instruction(f"{source_name}-instruction"),
+        _instruction(f"{source_name}-instruction", instruction_apply_to),
     )
     repositories = LocalGitRepositoryFactory(
         isolated.repository_root,
@@ -206,8 +211,7 @@ def _capture_portable_mcp_state(
         project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".github/mcp.json"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".mcp.json"),
         ),
         external_roots=external_roots,
     )
@@ -483,8 +487,8 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """VS Code stays untouched when Copilot migrates MCP ownership to .github."""
-    from apm_cli.adapters.client.copilot import CopilotClientAdapter
+    """The deprecated vscode alias and copilot converge on one .mcp.json entry."""
+    from apm_cli.factory import ClientFactory
 
     server = {
         "name": "project-contract-server",
@@ -501,6 +505,11 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     runner = _runner(apm_binary_path)
     environment = fixture.isolated.subprocess_env()
     manifest_bytes = (fixture.project_root / "apm.yml").read_bytes()
+    config_paths = (
+        PurePosixPath(".mcp.json"),
+        PurePosixPath(".github/mcp.json"),
+        PurePosixPath(".vscode/mcp.json"),
+    )
     vscode_install_args = (
         "install",
         "--runtime",
@@ -528,14 +537,14 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
         env=environment,
     )
     vscode_installed = LifecycleStateSnapshot.capture(
-        fixture.project_root,
-        config_paths=(PurePosixPath(".vscode/mcp.json"),),
+        fixture.project_root, config_paths=config_paths
     )
     assert vscode_installed.manifest_bytes == manifest_bytes
     assert vscode_installed.deployment_records
     assert b"project-contract-server" in vscode_installed.mcp_state_bytes
-    assert vscode_installed.file(".vscode/mcp.json").kind == "file"
-    vscode_bytes = vscode_installed.file(".vscode/mcp.json").content
+    assert vscode_installed.file(".mcp.json").kind == "file"
+    assert vscode_installed.file(".github/mcp.json").kind == "missing"
+    assert vscode_installed.file(".vscode/mcp.json").kind == "missing"
 
     runner.run_sequence(
         (copilot_install_args,),
@@ -545,20 +554,18 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
         env=environment,
     )
     copilot_installed = LifecycleStateSnapshot.capture(
-        fixture.project_root,
-        config_paths=(
-            PurePosixPath(".github/mcp.json"),
-            PurePosixPath(".vscode/mcp.json"),
-        ),
+        fixture.project_root, config_paths=config_paths
     )
-    assert copilot_installed.file(".vscode/mcp.json").content == vscode_bytes
-    copilot_config = fixture.project_root / ".github" / "mcp.json"
-    assert CopilotClientAdapter(project_root=fixture.project_root).get_config_path() == str(
-        copilot_config
-    )
+    _assert_exact_lifecycle_state(vscode_installed, copilot_installed)
+    copilot_config = fixture.project_root / ".mcp.json"
+    adapter = ClientFactory.create_client("copilot", project_root=fixture.project_root)
+    assert adapter.get_config_path() == str(copilot_config)
     mcp_servers = json.loads(copilot_config.read_text(encoding="utf-8"))["mcpServers"]
-    assert mcp_servers["project-contract-server"]["command"] == "echo"
-    assert mcp_servers["project-contract-server"]["args"] == ["project-contract"]
+    assert mcp_servers["project-contract-server"] == {
+        "type": "stdio",
+        "command": "echo",
+        "args": ["project-contract"],
+    }
     copilot_lock = LockFile.read(fixture.project_root / "apm.lock.yaml")
     assert copilot_lock is not None
     assert copilot_lock.mcp_target_servers == {"copilot": ["project-contract-server"]}
@@ -581,10 +588,7 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     )
     reinstalled = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(
-            PurePosixPath(".github/mcp.json"),
-            PurePosixPath(".vscode/mcp.json"),
-        ),
+        config_paths=config_paths,
     )
     _assert_exact_lifecycle_state(copilot_installed, reinstalled)
 
@@ -615,10 +619,7 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     )
     repaired = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(
-            PurePosixPath(".github/mcp.json"),
-            PurePosixPath(".vscode/mcp.json"),
-        ),
+        config_paths=config_paths,
     )
     assert repaired.manifest_bytes == manifest_bytes
     assert repaired.mcp_state_bytes == reinstalled.mcp_state_bytes
@@ -798,10 +799,10 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".mcp.json"),
         ),
     )
-    assert broad.file(".github/mcp.json").kind == "file"
+    assert broad.file(".mcp.json").kind == "file"
     assert b"managed-contract-server" in broad.file(".codex/config.toml").content
     assert b"user-authored" in broad.file(".codex/config.toml").content
     assert b"trust_level" in broad.file(".codex/config.toml").content
@@ -825,7 +826,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".mcp.json"),
         ),
     )
     codex_bytes = narrow.file(".codex/config.toml").content
@@ -847,7 +848,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".mcp.json"),
         ),
     )
     _assert_semantic_lifecycle_state(narrow, converged)
@@ -857,7 +858,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".mcp.json"),
         ),
     )
     assert (
@@ -873,7 +874,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".mcp.json"),
         ),
     )
     _assert_exact_lifecycle_state(before_audit, after_audit)
@@ -1037,7 +1038,7 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
         cwd=project.root,
         env=environment,
     )
-    assert "--force" in refused.stdout
+    assert "--force" in refused.stdout + refused.stderr
     assert plugin_path.read_bytes() == original
 
     runner.run_sequence(
@@ -1060,7 +1061,7 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
         cwd=project.root,
         env=environment,
     )
-    assert "--force" in update_refused.stdout
+    assert "--force" in update_refused.stdout + update_refused.stderr
     assert plugin_path.read_bytes() == foreign
 
     runner.run_sequence(
@@ -1296,7 +1297,7 @@ def test_lsp_uninstall_cleanup_failure_is_nonzero_and_actionable(
     )
 
     assert plugin_path.read_bytes() == foreign
-    normalized_output = " ".join(result.stdout.split())
+    normalized_output = " ".join((result.stdout + result.stderr).split())
     assert "Uninstall incomplete" in normalized_output
     assert "'apm install'" in normalized_output
 
@@ -1311,6 +1312,7 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     fixture = _create_git_lifecycle_project(
         tmp_path / "saved-target-project",
         source_name="saved-target-source",
+        instruction_apply_to="**/*.saved",
         mcp_dependencies=(
             {
                 "name": server_name,
@@ -1441,7 +1443,11 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
         cwd=fixture.project_root,
         env=environment,
     )
-    assert (fixture.project_root / ".github" / "mcp.json").is_file()
+    assert server_name in json.loads(claude_mcp.read_text(encoding="utf-8"))["mcpServers"]
+    assert not (fixture.project_root / ".github" / "mcp.json").exists()
+    reinstalled_lock = LockFile.read(fixture.project_root / "apm.lock.yaml")
+    assert reinstalled_lock is not None
+    assert reinstalled_lock.mcp_target_servers == {"copilot": [server_name]}
     assert (fixture.project_root / ".github" / "lsp.json").is_file()
     assert (
         fixture.project_root
@@ -1975,7 +1981,7 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """User-scope capability filtering precedes state and survives replay."""
+    """User-scope target filtering precedes state and survives replay."""
     isolated = IsolatedApmEnvironment.create(
         tmp_path / "global-target-capability",
         base_env=dict(os.environ),
@@ -1985,27 +1991,6 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
     environment = isolated.subprocess_env()
     runner = _runner(apm_binary_path)
     user_manifest = isolated.home / ".apm" / "apm.yml"
-
-    rejected = runner.run(
-        (
-            "install",
-            "-g",
-            "--target",
-            "vscode",
-            "--mcp",
-            "rejected-server",
-            "--no-policy",
-            "--",
-            "echo",
-            "rejected",
-        ),
-        scenario_id="global-zero-supported-target",
-        cwd=project,
-        env=environment,
-    )
-
-    assert rejected.returncode == 2
-    assert not user_manifest.exists()
 
     excluded = runner.run(
         (
@@ -2063,12 +2048,17 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
         env=environment,
     )
 
-    assert "Skipped workspace-only runtimes at user scope: vscode" in (mixed.stdout + mixed.stderr)
+    # ``vscode`` is a deprecated alias of ``copilot``, which has a user scope.
+    assert "Skipped workspace-only runtimes" not in mixed.stdout + mixed.stderr
     assert "Skipped workspace-only runtimes" not in replay.stdout + replay.stderr
     user_config = load_yaml(user_manifest)
-    assert user_config["targets"] == ["claude"]
+    assert sorted(user_config["targets"]) == ["claude", "copilot"]
     claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
     assert set(claude_config["mcpServers"]) == {"mixed-server", "replay-server"}
+    copilot_config = json.loads(
+        (isolated.home / ".copilot" / "mcp-config.json").read_text(encoding="utf-8")
+    )
+    assert set(copilot_config["mcpServers"]) == {"mixed-server", "replay-server"}
 
     hermes_isolated = IsolatedApmEnvironment.create(
         tmp_path / "global-hermes",
@@ -2299,10 +2289,8 @@ def test_saved_target_drives_declared_mcp_and_lsp_without_package(
         cwd=project.root,
         env=environment,
     )
-    assert (
-        "saved-declared-mcp"
-        not in json.loads((project.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
-    )
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    assert not (project.root / ".mcp.json").exists()
     assert not (project.root / _CLAUDE_LSP_PLUGIN).exists()
 
 
@@ -2334,7 +2322,8 @@ def test_saved_copilot_target_projects_to_copilot_for_direct_mcp(
         env=environment,
     )
 
-    assert (project / ".github" / "mcp.json").is_file()
+    assert (project / ".mcp.json").is_file()
+    assert not (project / ".github" / "mcp.json").exists()
     assert not (isolated.home / ".copilot" / "mcp-config.json").exists()
 
 
@@ -2421,7 +2410,7 @@ def test_unset_target_keeps_normal_detection_for_package_without_services(
     package_factory.add_instruction(
         package,
         "service-free",
-        _instruction("service-free"),
+        _instruction("service-free", "**/*.md"),
     )
     project_factory = LocalPackageFactory(isolated.work_root)
     project = project_factory.create(
@@ -2565,10 +2554,14 @@ def test_manifest_and_explicit_target_precedence_for_mcp_and_lsp(
         cwd=project.root,
         env=environment,
     )
-    assert (project.root / ".github" / "mcp.json").is_file()
+    # Copilot and Claude share .mcp.json; the lockfile names the owning runtime.
+    assert (project.root / ".mcp.json").is_file()
     assert (project.root / ".github" / "lsp.json").is_file()
-    assert not (project.root / ".mcp.json").exists()
+    assert not (project.root / ".github" / "mcp.json").exists()
     assert not (project.root / _CLAUDE_LSP_PLUGIN).exists()
+    manifest_lock = LockFile.read(project.root / "apm.lock.yaml")
+    assert manifest_lock is not None
+    assert manifest_lock.mcp_target_servers == {"copilot": ["precedence-mcp"]}
 
     runner.run_sequence(
         (("install", "--target", "claude", "--no-policy"),),
@@ -2579,6 +2572,14 @@ def test_manifest_and_explicit_target_precedence_for_mcp_and_lsp(
     )
     assert (project.root / ".mcp.json").is_file()
     assert (project.root / _CLAUDE_LSP_PLUGIN).is_file()
+    explicit_lock = LockFile.read(project.root / "apm.lock.yaml")
+    assert explicit_lock is not None
+    # The flag decides what this run writes; copilot, still selected by the
+    # manifest, keeps its claim (#4562).
+    assert explicit_lock.mcp_target_servers == {
+        "claude": ["precedence-mcp"],
+        "copilot": ["precedence-mcp"],
+    }
 
 
 def test_multi_target_exclusion_applies_to_mcp_and_lsp(
@@ -2871,3 +2872,48 @@ def test_uninstalling_one_shared_root_retains_shared_dependency_ownership(
         cwd=project.root,
         env=environment,
     )
+
+
+def test_ambiguous_harness_hints_name_every_detected_target_and_converge(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Both printed remedies for 'Multiple harnesses detected' run and converge."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "ambiguous", base_env=dict(os.environ))
+    package_factory = LocalPackageFactory(isolated.package_root)
+    package = package_factory.create("two-harness-kit")
+    package_factory.add_instruction(
+        package, "two-harness-kit-instruction", _instruction("two-harness-kit-instruction")
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        f"name: consumer\nversion: 0.1.0\ndependencies:\n  apm:\n    - {package.root.as_posix()}\n",
+        encoding="utf-8",
+    )
+    (project / ".cursor").mkdir()
+    (project / ".codex").mkdir()
+    runner = _runner(apm_binary_path)
+    env = isolated.subprocess_env()
+
+    refused = runner.run(("install",), scenario_id="ambiguous", cwd=project, env=env)
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    hint = refused.stderr
+    assert "Multiple harnesses detected: codex, cursor" in hint
+    assert "Multiple harnesses detected" not in refused.stdout, refused.stdout
+    assert "  apm install --target codex,cursor\n" in hint
+    assert "  targets:\n    - codex\n    - cursor" in hint
+
+    flagged = runner.run(
+        ("install", "--target", "codex,cursor"), scenario_id="hint-flag", cwd=project, env=env
+    )
+    assert flagged.returncode == 0, flagged.stdout + flagged.stderr
+
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "targets:\n  - codex\n  - cursor\n",
+        encoding="utf-8",
+    )
+    declared = runner.run(("install",), scenario_id="hint-yaml", cwd=project, env=env)
+    assert declared.returncode == 0, declared.stdout + declared.stderr
+    assert "Targets: codex, cursor" in declared.stdout, declared.stdout

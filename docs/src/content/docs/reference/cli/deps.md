@@ -41,7 +41,8 @@ roots and remain visible regardless of graph depth.
 Packages on a non-default host are listed by their host-qualified key, such as
 `gitlab.example.com/org/repo`, the key `apm deps tree` shows and
 `apm uninstall` accepts. The Source column follows the declared or locked host
-type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`.
+type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`, and a
+host APM does not recognize as GitHub, GitLab or Azure DevOps shows `git`.
 
 Orphan status uses the same selection as [`apm prune`](../prune/). Skills
 bundled inside a declared package, such as a whole-repository skill bundle,
@@ -71,6 +72,35 @@ apm deps list [OPTIONS]
 | `-g, --global` | List user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the project. |
 | `--all` | Show both project and user-scope dependencies. |
 | `--insecure` | Show only dependencies locked to `http://` sources. Adds an `Origin` column distinguishing `direct` declarations from `via <parent>` transitive pulls. |
+
+The listing also reports what each package declares and where it was deployed.
+It never fetches registries, connects to servers or runs package content, and
+neither column says whether a server is healthy or authenticated.
+
+| Column | Meaning |
+|---|---|
+| `MCPs` | Number of MCP servers the package declares, read the way install reads them: its `apm.yml` (for a Claude or marketplace plugin, the manifest install generates from `mcpServers` / `.mcp.json`), or a native Agent Plugin's MCP resource. `0` means none; `?` means the package could not be inspected. The count is per package, not per target. |
+| `Targets` | The targets recorded for the package in the listed scope's `apm.lock.yaml`, such as `claude, codex`. A project and a user install of one package can differ. |
+
+`Targets` comes only from recorded deployments, never from the configured
+targets or from directory names:
+
+| Value | Meaning |
+|---|---|
+| `claude, codex` | Every recorded deployment names a target. |
+| `claude, codex*` | Some deployments cannot be attributed to a target: legacy records, MCP or LSP servers without package-owned deployment records, or MCP definitions that could not be read. |
+| `ambiguous` | Deployments are recorded, but none names a target (legacy records). |
+| `unknown` | Nothing can be attributed: an older lockfile with no recorded deployments, a package missing from the lockfile, or deployable content with no attributable record. An MCP-only package shows `unknown` unless a record names it as an owner. |
+| `-` | Nothing to deploy and nothing recorded. |
+
+A one-line legend under the table explains the `*`, `unknown` and `ambiguous`
+cells in that listing, and only those.
+
+A deployment shared by several packages is credited to each. A directory shared
+by several targets, such as `.agents/skills` (Codex, agent-skills and
+Antigravity), is never read as a target: a row counts only for the target
+recorded on it, and a shared-directory row recorded without a target stays
+unattributed.
 
 ### `apm deps tree`
 
@@ -115,7 +145,7 @@ apm deps why PACKAGE [OPTIONS]
 
 | Argument | Description |
 |---|---|
-| `PACKAGE` | The installed package to explain. Accepts the same identifier styles as `apm deps info`: unique key (`owner_repo`), repo URL (`https://github.com/owner/repo`), `owner/repo`, or bare basename when unambiguous. |
+| `PACKAGE` | The installed package to explain. Accepts the lockfile key (`owner/repo`, or `host/owner/repo` for non-GitHub hosts) or the bare repo name when unambiguous. URLs are not normalized. |
 
 | Option | Description |
 |---|---|
@@ -127,7 +157,7 @@ Exit codes: `0` on success, `1` when the package is not installed or the query m
 ### `apm deps update`
 
 :::caution[Deprecated]
-`apm deps update` is deprecated in favor of [`apm update`](../update/), which is now a strict superset: it supports `-g/--global`, `[PACKAGES...]`, `--force`, and `--parallel-downloads`, plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
+`apm deps update` is deprecated in favor of [`apm update`](../update/), which supports `-g/--global`, `[PACKAGES...]`, `--force`, `--parallel-downloads`, `--target`, and `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS`), plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
 :::
 
 Re-resolve git references for installed dependencies (direct and transitive), download updated content, re-integrate primitives, and regenerate `apm.lock.yaml`.
@@ -144,12 +174,14 @@ apm deps update [PACKAGES...] [OPTIONS]
 |---|---|
 | `-v, --verbose` | Show detailed update information. |
 | `--force` | Overwrite locally-authored files on collision. |
-| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `agents`, `agy`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `vscode`, `windsurf`. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
+| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `windsurf`. Aliases: `agents` for `copilot`, `agy` for `antigravity`; `vscode` is a deprecated alias of `copilot` and warns. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
 | `-g, --global` | Update user-scope dependencies under `$APM_HOME` (default `~/.apm`). |
-| `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. |
+| `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 `apm deps update` runs the install pipeline and is gated by org `apm-policy.yml`. There is no `--no-policy` flag; the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session.
+
+Like `apm update`, it refuses an `apm.lock.yaml` written by a newer APM before changing anything, naming both versions and how to upgrade; see [Lockfile written by a newer APM](../../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm).
 
 ### `apm deps clean`
 

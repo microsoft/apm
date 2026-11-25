@@ -1,0 +1,21 @@
+{
+  "issue": 4086,
+  "fixed_in": "0.37.0",
+  "summary": "The lockfile had no write authority: one install persisted it once per phase, and apm compile could remove deployed files before refusing a lockfile it may not rewrite.",
+  "failure_modes": [
+    "idempotency",
+    "transaction"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lockfile_write_authority_lifecycle.py::test_install_commits_the_lockfile_once",
+    "tests/integration/test_lockfile_write_authority_lifecycle.py::test_compile_commits_the_lockfile_through_the_authority",
+    "tests/integration/test_lockfile_write_authority_lifecycle.py::test_a_failed_mcp_write_restores_the_deploys_and_writes_no_lockfile",
+    "tests/integration/test_lockfile_write_authority_lifecycle.py::test_every_lockfile_writer_refuses_a_newer_generator_before_changing_files",
+    "tests/integration/test_lockfile_writer_mapping.py::test_each_lock_writing_command_maps_to_its_registered_writer",
+    "tests/integration/test_lockfile_writer_mapping.py::test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens"
+  ]
+}

@@ -225,9 +225,9 @@ def maybe_resolve_git_semver(
     # this an exact pin would hit the range guard in GitSemverResolver --
     # the very thing that guard's hint tells authors to use instead. A
     # matching locked resolution is replayed above without any listing.
-    from apm_cli.deps.registry_proxy import is_enforce_only
+    from apm_cli.deps.egress_route import EgressSurface, is_refused
 
-    if is_enforce_only() and _is_exact_semver_constraint(constraint):
+    if is_refused(EgressSurface.SOURCE_ENUMERATION) and _is_exact_semver_constraint(constraint):
         return None
 
     dep_ref = dep_ref.source_reference

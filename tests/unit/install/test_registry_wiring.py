@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.install.registry_wiring import (
     get_effective_default_registry,
     should_skip_github_probe_for_dep,
     validate_registry_ref,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # should_skip_github_probe_for_dep
@@ -171,6 +175,17 @@ def _dep_with_ref(reference, ref_kind_val=None, raises=None):
 
 
 class TestValidateRegistryRef:
+    def test_registry_routed_ref_without_version_names_the_entry_not_git(self):
+        """A catalog-routed registry ref has no Git path to suggest (#4009)."""
+        from apm_cli.models.dependency import DependencyReference
+
+        dep = DependencyReference(repo_url="acme/widget", source="registry", registry_name="corp")
+        ok, err = validate_registry_ref(dep)
+        assert ok is False
+        assert "'acme/widget' routes to a package registry in registry 'corp'" in err
+        assert "catalog entry or apm.yml entry must name a version selector" in err
+        assert "git:" not in err
+
     def test_semver_ref_is_valid(self):
         dep = _dep_with_ref("^1.0.0", ref_kind_val="semver")
         ok, err = validate_registry_ref(dep)

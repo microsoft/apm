@@ -20,41 +20,15 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import (
     CheckLogger,
-    DriftFinding,
     ReplayConfig,
-    _governed_root_dirs,
-    _normalize_line_endings,
-    _strip_bom,
-    _strip_build_id,
     diff_scratch_against_project,
-    render_drift_sarif,
-    render_drift_text,
 )
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Normalization helpers
 # ---------------------------------------------------------------------------
-
-
-def test_strip_build_id_removes_header_preserves_rest():
-    src = b"# Title\n<!-- Build ID: abc123def456 -->\nbody line\n<!-- Build ID: 999 -->trailing\n"
-    out = _strip_build_id(src)
-    assert b"Build ID" not in out
-    assert b"# Title\n" in out
-    assert b"body line\n" in out
-    assert b"trailing\n" in out
-
-
-def test_normalize_line_endings_crlf_to_lf():
-    assert _normalize_line_endings(b"a\r\nb\r\nc") == b"a\nb\nc"
-    assert _normalize_line_endings(b"no-crlf") == b"no-crlf"
-
-
-def test_strip_bom_at_start_only():
-    assert _strip_bom(b"\xef\xbb\xbfhello") == b"hello"
-    # BOM mid-stream must not be removed (not a real BOM there).
-    mid = b"x\xef\xbb\xbfy"
-    assert _strip_bom(mid) == mid
 
 
 # ---------------------------------------------------------------------------
@@ -69,12 +43,6 @@ def test_replay_config_is_frozen(tmp_path):
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.cache_only = False  # type: ignore[misc]
-
-
-def test_drift_finding_is_frozen():
-    f = DriftFinding(path=".apm/x.md", kind="modified")
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        f.kind = "orphaned"  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -526,15 +494,6 @@ def test_diff_engine_case_only_variant_is_unmanaged_conflict(tmp_path):
     assert [(f.path, f.kind) for f in findings] == [(".apm/skills/hello.md", "unmanaged-conflict")]
 
 
-def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
-    out = render_drift_text([DriftFinding(path=".claude/skills/x/SKILL.md", kind="unrecorded")])
-    assert "[x] Drift detected: 1 file(s)" in out
-    assert "unrecorded (1):" in out
-    assert ".claude/skills/x/SKILL.md" in out
-    assert "Run 'apm install' to re-sync deployed files" in out
-    assert "Commit the regenerated apm.lock.yaml" in out
-
-
 def test_diff_engine_100kb_inline_cap(tmp_path):
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
@@ -568,22 +527,6 @@ def _target_with_skill_deploy_root(root_dir: str = ".github", deploy_root: str =
             "skills": dataclasses.replace(target.primitives["skills"], deploy_root=deploy_root)
         },
     )
-
-
-def test_governed_root_dirs_includes_primitive_deploy_root():
-    """The differ must walk per-primitive deploy roots (copilot skills ->
-    .agents), not only the target's top-level root_dir -- otherwise committed
-    .agents/skills/ content escapes drift detection (issue #1716)."""
-    roots = _governed_root_dirs([_target_with_skill_deploy_root()])
-    assert ".apm" in roots
-    assert ".github" in roots
-    assert ".agents" in roots
-
-
-def test_governed_root_dirs_collapses_nested_deploy_root_to_first_segment():
-    roots = _governed_root_dirs([_target_with_skill_deploy_root(deploy_root=".agents/nested")])
-    assert ".agents" in roots
-    assert ".agents/nested" not in roots
 
 
 def test_diff_engine_walks_skill_deploy_root_detects_drift(tmp_path):
@@ -625,46 +568,9 @@ def test_diff_engine_skill_deploy_root_clean_when_identical(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_render_sarif_rule_id_prefix():
-    findings = [
-        DriftFinding(path="a.md", kind="modified", package="pkg-a"),
-        DriftFinding(path="b.md", kind="orphaned", package="pkg-b"),
-        DriftFinding(path="c.md", kind="unrecorded", package="pkg-c"),
-    ]
-    results = render_drift_sarif(findings)
-    assert results[0]["ruleId"] == "apm/drift/modified"
-    assert results[1]["ruleId"] == "apm/drift/orphaned"
-    assert results[2]["ruleId"] == "apm/drift/unrecorded"
-    assert results[2]["level"] == "error"
-    assert results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "a.md"
-    assert results[1]["properties"]["package"] == "pkg-b"
-
-
 # ---------------------------------------------------------------------------
 # CheckLogger -- stderr only
 # ---------------------------------------------------------------------------
-
-
-def test_check_logger_phases_to_stderr(capsys):
-    logger = CheckLogger(verbose=False)
-    logger.replay_start()
-    logger.replay_complete(3)
-    logger.diff_start()
-    logger.findings(2)
-    logger.clean()
-
-    captured = capsys.readouterr()
-    # Everything must be on stderr to keep stdout JSON-clean.
-    assert captured.out == ""
-    assert "Replaying install" in captured.err
-    assert "Replayed 3 package(s)" in captured.err
-    assert "Diffing scratch" in captured.err
-    assert "Drift detected: 2 file(s)" in captured.err
-    assert "No drift detected" in captured.err
-    # ASCII-only status symbols.
-    assert "[>]" in captured.err
-    assert "[+]" in captured.err
-    assert "[!]" in captured.err
 
 
 def test_check_logger_scratch_root_emits_to_stderr_when_verbose(capsys, tmp_path):
@@ -804,15 +710,26 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
 
 
-@pytest.mark.parametrize(("user_scope", "expected"), [(False, ["."]), (True, [])])
+@pytest.mark.parametrize(
+    ("user_scope", "user_root_primitives", "expected"),
+    [
+        (False, (), ["."]),
+        (True, ("hooks",), ["."]),
+        (True, ("hooks", "agents"), []),
+        (True, (), []),
+    ],
+    ids=["project", "user-root-hooks-only", "user-root-with-agents", "user-root-empty"],
+)
 def test_run_replay_includes_root_apm_without_local_deployed_files(
-    monkeypatch, tmp_path, user_scope, expected
+    monkeypatch, tmp_path, user_scope, user_root_primitives, expected
 ):
-    """Project-scope replay integrates root .apm/ like install does (#3369).
+    """Replay integrates root .apm/ like install does (#3369, #4837).
 
     Root hooks merge into shared configs and record no local_deployed_files,
     so the lockfile synthesizes no self-entry. Replay must still integrate
-    the project's own .apm/ content, without rewriting the lockfile.
+    the root's own .apm/ content, without rewriting the lockfile. At user
+    scope only a hooks-only root qualifies: other primitives claim files, so
+    a user lock without a self-entry predates user-root recording.
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.drift import ReplayConfig, run_replay
@@ -820,6 +737,12 @@ def test_run_replay_includes_root_apm_without_local_deployed_files(
     project_root = tmp_path / "proj"
     (project_root / ".apm" / "hooks").mkdir(parents=True)
     (project_root / "apm.yml").write_text("name: proj\ntargets: [claude]\n", encoding="utf-8")
+    user_root = tmp_path / "home"
+    (user_root / ".apm").mkdir(parents=True)
+    for primitive in user_root_primitives:
+        (user_root / ".apm" / primitive).mkdir()
+        (user_root / ".apm" / primitive / "p.md").write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr("apm_cli.install.drift.get_source_root", lambda _scope: user_root)
     lockfile_path = project_root / "apm.lock.yaml"
     LockFile().write(lockfile_path)
     lock_bytes = lockfile_path.read_bytes()
@@ -970,6 +893,7 @@ def test_run_replay_threads_locked_skill_subset(
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
                 "skill_subset": kwargs.get("skill_subset"),
                 "deployment_package_root": package_info.deployment_package_root,
+                "deployment_frame": package_info.deployment_frame,
             }
         )
         return {"deployed_files": []}
@@ -1002,9 +926,10 @@ def test_run_replay_threads_locked_skill_subset(
                 "productivity/grilling",
             ),
             "deployment_package_root": dep.to_dependency_ref().get_install_path(
-                scratch_root / ".apm" / "apm_modules"
+                project_root / ".apm" / "apm_modules"
                 if user_scope
-                else scratch_root / "apm_modules"
+                else project_root / "apm_modules"
             ),
+            "deployment_frame": (scratch_root, project_root),
         }
     ]

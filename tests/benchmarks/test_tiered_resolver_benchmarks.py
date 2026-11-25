@@ -29,6 +29,8 @@ from apm_cli.deps.tiered_ref_resolver import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
+pytestmark = pytest.mark.unit
+
 # Simulates the per-clone cost. Real clones in #1369 took 1583s / 9 ~= 176s
 # on Windows+Defender+slow ADO. We use 30ms here so the test runs in
 # under 1s while still being measurable.

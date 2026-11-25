@@ -1,0 +1,11 @@
+name: consumer
+version: 0.1.0
+description: Selection fixture package consumer
+author: APM Test
+dependencies:
+  apm:
+    - git: fixture-org/bundle
+      skills:
+        - alpha
+targets:
+  - copilot

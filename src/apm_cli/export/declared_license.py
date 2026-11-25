@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.utils.yaml_io import load_yaml
 
 
@@ -63,7 +64,7 @@ def read_declared_license(install_path: Path | str) -> str | None:
     path = Path(install_path)
     base = path if path.is_dir() else path.parent
 
-    apm_yml = base / "apm.yml"
+    apm_yml = manifest_file(base)
     if apm_yml.is_file():
         declared = _from_apm_yml(apm_yml)
         if declared is not None:

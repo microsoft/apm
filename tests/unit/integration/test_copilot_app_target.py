@@ -21,6 +21,8 @@ from apm_cli.integration.targets import (
     resolve_targets,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _reset_config_cache():

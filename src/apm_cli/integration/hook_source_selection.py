@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.hook_contract import walk_hook_commands
-from apm_cli.integration.hook_bundle import _hook_source_root
+from apm_cli.integration.hook_bundle import _hook_source_root, hook_bundle_deploys_json
 from apm_cli.integration.hook_command_paths import (
     iter_plugin_root_paths,
     iter_relative_script_paths,
@@ -209,14 +209,18 @@ def select_hook_sources(
     parse_hook_json: Callable[[Path], dict | None],
     iter_bundle_files: Callable[..., list[Path]],
     merge_target_names: Iterable[str],
+    known_descriptors: Iterable[Path] = (),
 ) -> HookSourceSelection:
     """Select descriptors and bundle assets for every supported target.
 
     Filenames never route: each supported target receives every descriptor.
     Targets where the retired filename convention selected fewer files are
     recorded so consumers fail closed instead of widening executable reach.
+    *known_descriptors* are every hook document the package carries: one
+    left out of *hook_files* (withheld by its approval) is still a document,
+    never a bundle asset, as the approval pin treats it.
     """
-    all_descriptors = set(hook_files)
+    all_descriptors = set(hook_files) | set(known_descriptors)
     descriptors = configured_hook_file_selection(hook_files)
     conflicts: dict[str, tuple[str, ...]] = {}
     descriptors_by_target: dict[str, frozenset[Path]] = {}
@@ -253,7 +257,7 @@ def select_hook_sources(
                 iter_bundle_files(
                     source_root,
                     descriptor_files=all_descriptors,
-                    exclude_json_files=target_name == "copilot",
+                    exclude_json_files=not hook_bundle_deploys_json(target_name),
                 )
             )
         bundles_by_target[target_name] = frozenset(bundle_files)

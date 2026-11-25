@@ -51,7 +51,25 @@ class InstallRequest:
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
     trust_transitive_mcp: bool = False
+    # MCP servers the caller integrates after the pipeline; their org policy
+    # is enforced by the commit gate before anything deploys.
+    install_mcp: bool = True
+    mcp_runtime: str | None = None
+    # --dry-run: the pipeline resolves into rollback staging, runs its gates
+    # in preview mode, and stops before the first write.
+    # The caller reconciles MCP/LSP services after the pipeline and fires
+    # post-install itself (result.post_install), so scripts see the final
+    # lockfile (#4319).
+    post_install_after_services: bool = False
+    # The caller's MCP/LSP reconciliation, called with the pre-commit
+    # InstallResult before native Claude registration commits the lockfile,
+    # so the install writes it once (install/phases/services.py, #4329).
+    reconcile_services: Callable[[Any], object] | None = None
+    dry_run: bool = False
     trust_bin: bool | None = None
+    # Set when the caller integrates LSP after the pipeline: declared LSP
+    # without a capable target fails before the pipeline writes (#3727).
+    lsp_preflight: Any = None  # LspPreflight | None
 
     # --frozen: refuse to install if lockfile is missing or stale relative
     # to apm.yml.  Enforced in InstallService.run() BEFORE delegating to
@@ -75,3 +93,12 @@ class InstallRequest:
     # by ``apm update`` to render the plan and prompt the user.
     plan_callback: Callable[[UpdatePlan], bool] | None = None
     transaction: InstallTransaction | None = None
+
+    def hold_deploy_evidence(self) -> None:
+        """Hand the deploy-store evidence this install staged to its transaction.
+
+        Deployed bytes enter the store only when the transaction commits; it
+        holds them from here, before a post-install script resets the memos.
+        """
+        if self.transaction is not None:
+            self.transaction.hold_deploy_evidence()

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
 from apm_cli.models.apm_package import APMPackage, DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _make_node(repo_url: str, reference: str | None = None, depth: int = 1, parent=None):

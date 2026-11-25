@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +16,31 @@ import yaml
 WorkflowNode = dict[str, Any]
 
 _ENV_REFERENCE = re.compile(r"^\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
+
+
+def run_bash(script: str, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Execute an extracted workflow step with its declared test environment."""
+    # Windows' ambient bash.exe can be the WSL launcher, not Git Bash.
+    search_path = None
+    if sys.platform == "win32":
+        program_files = os.environ.get("PROGRAMFILES")
+        if not program_files:
+            raise FileNotFoundError(
+                "Workflow contract tests require PROGRAMFILES to locate Git for Windows Bash"
+            )
+        search_path = str(Path(program_files) / "Git" / "bin")
+    executable = shutil.which("bash", path=search_path)
+    if executable is None:
+        recovery = "install Git for Windows" if sys.platform == "win32" else "install bash on PATH"
+        raise FileNotFoundError(f"Workflow contract tests require native Bash; {recovery}")
+    return subprocess.run(
+        (executable, "-c", script),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **env},
+        timeout=30,
+    )
 
 
 def load_workflow(path: Path) -> WorkflowNode:
@@ -30,6 +59,30 @@ def workflow_job(workflow: WorkflowNode, name: str) -> WorkflowNode:
     if not isinstance(jobs, dict) or not isinstance(jobs.get(name), dict):
         raise AssertionError(f"workflow job not found: {name}")
     return jobs[name]
+
+
+def load_action_steps(path: Path) -> list[WorkflowNode]:
+    """Return a local composite action's steps."""
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    runs = loaded.get("runs") if isinstance(loaded, dict) else None
+    if not isinstance(runs, dict) or runs.get("using") != "composite":
+        raise AssertionError(f"local action must be a composite action: {path}")
+    steps = runs.get("steps")
+    if not isinstance(steps, list):
+        raise AssertionError(f"composite action steps must be a list: {path}")
+    return steps
+
+
+def expand_local_actions(job: WorkflowNode, root: Path) -> WorkflowNode:
+    """Copy a job with each ``uses: ./<path>`` step replaced by that action's steps."""
+    steps: list[Any] = []
+    for step in job.get("steps") or []:
+        uses = step.get("uses") if isinstance(step, dict) else None
+        if isinstance(uses, str) and uses.startswith("./"):
+            steps.extend(load_action_steps(root / uses / "action.yml"))
+        else:
+            steps.append(step)
+    return {**job, "steps": steps}
 
 
 def workflow_step(job: WorkflowNode, name: str) -> WorkflowNode:

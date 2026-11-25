@@ -38,12 +38,43 @@ detection repo-wide.
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+
+USER_SCOPE_RELATIVE_PATH_ERROR = (
+    "relative local paths are not supported at user scope (--global). "
+    "Use an absolute path or a remote reference (owner/repo) instead"
+)
+
+
+def local_dep_base_dir(
+    local_path: str,
+    *,
+    declaring_dir: Path | None,
+    source_root: Path | None,
+    user_scope: bool,
+) -> Path | None:
+    """Return the directory a dependency's ``local_path`` resolves against.
+
+    The single install-time anchor decision (#857, #4153). A path declared
+    by another package anchors on that package's directory at every scope.
+    A root-declared path anchors on *source_root* at project scope; at user
+    scope the root manifest has no project, so only an absolute path is
+    admitted. ``None`` means the path cannot be anchored and the caller
+    must fail the dependency with :data:`USER_SCOPE_RELATIVE_PATH_ERROR`.
+    """
+    if declaring_dir is not None:
+        return declaring_dir
+    if not user_scope and source_root is not None:
+        return source_root
+    raw = Path(local_path).expanduser()
+    return Path(raw.anchor) if raw.is_absolute() else None
 
 
 class LocalResolutionError(Exception):
@@ -123,6 +154,26 @@ def resolve_local_dep_base(
     )
 
 
+def root_anchored_local_path(
+    lock_dep: LockedDependency, lockfile: LockFile | None, project_root: Path
+) -> str:
+    """Re-spell a locked local dep's ``local_path`` against *project_root*.
+
+    The result names the same directory once the row is root-declared
+    (``resolved_by`` cleared), so a ``../sibling`` declared by a parent at
+    ``./packages/parent`` becomes ``./packages/sibling``. Raises
+    :class:`LocalResolutionError` like :func:`resolve_local_dep_dir`.
+    """
+    resolved = resolve_local_dep_dir(lock_dep, lockfile, project_root)
+    try:
+        relative = Path(os.path.relpath(resolved, project_root.resolve())).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+    if relative == "." or relative.startswith("../") or relative == "..":
+        return relative
+    return f"./{relative}"
+
+
 def build_local_parent_index(
     lockfile: LockFile | None,
 ) -> dict[str, tuple[LockedDependency, ...]]:
@@ -188,35 +239,47 @@ def _resolve_dep_dir(
         )
     seen.add(key)
 
-    parent = _find_parent(lockfile, dep, parent_index=parent_index)
-    parent_dir = _resolve_dep_dir(
-        parent,
-        lockfile,
-        project_root,
-        parent_index=parent_index,
-        resolved_cache=resolved_cache,
-        seen=seen,
-    )
-    resolved = _join(parent_dir, dep.local_path)
+    parents = _find_parents(lockfile, dep, parent_index=parent_index)
+    parent_dirs = {
+        _resolve_dep_dir(
+            parent,
+            lockfile,
+            project_root,
+            parent_index=parent_index,
+            resolved_cache=resolved_cache,
+            seen=seen,
+        )
+        for parent in parents
+    }
+    if len(parent_dirs) > 1:
+        raise LocalResolutionError(
+            f"ambiguous resolved_by parent {dep.resolved_by!r} of {dep.repo_url!r}: "
+            f"{len(parents)} local dependencies share that repo_url "
+            f"({sorted(p.local_path for p in parents if p.local_path)}) and anchor to "
+            f"different directories"
+        )
+    resolved = _join(parent_dirs.pop(), dep.local_path)
     resolved_cache[key] = resolved
     seen.remove(key)
     return resolved
 
 
-def _find_parent(
+def _find_parents(
     lockfile: LockFile | None,
     dep: LockedDependency,
     *,
     parent_index: dict[str, tuple[LockedDependency, ...]],
-) -> LockedDependency:
-    """Find the unique local parent of *dep* by ``repo_url == resolved_by``.
+) -> tuple[LockedDependency, ...]:
+    """Find the local parent candidates of *dep* by ``repo_url == resolved_by``.
 
     ``resolved_by`` carries the parent's ``repo_url`` (e.g. ``_local/foo``),
     NOT its ``local_path``; and the lockfile dict is keyed by
     ``get_unique_key()`` (``local_path`` for locals), so the parent cannot
     be looked up by key -- we scan by ``repo_url``. Because ``_local/<name>``
-    is basename-derived it is NOT guaranteed unique, so a duplicate match is
-    a hard error rather than a silent first-wins pick.
+    is basename-derived it is NOT guaranteed unique: one directory reached
+    through two relative spellings (``./packages/lib`` from the root and
+    ``../lib`` from a sibling) yields several candidates, and the caller
+    refuses only when they anchor to different directories.
     """
     if lockfile is None:
         raise LocalResolutionError(
@@ -229,17 +292,11 @@ def _find_parent(
             raise LocalResolutionError(
                 f"resolved_by parent {dep.resolved_by!r} of {dep.repo_url!r} is not a locked local source"
             )
-        return parent
+        return (parent,)
     matches = parent_index.get(dep.resolved_by, ())
     if not matches:
         raise LocalResolutionError(
             f"resolved_by parent {dep.resolved_by!r} of {dep.repo_url!r} "
             f"(local_path={dep.local_path!r}) is not a local dependency in the lockfile"
         )
-    if len(matches) > 1:
-        raise LocalResolutionError(
-            f"ambiguous resolved_by parent {dep.resolved_by!r} of {dep.repo_url!r}: "
-            f"{len(matches)} local dependencies share that repo_url "
-            f"({sorted(m.local_path for m in matches if m.local_path)})"
-        )
-    return matches[0]
+    return matches

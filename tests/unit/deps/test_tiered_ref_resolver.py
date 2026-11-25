@@ -17,8 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
-from apm_cli.cache.url_normalize import cache_shard_key
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
     L1CommitsAPI,
@@ -33,7 +32,9 @@ from apm_cli.deps.tiered_ref_resolver import (
     ref_freshness_policy_for_install,
 )
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef, ResolvedReference
+
+pytestmark = pytest.mark.unit
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -168,13 +169,23 @@ def test_l1_returns_sha_directly_when_ref_is_already_a_sha():
     assert tier.try_resolve(_dep(ref=SHA_A), SHA_A) == SHA_A
 
 
-def test_l1_delegates_to_legacy_resolve_commit_sha_for_ref():
+def test_l1_resolves_a_branch_from_the_exact_ref_listing():
+    legacy = MagicMock()
+    legacy.list_remote_refs.return_value = [RemoteRef("main", GitReferenceType.BRANCH, SHA_B)]
+    host = MagicMock()
+    host._refs = legacy
+    tier = L1CommitsAPI(host=host)
+    assert tier.try_resolve(_dep(), "main") == SHA_B
+    legacy.resolve_commit_sha_for_ref.assert_not_called()
+
+
+def test_l1_expands_an_abbreviated_commit_through_the_commits_api():
     legacy = MagicMock()
     legacy.resolve_commit_sha_for_ref.return_value = SHA_B
     host = MagicMock()
     host._refs = legacy
     tier = L1CommitsAPI(host=host)
-    assert tier.try_resolve(_dep(), "main") == SHA_B
+    assert tier.try_resolve(_dep(), SHA_B[:12]) == SHA_B
     legacy.resolve_commit_sha_for_ref.assert_called_once()
 
 
@@ -215,44 +226,10 @@ def test_l2_returns_none_when_no_git_cache():
     assert tier.try_resolve(_dep(), "main") is None
 
 
-def test_l2_returns_none_when_bare_dir_missing(tmp_path):
-    fake_cache = types.SimpleNamespace(
-        _db_root=tmp_path / "nonexistent", read_resolved_ref=lambda *_: (False, None)
-    )
-    tier = L2BareRevParse(git_cache=fake_cache)
-    assert tier.try_resolve(_dep(), "main") is None
-
-
 def test_l2_short_circuits_on_sha_input():
     fake_cache = types.SimpleNamespace(_db_root=None)
     tier = L2BareRevParse(git_cache=fake_cache)
     assert tier.try_resolve(_dep(ref=SHA_A), SHA_A) == SHA_A
-
-
-@pytest.mark.parametrize(
-    "dependency",
-    [
-        DependencyReference(repo_url="owner/repo", host="github.com", reference="main"),
-        DependencyReference(
-            repo_url="acme/platform/team/repo",
-            host="gitlab.com",
-            reference="main",
-        ),
-    ],
-)
-def test_l2_rev_parse_uses_git_cache_repository_identity(tmp_path, dependency):
-    bare = tmp_path / cache_shard_key(dependency.to_github_url())
-    bare.mkdir(parents=True)
-    fake_cache = types.SimpleNamespace(
-        _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
-    )
-    tier = L2BareRevParse(git_cache=fake_cache)
-
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as rp:
-        result = tier.try_resolve(dependency, "main")
-
-    assert result == SHA_A
-    rp.assert_called_once_with(bare, "main")
 
 
 # ---------------------------------------------------------------------------
@@ -680,175 +657,158 @@ def test_factory_preserves_l2_for_explicit_compatibility_policy(monkeypatch):
     assert tier_names == ["per_run_cache", "commits_api", "bare_rev_parse", "legacy_clone"]
 
 
-def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
-    """With update_refs=True, a stale local bare SHA is never returned (#2342).
+class _RevParseCommitsApi:
+    """A commits API that resolves names like ``git rev-parse`` (as GitHub does)."""
 
-    Scenario:
-    - L2BareRevParse would return SHA_A (stale cached value).
-    - L1 CommitsAPI returns SHA_B (fresh upstream value).
-    - When update_refs=True, L2 is excluded so the resolver returns SHA_B.
-    - When update_refs=False, L2 is in the stack but L1 fires first anyway,
-      so SHA_B is returned and the stale path is never reached in normal flow.
-      The important invariant is that in update mode, L2's stale answer can
-      never surface even if L1 were somehow bypassed.
-    """
-    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self.listings = 0
+        self._REFS = {
+            "refs/heads/main": "a" * 40,
+            "refs/tags/v1": "b" * 40,
+            "refs/pull/1/head": "f" * 40,
+        }
 
-    bare = tmp_path / cache_shard_key(_dep().to_github_url())
-    bare.mkdir(parents=True)
-    git_cache = types.SimpleNamespace(_db_root=tmp_path, read_resolved_ref=lambda *_: (False, None))
-    downloader = MagicMock()
-    fake_refs = MagicMock()
-    fake_refs.resolve_commit_sha_for_ref.return_value = None
-    fake_refs.resolve.return_value = ResolvedReference(
-        original_ref="owner/repo#main",
-        ref_type=GitReferenceType.BRANCH,
-        resolved_commit=SHA_B,
-        ref_name="main",
-    )
-    downloader._refs = fake_refs
+    def list_remote_refs(self, _dep_ref) -> list[RemoteRef]:
+        self.listings += 1
+        kinds = (("refs/heads/", GitReferenceType.BRANCH), ("refs/tags/", GitReferenceType.TAG))
+        return [
+            RemoteRef(name.removeprefix(prefix), kind, sha)
+            for name, sha in self._REFS.items()
+            for prefix, kind in kinds
+            if name.startswith(prefix)
+        ]
 
-    resolver = build_tiered_ref_resolver(
-        downloader=downloader,
-        git_cache=git_cache,
-        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
-    )
-    assert isinstance(resolver, TieredRefResolver)
-
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2:
-        result = resolver.resolve(_dep(repo="owner/repo", ref="main"))
-
-    assert result.resolved_commit == SHA_B
-    stale_l2.assert_not_called()
-    fake_refs.resolve_commit_sha_for_ref.assert_called_once()
-    fake_refs.resolve.assert_called_once()
-    assert resolver.stats["legacy_clone"] == 1
-    assert "bare_rev_parse" not in resolver.stats
+    def resolve_commit_sha_for_ref(self, _dep_ref, ref: str) -> str | None:
+        self.queries.append(ref)
+        for prefix in ("", "refs/", "refs/tags/", "refs/heads/"):
+            if f"{prefix}{ref}" in self._REFS:
+                return self._REFS[f"{prefix}{ref}"]
+        return None
 
 
-def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, tmp_path):
-    """Explicit compatibility policy retains legacy bare-cache behavior."""
-    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
-    bare = tmp_path / cache_shard_key(_dep().to_github_url())
-    bare.mkdir(parents=True)
-    git_cache = types.SimpleNamespace(_db_root=tmp_path, read_resolved_ref=lambda *_: (False, None))
-    downloader = MagicMock()
-    fake_refs = MagicMock()
-    fake_refs.resolve_commit_sha_for_ref.return_value = None
-    downloader._refs = fake_refs
-    resolver = build_tiered_ref_resolver(
-        downloader=downloader,
-        git_cache=git_cache,
-        freshness_policy=RefFreshnessPolicy.REPRODUCIBLE,
-    )
-    assert isinstance(resolver, TieredRefResolver)
+@pytest.mark.parametrize("ref", ["main", "refs/heads/main"])
+def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    del api._REFS["refs/heads/main"]
+    api._REFS["refs/tags/heads/main"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as cached_l2:
-        result = resolver.resolve(_dep())
-
-    assert result.resolved_commit == SHA_A
-    cached_l2.assert_called_once_with(bare, "main")
-    fake_refs.resolve_commit_sha_for_ref.assert_called_once()
-    fake_refs.resolve.assert_not_called()
-    assert resolver.stats["bare_rev_parse"] == 1
-    assert resolver.stats["legacy_clone"] == 0
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
 
 
-@pytest.mark.parametrize("lock_shape", ["matching", "unrelated", "sibling", "empty"])
-def test_install_lock_presence_cannot_authorize_unseeded_bare_refs(
-    monkeypatch, tmp_path, lock_shape: str
-) -> None:
-    """Only a concrete matching lock seed can avoid current upstream resolution."""
-    from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+@pytest.mark.parametrize("namespace", ["tags", "heads"])
+def test_a_hex_named_ref_wins_over_a_commit_abbreviation(namespace: str) -> None:
+    api = _RevParseCommitsApi()
+    api._REFS[f"refs/{namespace}/20241201"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
-    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
-    dep = _dep()
-    bare = tmp_path / cache_shard_key(dep.to_github_url())
-    bare.mkdir(parents=True)
-    locked_ref = _dep(repo="other/package") if lock_shape == "unrelated" else _dep()
-    if lock_shape == "sibling":
-        locked_ref = DependencyReference(
-            repo_url="owner/repo", reference="main", virtual_path="skills/sibling", is_virtual=True
-        )
-    locked = LockedDependency(
-        repo_url=locked_ref.repo_url,
-        virtual_path=locked_ref.virtual_path,
-        is_virtual=locked_ref.is_virtual,
-        resolved_ref="main",
-        resolved_commit=SHA_A,
-    )
-    context = types.SimpleNamespace(
-        ref_freshness_policy=None,
-        update_refs=False,
-        refresh=False,
-        existing_lockfile=LockFile(
-            dependencies={} if lock_shape == "empty" else {locked_ref.get_unique_key(): locked}
-        ),
-        logger=None,
-    )
-    downloader = MagicMock()
-    downloader._refs.resolve_commit_sha_for_ref.return_value = None
-    downloader._refs.resolve.return_value = ResolvedReference(
-        original_ref=str(dep),
-        ref_type=GitReferenceType.BRANCH,
-        resolved_commit=SHA_B,
-        ref_name="main",
-    )
-    resolver = build_tiered_ref_resolver(
-        downloader=downloader,
-        git_cache=types.SimpleNamespace(
-            _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
-        ),
-        freshness_policy=ref_freshness_policy_for_install(context),
-    )
-    assert resolver is not None
-    context.ref_resolver = resolver
-    seed_ref_resolver_from_lockfile(context)
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2:
-        result = resolver.resolve(dep)
-    assert result.resolved_commit == (SHA_A if lock_shape == "matching" else SHA_B)
-    stale_l2.assert_not_called()
-    if lock_shape == "matching":
-        downloader._refs.resolve.assert_not_called()
-    else:
-        downloader._refs.resolve.assert_called_once_with(dep)
-    if lock_shape == "sibling":
-        assert resolver.resolve(locked_ref).resolved_commit == SHA_A
-        other_unlocked = DependencyReference(
-            repo_url="owner/repo", reference="main", virtual_path="skills/new", is_virtual=True
-        )
-        assert resolver.resolve(other_unlocked).resolved_commit == SHA_B
-        downloader._refs.resolve.assert_called_once_with(dep)
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "20241201") == "d" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_hex_name_no_ref_holds_expands_through_the_commits_api() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["f00dfeed1"] = "9" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f00dfeed1") == "9" * 40
+    assert (api.queries, api.listings) == (["f00dfeed1"], 1)
+
+
+def test_a_branch_wins_over_a_tag_named_like_its_namespace() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/heads/main"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "main") == "a" * 40
+
+
+@pytest.mark.parametrize("ref", ["pull/1/head", "refs/pull/1/head"])
+def test_the_commits_api_tier_never_answers_with_a_pull_request_commit(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+    assert all(query.startswith(("heads/", "tags/")) for query in api.queries)
 
 
 @pytest.mark.parametrize(
-    "policy", [RefFreshnessPolicy.CURRENT_REMOTE, RefFreshnessPolicy.LOCKED_OR_CURRENT]
+    ("ref", "want"),
+    [
+        ("main", "a" * 40),
+        ("refs/heads/main", "a" * 40),
+        ("v1", "b" * 40),
+        ("refs/tags/v1", "b" * 40),
+    ],
 )
-def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_path, policy):
-    """Freshness-required resolution never substitutes a stale L2 answer."""
-    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
-    bare = tmp_path / cache_shard_key(_dep().to_github_url())
-    bare.mkdir(parents=True)
-    downloader = MagicMock()
-    fake_refs = MagicMock()
-    fake_refs.resolve_commit_sha_for_ref.return_value = None
-    fake_refs.resolve.side_effect = RuntimeError("remote unavailable")
-    downloader._refs = fake_refs
-    resolver = build_tiered_ref_resolver(
-        downloader=downloader,
-        git_cache=types.SimpleNamespace(
-            _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
-        ),
-        freshness_policy=policy,
-    )
-    assert isinstance(resolver, TieredRefResolver)
+def test_the_commits_api_tier_resolves_exact_branches_and_tags(ref: str, want: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
-    with (
-        patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2,
-        pytest.raises(RuntimeError, match="remote unavailable"),
-    ):
-        resolver.resolve(_dep())
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) == want
 
-    stale_l2.assert_not_called()
-    assert resolver._cache.size() == 0
-    assert "bare_rev_parse" not in resolver.stats
+
+@pytest.mark.parametrize(
+    "ref",
+    ["main..pull/1/head", "pull%2F1%2Fhead", "refs/pull/1/head", "main^{}", "main~1", "main@{1}"],
+    ids=["range", "percent-encoded", "refs-namespace", "peel", "ancestor", "reflog"],
+)
+def test_a_revision_expression_never_reaches_the_commits_api(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+    assert api.queries == []
+
+
+def test_a_full_commit_ref_is_not_a_commits_api_query() -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f" * 40) == "f" * 40
+    assert api.queries == []
+
+
+def test_a_branch_literally_named_like_a_pull_ref_resolves_to_its_own_commit() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/heads/pull/1/head"] = "c" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "pull/1/head") == "c" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_ref_with_a_space_gets_no_commits_api_query() -> None:
+    api = _RevParseCommitsApi()
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "main pull/1/head") is None
+    assert api.queries == []
+
+
+def test_a_non_ascii_name_resolves_only_as_a_branch_or_tag() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/v\u00e9"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v\u00e9") == "d" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_version_like_tag_is_found_in_one_listing() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/v1.2.0"] = "e" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v1.2.0") == "e" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_branch_named_like_a_version_still_resolves() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/heads/2.x"] = "9" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "2.x") == "9" * 40
+    assert (api.queries, api.listings) == ([], 1)

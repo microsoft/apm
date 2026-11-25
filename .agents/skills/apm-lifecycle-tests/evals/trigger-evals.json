@@ -1,0 +1,36 @@
+{
+  "description": "Trigger evals for the apm-lifecycle-tests dispatch description. 10 should-trigger + 10 should-NOT-trigger. 60/40 train/val split. Validation split is the ship gate (>=0.5 on should-trigger AND <0.5 on should-not-trigger).",
+  "should_trigger": {
+    "train": [
+      "Write a regression test for: apm deny does not remove the MCP server deployed by a previous install",
+      "Add an e2e test proving apm install --frozen fails when an edited instruction was restored",
+      "The reviewer says lifecycle coverage is missing for the uninstall cleanup change; add it",
+      "Add a state machine rule for apm update after an approval is revoked",
+      "Migrate tests/integration/test_hook_path_package_lifecycle.py into the new lifecycle family",
+      "Prove that apm uninstall keeps a user-authored file next to a deployed skill"
+    ],
+    "val": [
+      "Add an integration test that apm compile does not write the lockfile twice",
+      "We fixed apm prune leaving a stale lockfile entry; add the test that would have caught it",
+      "Write the replay row for T4: newer-generator lockfile refused by apm prune",
+      "Add a docs journey step for the CI gate with apm audit --ci"
+    ]
+  },
+  "should_not_trigger": {
+    "train": [
+      "Add a unit test for DependencyReference.parse with a GitLab subgroup URL",
+      "Review this PR for missing test coverage and post the panel verdict",
+      "Fix the ruff RUF043 lint error in tests/unit/test_auth.py",
+      "Which tests in tests/unit can we delete to speed up CI?",
+      "Update the CHANGELOG for the 0.37 release",
+      "Shard the Windows unit tests into three CI jobs"
+    ],
+    "val": [
+      "Write a property test for the semver range parser",
+      "Explain how the architecture linter guards work",
+      "Rename the --skill flag in the install help text",
+      "Profile why apm --version takes 1.3 seconds to start"
+    ]
+  },
+  "notes": "Near-misses cover unit tests, PR review (persona), corpus cuts (steward/method), CI topology, docs and lint work."
+}

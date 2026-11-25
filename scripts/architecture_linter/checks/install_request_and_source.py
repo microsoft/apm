@@ -262,7 +262,7 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     exclusion_calls = _named_calls(handler_nodes, "filter_excluded_mcp_runtimes")
     dry_run_validation_calls = _named_calls(handler_nodes, "_validate_mcp_dry_run_entry")
     registry_validation_calls = _attribute_calls(command_nodes, "prevalidate_registry_dependencies")
-    bootstrap_calls = _named_calls(command_nodes, "_create_minimal_apm_yml")
+    bootstrap_calls = _named_calls(command_nodes, "write_minimal_manifest")
     manifest_write_calls = _named_calls(command_nodes, "add_mcp_to_apm_yml")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
     apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")
@@ -506,6 +506,11 @@ def check_primitive_classification(provider: FactsProvider) -> tuple[Violation, 
 
 
 _OUTCOME_OWNER = "src/apm_cli/install/outcome.py"
+# A package becomes installed only through outcome.package_install_count; the
+# fetch signal (``int(self.fetched_this_run)``) is the one permitted input.
+_INSTALLED_PROMOTION = re.compile(
+    r"""\[\s*["']installed["']\s*\]\s*=\s*1\b|["']installed["']\s*:\s*int\((?!self\.fetched_this_run\))"""
+)
 _OUTCOME_ADAPTERS = (
     "src/apm_cli/commands/install.py",
     "src/apm_cli/commands/update.py",
@@ -571,16 +576,49 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
                         column=column + 1,
                     )
                 )
+    # Apply barrier (#3874): a failed direct dependency stops the install before
+    # integration, so a failed run never deploys untracked files.
+    pipeline_lines = _lines(provider.file_facts("src/apm_cli/install/pipeline.py"))
+    barrier = [
+        n for n, line in enumerate(pipeline_lines) if "if direct_dependency_failed(ctx):" in line
+    ]
+    integrate = [
+        n for n, line in enumerate(pipeline_lines) if "_run_integration_phase(ctx)" in line
+    ]
+    if len(barrier) != 1 or not integrate or barrier[0] > min(integrate):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/pipeline.py",
+                "run_install_pipeline must stop on direct_dependency_failed before integrating (#3874)",
+            )
+        )
     if not (
         _present(owner, "def result_from_install_context(")
         and _present(owner, "def finalize_install_result(")
         and _present(owner, "def apply_install_command_outcome(")
+        and _present(owner, "def package_install_count(")
     ):
         findings.append(
             _summary(
                 rule_id,
                 _OUTCOME_OWNER,
-                "Install outcome owner must define result_from_install_context, finalize_install_result, and apply_install_command_outcome",
+                "Install outcome owner must define result_from_install_context, finalize_install_result, apply_install_command_outcome, and package_install_count",
             )
         )
+    # Truthful install counts (#4184): only package_install_count promotes a
+    # package to installed; integration results never count it directly.
+    for path in _python_paths(provider, f"{_SRC_PREFIX}install/"):
+        for number, line in enumerate(_lines(provider.file_facts(path)), start=1):
+            match = _INSTALLED_PROMOTION.search(line)
+            if match and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Route per-package install counts through outcome.package_install_count",
+                        line=number,
+                        column=match.start() + 1,
+                    )
+                )
     return tuple(findings)

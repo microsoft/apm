@@ -1,0 +1,37 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: contoso/platform/agent-skills
+  name: ado-helper
+  host: dev.azure.com
+  resolved_commit: eb316d5ee4db7c13bd9234b9066e01d059c3a117
+  resolved_ref: main
+  version: unknown
+  virtual_path: skills/ado-helper
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .agents/skills/ado-helper
+  - .agents/skills/ado-helper/SKILL.md
+  deployed_file_hashes:
+    .agents/skills/ado-helper/SKILL.md: sha256:d0c75413cd46673dba60e74876c9f051a2b24e3345708c75727708ae0d8bd34f
+  content_hash: sha256:3e607a37c875d3e41921b1541a2b937c6fee5877937e128bf5aa41b4b420ddfb
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/ado-helper
+  runtime: null
+  scope: project
+  owners:
+  - dev.azure.com/contoso/platform/agent-skills/skills/ado-helper
+  active_owner: dev.azure.com/contoso/platform/agent-skills/skills/ado-helper
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/ado-helper/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - dev.azure.com/contoso/platform/agent-skills/skills/ado-helper
+  active_owner: dev.azure.com/contoso/platform/agent-skills/skills/ado-helper
+  content_hash: sha256:d0c75413cd46673dba60e74876c9f051a2b24e3345708c75727708ae0d8bd34f

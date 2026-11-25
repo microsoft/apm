@@ -9,6 +9,8 @@ import pytest
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import MCPDependency
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # MCPDependency Model
@@ -548,6 +550,36 @@ class TestMCPDependencyHardening:
         dep = MCPDependency.from_string("valid-name")
         assert dep.name == "valid-name"
 
+    @pytest.mark.parametrize(
+        "name", ["__proto__", "constructor", "prototype", "__PROTO__", "Constructor", "PROTOTYPE"]
+    )
+    def test_reserved_object_key_name_rejected(self, name):
+        with pytest.raises(ValueError, match=rf"Invalid MCP dependency name '{name}': reserved"):
+            MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize("name", ["proto", "my-constructor", "prototype-server", "_proto_"])
+    def test_name_containing_reserved_word_accepted(self, name):
+        MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize(
+        "name", ["__proto__\n", "io.github.acme/constructor", "acme/__PROTO__", "x/Prototype"]
+    )
+    def test_reserved_key_variant_rejected(self, name):
+        with pytest.raises(ValueError, match=r"(?s)Invalid MCP dependency name .*: reserved"):
+            MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    def test_trailing_newline_ordinary_name_still_accepted(self):
+        name = "ok-name\n"
+        MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize(
+        ("name", "registry"), [("@scope/constructor", None), ("acme/constructor", False)]
+    )
+    def test_name_whose_config_key_is_not_reserved_accepted(self, name, registry):
+        # A scoped name and a self-defined name keep their full name as the config key.
+        dep = MCPDependency(name=name, registry=registry, url="https://example.com/mcp")
+        dep.validate(strict=False)
+
     def test_from_string_fails_for_invalid_name(self):
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             MCPDependency.from_string("bad name with space")
@@ -571,16 +603,15 @@ class TestMCPDependencyHardening:
             MCPDependency.from_dict({"name": "bad name"})
 
     def test_from_dict_self_defined_runs_strict_checks(self):
-        # registry=False with stdio transport but no command -> existing
-        # strict=True check still fires.
-        with pytest.raises(ValueError, match="requires 'command'"):
-            MCPDependency.from_dict(
-                {
-                    "name": "x",
-                    "registry": False,
-                    "transport": "stdio",
-                }
-            )
+        # Identical payloads differ only in ``registry``: the registry entry
+        # gets universal checks only, the self-defined one gets strict=True
+        # checks (here: the transport allowlist).
+        payload = {"name": "srv", "transport": "websocket", "url": "https://example.com/mcp"}
+        registry_dep = MCPDependency.from_dict(dict(payload))
+        assert registry_dep.transport == "websocket"
+        assert registry_dep.is_self_defined is False
+        with pytest.raises(ValueError, match="unsupported transport 'websocket'"):
+            MCPDependency.from_dict({**payload, "registry": False})
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +629,7 @@ class TestBuildSelfDefinedServerInfo:
         assert "remotes" in result
         assert len(result["remotes"]) == 1
         assert result["remotes"][0]["url"] == "http://example.com"
-        assert result["remotes"][0]["transport_type"] == "http"
+        assert result["remotes"][0]["transport"] == "streamable-http"
         assert "packages" not in result
 
     def test_sse_transport_builds_remote(self):
@@ -610,7 +641,7 @@ class TestBuildSelfDefinedServerInfo:
         )
         result = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in result
-        assert result["remotes"][0]["transport_type"] == "sse"
+        assert result["remotes"][0]["transport"] == "sse"
         assert result["remotes"][0]["url"] == "http://example.com/sse"
 
     def test_stdio_transport_builds_package(self):
@@ -856,14 +887,14 @@ class TestInstallMCPDepsWithOverlays:
             command="my-cmd",
         )
 
-        count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
+        count = MCPIntegrator.install([dep], runtime="copilot", explicit_target="copilot")
 
         # Self-defined deps should NOT go through registry validation
         # (MCPServerOperations is never instantiated for self-defined-only lists)
         mock_install_runtime.assert_called_once()
         call_args = mock_install_runtime.call_args
         # First positional arg is runtime, second is dep list
-        assert call_args[0][0] == "vscode"
+        assert call_args[0][0] == "copilot"
         assert call_args[0][1] == ["my-local"]
         # Fourth positional arg is server_info_cache with synthetic info
         server_cache = call_args[0][3]
@@ -885,7 +916,7 @@ class TestInstallMCPDepsWithOverlays:
         mock_ops.collect_runtime_variables.return_value = {}
 
         dep = MCPDependency.from_string("io.github.github/github-mcp-server")
-        count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
+        count = MCPIntegrator.install([dep], runtime="copilot", explicit_target="copilot")
 
         mock_ops.validate_servers_exist.assert_called_once_with(
             ["io.github.github/github-mcp-server"], server_info_cache=ANY
@@ -914,7 +945,7 @@ class TestInstallMCPDepsWithOverlays:
         )
 
         count = MCPIntegrator.install(
-            [registry_dep, self_defined_dep], runtime="vscode", explicit_target="vscode"
+            [registry_dep, self_defined_dep], runtime="copilot", explicit_target="copilot"
         )
 
         # Registry dep goes through validation
@@ -945,3 +976,26 @@ def test_opencode_enabled_object_order_does_not_create_drift() -> None:
         )
         == set()
     )
+
+
+class TestMCPDependencyTargetsScoping:
+    """Regression for #2606: ``targets`` scopes reach; it is not a harness passthrough key."""
+
+    def test_targets_key_does_not_leak_into_extra(self):
+        dep = MCPDependency.from_dict(
+            {
+                "name": "srv-claude-only",
+                "registry": False,
+                "transport": "stdio",
+                "command": "echo",
+                "targets": ["claude"],
+            }
+        )
+        assert "targets" not in (dep.extra or {})
+
+    def test_targets_is_modeled_and_rejects_unknown_target_names(self):
+        base = {"name": "srv", "registry": False, "transport": "stdio", "command": "echo"}
+        scoped = MCPDependency.from_dict({**base, "targets": ["claude"]})
+        assert scoped.targets == ["claude"]
+        with pytest.raises(ValueError, match="Unknown target 'claud'"):
+            MCPDependency.from_dict({**base, "targets": ["claud"]})

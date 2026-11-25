@@ -2,19 +2,63 @@
 
 import json
 import logging
-import shutil
+import os
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
+from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.integration.hook_native_formats import (
+    hook_module_type_metadata,
+    is_hook_module_type_metadata,
+    node_module_type,
+)
+from apm_cli.utils.content_hash import content_hash_of_bytes
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
+# Targets whose hook loader scans the deployed bundle for JSON descriptors, so
+# the bundle deploys no JSON assets and no module-type package.json.
+_JSON_EXCLUDING_HOOK_TARGETS = frozenset({"copilot"})
 _log = logging.getLogger(__name__)
+
+
+def hook_bundle_deploys_json(target_name: str) -> bool:
+    """Return True when *target_name*'s hook bundle deploys JSON and module metadata."""
+    return target_name not in _JSON_EXCLUDING_HOOK_TARGETS
+
+
+def is_deployed_hook_module_metadata(
+    path: PurePath,
+    text: str,
+    *,
+    target_name: str,
+    recorded_hash: str | None,
+) -> bool:
+    """Return True for module metadata this bundle deploy wrote, still unedited (#4921).
+
+    Hook bundle deploy writes a module-type ``package.json`` beside JavaScript
+    hooks and deploys nested copies with their scripts (#2950). Neither defines
+    hooks. Only a ``package.json`` whose *text* holds just a Node module type,
+    on a target whose bundle deploys it, and still hashes to the value recorded
+    at deploy, qualifies; anything else stays a hook candidate.
+    """
+    if (
+        path.name != "package.json"
+        or recorded_hash is None
+        or not hook_bundle_deploys_json(target_name)
+        or content_hash_of_bytes(text.encode("utf-8")) != recorded_hash
+    ):
+        return False
+    try:
+        return is_hook_module_type_metadata(json.loads(text))
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -71,11 +115,11 @@ def _hook_module_type(package_path: Path, hook_source_root: Path) -> str:
             try:
                 data = json.loads(package_json.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                return "commonjs"
+                return node_module_type(None)
             package_type = data.get("type") if isinstance(data, dict) else None
-            return package_type if package_type in {"commonjs", "module"} else "commonjs"
+            return node_module_type(package_type)
         if current in (package_path, current.parent):
-            return "commonjs"
+            return node_module_type(None)
         current = current.parent
 
 
@@ -99,16 +143,60 @@ def _is_root_hook_descriptor(
     return stem == "hooks" or stem.startswith("hooks-") or stem.endswith("-hooks")
 
 
+def _walk_dereferencing(source_root: Path, package_root: Path) -> list[Path]:
+    """List files under *source_root* as local materialization lays them out.
+
+    In-package symlinks (files and directories) appear under their link
+    names, as the local package copy dereferences them; a link that escapes
+    *package_root*, dangles or cycles raises ``PathTraversalError``, as that
+    copy aborts.
+    """
+    package_root = package_root.resolve()
+    found: list[Path] = []
+    pending = [(source_root, frozenset({source_root.resolve()}))]
+    while pending:
+        directory, visited = pending.pop()
+        for entry in directory.iterdir():
+            target = entry
+            if entry.is_symlink():
+                try:
+                    target = ensure_path_within(entry.resolve(strict=True), package_root)
+                except OSError as exc:
+                    raise PathTraversalError(f"Unresolvable hook bundle link {entry}") from exc
+            if target.is_dir():
+                if target.resolve() in visited:
+                    raise PathTraversalError(f"Circular hook bundle link {entry}")
+                pending.append((entry, visited | {target.resolve()}))
+            elif target.is_file():
+                found.append(entry)
+    return sorted(found)
+
+
 def iter_deployable_hook_bundle_files(
     source_root: Path,
     *,
     descriptor_files: set[Path] | None = None,
     exclude_json_files: bool = False,
     include_package_metadata: bool = False,
+    dereference_within: Path | None = None,
 ) -> Iterator[Path]:
-    """Yield source files that hook bundle materialization may copy."""
+    """Yield source files that hook bundle materialization may copy.
+
+    With *dereference_within*, in-package symlinks are followed as the local
+    package copy follows them (see :func:`_walk_dereferencing`).
+
+    The hooks root's own ``package.json`` is skipped (the deployed module-type
+    sidecar replaces it) unless *include_package_metadata*; a nested
+    ``package.json`` is module metadata for its directory and deploys with the
+    scripts it governs (#2950).
+    """
     descriptors = descriptor_files or set()
-    for source_file in sorted(source_root.rglob("*")):
+    candidates = (
+        sorted(source_root.rglob("*"))
+        if dereference_within is None
+        else _walk_dereferencing(source_root, dereference_within)
+    )
+    for source_file in candidates:
         if exclude_json_files and source_file.suffix.lower() == ".json":
             _log.debug(
                 "Skipping JSON hook bundle asset %s for recursive-scanner target",
@@ -116,14 +204,71 @@ def iter_deployable_hook_bundle_files(
             )
             continue
         if (
-            source_file.is_symlink()
+            (source_file.is_symlink() and dereference_within is None)
             or not source_file.is_file()
             or source_file.name == MARKER_FILENAME
-            or (source_file.name == "package.json" and not include_package_metadata)
+            or (
+                source_file.name == "package.json"
+                and source_file.parent == source_root
+                and not include_package_metadata
+            )
             or _is_root_hook_descriptor(source_file, source_root, descriptors)
         ):
             continue
         yield source_file
+
+
+def _written_path(target_file: Path, checked: Path) -> Path:
+    """Return the path a completed write is reported and receipted under.
+
+    The lexically normalized destination keeps the spelling every other
+    destination uses (no symlink resolution of the root); a '..' detour
+    through a missing directory is unreadable as spelled, so it is collapsed.
+    Falls back to the containment-checked path when the two disagree.
+    """
+    normalized = Path(os.path.normpath(target_file))
+    return normalized if normalized.resolve() == checked else checked
+
+
+def hook_containment_root(target, project_root: Path) -> Path:
+    """Return the root a target's deployed hook bundle must stay within (#4772).
+
+    A Claude target relocated by an absolute ``CLAUDE_CONFIG_DIR`` outside the
+    deploy root is contained by that directory, so hooks deploy where Claude
+    reads them. Every other target keeps *project_root*; so does a Claude root
+    at the filesystem root or at an ancestor of HOME, which therefore stays
+    refused as before.
+    """
+    root = getattr(target, "managed_deploy_root", None)
+    if getattr(target, "name", None) != "claude" or root is None or not root.is_absolute():
+        return project_root
+    resolved = root.resolve()
+    if resolved == Path(resolved.anchor) or Path.home().resolve().is_relative_to(resolved):
+        return project_root
+    return root
+
+
+def hook_cleanup_root(target, project_root: Path) -> Path | None:
+    """Return the root an emptied hook file may be deleted under (#4945).
+
+    The :func:`hook_containment_root` of *target*. An outside-HOME Claude root
+    that is itself a symlink, as configured or as stored, may have been
+    redirected since install, so it yields ``None``: the cleanup rewrites the
+    file in place, never deletes it.
+    """
+    from apm_cli.integration.targets import configured_user_root
+
+    root = hook_containment_root(target, project_root)
+    if root == project_root:
+        return root
+    try:
+        # The scope resolver stores the resolved path; the configured one keeps the link.
+        configured = configured_user_root(target.name)
+    except PathTraversalError:
+        return None
+    if root.is_symlink() or (configured and Path(os.path.normpath(configured)).is_symlink()):
+        return None
+    return root
 
 
 def copy_deployed_hook_bundle(
@@ -141,6 +286,7 @@ def copy_deployed_hook_bundle(
     exclude_json_files: bool = False,
     source_plan=None,
     selected_bundle_files: frozenset[Path],
+    target=None,
 ) -> HookBundleCopyResult:
     """Copy each referenced script's whole hooks root and module type.
 
@@ -154,13 +300,21 @@ def copy_deployed_hook_bundle(
     CommonJS.
     """
     result = HookBundleCopyResult()
+    containment = hook_containment_root(target, project_root)
+
+    def entry(path: Path) -> str:
+        """The lock entry for *path*: an external target root uses its locator."""
+        if containment == project_root:
+            return portable_relpath(path, project_root)
+        return deployed_path_entry(path, project_root, [target])
+
     package_path = package_path.resolve()
     if hook_file_dir is not None:
         hook_file_dir = hook_file_dir.resolve()
     selected_bundle_files = frozenset(path.resolve() for path in selected_bundle_files)
     source_target_roots: dict[tuple[Path, Path], str] = {}
     root_has_js_hook: dict[tuple[Path, Path], bool] = {}
-    command_target_rels = {target_rel for _source_file, target_rel in scripts}
+    command_targets = {project_root / target_rel for _source_file, target_rel in scripts}
     descriptor_files = {path.resolve() for path in hook_descriptor_files or set()}
 
     for source_file, target_rel in scripts:
@@ -177,7 +331,7 @@ def copy_deployed_hook_bundle(
         )
         root_has_js_hook.setdefault((source_root, target_root), False)
 
-    copy_plan: dict[str, Path] = {}
+    copy_plan: dict[str, tuple[Path, Path]] = {}
     files_by_ancestor: dict[Path, list[Path]] = defaultdict(list)
     for source_file in selected_bundle_files:
         current = source_file.parent
@@ -196,15 +350,23 @@ def copy_deployed_hook_bundle(
                 continue
             source_rel = source_file.relative_to(source_root)
             target_file = target_root / source_rel
-            copy_plan[portable_relpath(target_file, project_root)] = source_file
+            ensure_path_within(target_file, containment)
+            copy_plan[entry(target_file)] = (target_file, source_file)
             if source_file.suffix.lower() in _HOOK_SCRIPT_EXTENSIONS:
                 root_has_js_hook[(source_root, target_root)] = True
 
-    for target_rel, source_file in copy_plan.items():
-        target_file = project_root / target_rel
-        ensure_path_within(target_file, project_root)
+    for target_rel, (target_file, source_file) in copy_plan.items():
+        # Write through the resolved path: an out-and-back '..' destination
+        # passes containment but would mkdir its detour outside the root.
+        checked = ensure_path_within(target_file, containment)
         if integrator.try_adopt_identical(target_file, source_file, target_paths):
-            if target_rel in command_target_rels:
+            if integrator.receipted_unchanged(target_file):
+                continue  # unchanged since APM wrote it: not an adoption (RA-007)
+            # A managed script already holding the source bytes is APM's: record
+            # the receipt the skipped copy would have (#4184, #3701).
+            if managed_files and target_rel in managed_files:
+                integrator.note_rendered_write(target_file)
+            if target_file in command_targets:
                 result.files_adopted += 1
             continue
         if integrator.check_collision(
@@ -215,11 +377,18 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_file)
-        if target_rel in command_target_rels:
+        # An edited copied script is kept like any managed file (#4626).
+        if integrator.keeps_edited_output(
+            target_file, source_file, target_rel, force, diagnostics, target_paths
+        ):
+            continue
+        write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
+        write_seam.copy2(source_file, checked)
+        written = _written_path(target_file, checked)
+        integrator.note_rendered_write(written)
+        if target_file in command_targets:
             result.scripts_copied += 1
-        target_paths.append(target_file)
+        target_paths.append(written)
 
     if exclude_json_files:
         return result
@@ -228,9 +397,14 @@ def copy_deployed_hook_bundle(
         if not root_has_js_hook.get((_source_root, target_root), False):
             continue
         target_file = target_root / "package.json"
-        target_rel = portable_relpath(target_file, project_root)
-        ensure_path_within(target_file, project_root)
-        content = json.dumps({"type": module_type}, indent=2, sort_keys=True) + "\n"
+        checked = ensure_path_within(target_file, containment)
+        target_rel = entry(target_file)
+        if target_rel in copy_plan:
+            # An enclosing root already deploys this directory's own metadata.
+            continue
+        content = (
+            json.dumps(hook_module_type_metadata(module_type), indent=2, sort_keys=True) + "\n"
+        )
         if target_file.exists() and _same_text(target_file, content):
             target_paths.append(target_file)
             continue
@@ -242,8 +416,20 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        target_file.write_text(content, encoding="utf-8")
-        target_paths.append(target_file)
+        if integrator.keeps_edited_output(
+            target_file,
+            target_file,
+            target_rel,
+            force,
+            diagnostics,
+            target_paths,
+            expected_content=content,
+        ):
+            continue
+        write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
+        write_seam.write_text(checked, content)
+        written = _written_path(target_file, checked)
+        integrator.note_rendered_write(written)
+        target_paths.append(written)
 
     return result

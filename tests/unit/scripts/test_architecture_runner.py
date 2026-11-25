@@ -294,10 +294,10 @@ def test_spill_write_failure_keeps_facts_without_rewalking(
     target.write_text(_SAMPLE_SOURCE, encoding="utf-8")
     provider = FactsProvider(tmp_path, (path,), registry=None)
 
-    def fail_spill(_relative_path: str, _facts: FileFacts) -> None:
+    def fail_spill(_key: object, _facts: FileFacts) -> None:
         raise OSError("injected spill failure")
 
-    monkeypatch.setattr(provider, "_spill_facts", fail_spill)
+    monkeypatch.setattr(provider.session, "store_cold", fail_spill)
 
     with pytest.raises(OSError, match="injected spill failure"):
         provider.file_facts(path)
@@ -324,10 +324,10 @@ def test_spill_load_failure_never_rebuilds_or_hides_the_failure(
     facts = provider.file_facts(path)
     provider._transient_facts.clear()
 
-    def fail_load(_spill_path: Path) -> FileFacts:
+    def fail_load(_key: object) -> FileFacts:
         raise OSError("injected spill load failure")
 
-    monkeypatch.setattr(provider, "_load_spilled_facts", fail_load)
+    monkeypatch.setattr(provider.session, "load_cold", fail_load)
 
     for _ in range(2):
         with pytest.raises(OSError, match="injected spill load failure"):
@@ -598,58 +598,111 @@ def test_literal_group_import_converts_system_exit_to_import_error(
 
 
 _EXPECTED_RULE_ID_TEXT = """
+contracts-tests-conformance-behavioral-coverage
 contracts-tests-executable-contract-authorities
 contracts-tests-lifecycle-smoke-partition
 contracts-tests-taxonomy-classification
 contracts-tooling-ado-lock-coordinates
 contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
+contracts-tooling-ci-merge-queue-freshness
+contracts-tooling-ci-merge-time-topology
+contracts-tooling-ci-shard-file-lists
+contracts-tooling-ci-validation-topology
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
+contracts-tooling-lifecycle-script-gate
+contracts-tooling-lifecycle-policy-errors
+contracts-tooling-linter-cache-content-key
+contracts-tooling-linter-cache-parse-once
+contracts-tooling-local-identity
+contracts-tooling-local-path-anchor
+contracts-tooling-lockfile-generator-gate
+contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
 contracts-tooling-lockfile-symlink-write-guard
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-lockfile-write-authority
 contracts-tooling-native-lifecycle-evidence
 contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
+contracts-tooling-remediation-advice
+contracts-tooling-remediation-drift-kinds
 contracts-tooling-source-replacements
+contracts-tooling-strip-charset
+contracts-tooling-update-plan-recorded-ref
 install-deployment-approval-outcome-routing
+install-deployment-approval-store-identity
+install-deployment-approve-command
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
+install-deployment-bundle-admission-owner
 install-deployment-bundle-compile-staging
+install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-spelling-aliases
+install-deployment-cleanup-target-roots
+install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
+install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
+install-deployment-claude-agents-md-routing
+install-deployment-agent-render-then-adopt
+install-deployment-command-render-then-adopt
+install-deployment-overwrite-evidence
 install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-drift-claim-classification
+install-deployment-effective-selection
+install-deployment-executable-item-admission
 install-deployment-executable-trust-context
+install-deployment-explicit-policy-source-owner
+install-deployment-frozen-flag-reader
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration
 install-deployment-gitlab-policy-adapter
+install-deployment-hook-pin-frozen-audit-parity
 install-deployment-incomplete-chain-routing
+install-deployment-install-lockfile-preflight
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-local-reparent-rule
 install-deployment-lock-parent-placement
+install-deployment-locked-content-verdict
+install-deployment-locked-copy-validity
+install-deployment-lockfile-required
+install-deployment-locked-source-cache
+install-deployment-package-content-hash
+install-deployment-reanchor-receipt-history
+install-deployment-reanchor-writer-prediction
+install-deployment-receipt-collection
+install-deployment-skill-layout
 install-deployment-skill-preflight
+install-deployment-skill-adoption-baseline
+install-deployment-skill-adoption-trusted-receipt
+install-deployment-selection-merge
+install-deployment-server-name-rule
 install-deployment-locked-skill-subset-reconstruction
+install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract
 install-deployment-manifest-inheritance-includes
 install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
+install-deployment-lifecycle-serialization-closed-world
+install-deployment-mcp-admission
 install-deployment-mcp-native-comparison
 install-deployment-mcp-ownership-migration
 install-deployment-mcp-registry-resolution
@@ -657,14 +710,24 @@ install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-policy-cache-pin
 install-deployment-policy-disable-switch-owner
+install-deployment-policy-field-types
+install-deployment-policy-mcp-transport-projection
+install-deployment-policy-outcome-routing
 install-deployment-policy-remote-origin-owner
+install-deployment-policy-violation-subjects
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
+install-deployment-install-entry-routing
+install-deployment-install-commit-order
+install-deployment-deploy-write-seam
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
+install-deployment-remote-read-reuse
+install-deployment-registry-url-scheme
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
 install-deployment-resolution-replacement
@@ -674,15 +737,30 @@ install-deployment-single-file-materialization
 install-deployment-skills-root-derivation
 install-deployment-source-plan
 install-deployment-target-file-contraction
+install-deployment-trust-fingerprint
+install-deployment-trust-policy-outcome
+install-deployment-local-bundle-hook-trust
+install-deployment-uninstall-absence-proof
+install-deployment-uninstall-preflight
+install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
+install-deployment-unpack-executable-refusal
+install-deployment-update-content-integrity
+install-deployment-update-registry-integrity
+install-deployment-update-marketplace-provenance
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source
 marketplace-integrations-bundle-format-authority
+marketplace-integrations-catalog-freshness
 marketplace-integrations-catalog-manifest
+marketplace-integrations-catalog-origin
+marketplace-integrations-claude-ownership
 marketplace-integrations-codex-native-lifecycle
+marketplace-integrations-codex-offline-launch
 marketplace-integrations-copilot-ownership
+marketplace-integrations-dependency-confusion
 marketplace-integrations-generated-bundle-lf-writers
 marketplace-integrations-hash-visible-lf-writers
 marketplace-integrations-legacy-skill-membership
@@ -691,12 +769,16 @@ marketplace-integrations-locked-evidence
 marketplace-integrations-metadata-enrichment
 marketplace-integrations-native-registration
 marketplace-integrations-output-path
+marketplace-integrations-pack-credential-files
+marketplace-integrations-pack-plugin-manifests
 marketplace-integrations-package-construction
 marketplace-integrations-package-format-precedence
 marketplace-integrations-package-projection
 marketplace-integrations-producer-admission
+marketplace-integrations-project-map
 marketplace-integrations-projection-boundary
 marketplace-integrations-raw-diagnostics
+marketplace-integrations-ref-pin-commit
 marketplace-integrations-removed-plugin-lifecycle
 marketplace-integrations-source-admission
 marketplace-integrations-source-parsing
@@ -707,16 +789,22 @@ mutation_writes.copilot_cli_mcp_paths
 mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
+mutation_writes.hook_containment_root
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
+mutation_writes.mcp_config_link_policy
 mutation_writes.mcp_declaration_scope
 mutation_writes.mcp_json_config_write
+mutation_writes.mcp_json_config_writer
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
 mutation_writes.mcp_passthrough_denylist
+mutation_writes.mcp_remote_shape_table
+mutation_writes.mcp_remote_transport_normalization
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.opencode_enabled_intent
+mutation_writes.plugin_root_render
 mutation_writes.user_hook_home_reference
 mutation_writes.user_root_scope
 onboarding-metadata-only
@@ -727,50 +815,77 @@ registry_delegation.apm_home_resolution
 registry_delegation.audit_target_selection
 registry_delegation.bootstrap_project_name
 registry_delegation.build_id_verification
+registry_delegation.cli_startup_imports
 registry_delegation.command_machine_output
 registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes
+registry_delegation.console_construction
+registry_delegation.console_streams
+registry_delegation.deprecation_catalog
 registry_delegation.diagnostic_ascii_owner
+registry_delegation.experimental_flags
 registry_delegation.experimental_target_hints
+registry_delegation.harness_user_root_resolution
 registry_delegation.host_backend_dispatch
+registry_delegation.install_layering
 registry_delegation.install_target_selection
 registry_delegation.lifecycle_docs_aggregate
 registry_delegation.lockfile_version_authority
 registry_delegation.logger_redaction_attachment
 registry_delegation.manifest_schema_negotiation
+registry_delegation.module_ownership
 registry_delegation.native_locator_target_names
 registry_delegation.output_diagnostics
 registry_delegation.policy_ref_redaction
+registry_delegation.policy_target_projection
 registry_delegation.process_interrupt_signals
 registry_delegation.root_cli_output_mode
 registry_delegation.runtime_descriptors
+registry_delegation.scope_manifest_path
 registry_delegation.target_vocabulary
 registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
+transport-platform-archive-extraction-limits
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-auth-outcome-owner
+transport-platform-authenticated-egress
 transport-platform-cache-cleanup-outcome
+transport-platform-cached-repo-git
+transport-platform-checkout-verified
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
+transport-platform-credential-report-owner
+transport-platform-credential-value-rendering
+transport-platform-deploy-store-verified-reads
+transport-platform-egress-route-policy
+transport-platform-external-executable-owner
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
+transport-platform-github-credential-class
 transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
+transport-platform-http-session-construction
 transport-platform-ls-remote-tag-commits
+transport-platform-marketplace-catalog-credentials
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
+transport-platform-origin-bounded-redirect
+transport-platform-proxy-http-token
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
+transport-platform-rmtree-callback-no-follow-chmod
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
 transport-platform-unix-install-ownership
+transport-platform-url-builder-credential-free
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """
@@ -1847,3 +1962,65 @@ def test_public_run_has_no_partial_selection_surface() -> None:
     executed = [result.rule_id for group in partial.group_results for result in group.rules]
     assert executed == [picked]
     assert partial.exit_code == 2
+
+
+def test_the_definition_index_matches_the_direct_scan_and_fails_closed(tmp_path: Path) -> None:
+    """Indexed definers and fail-closed violations equal the per-call scan (#5196)."""
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    sources = {
+        "src/apm_cli/a.py": "def target():\n    pass\n\n\nclass Target:\n    pass\n",
+        "src/apm_cli/b.py": "class Holder:\n    def target(self):\n        pass\n",
+        "src/apm_cli/broken.py": "def (:\n",
+    }
+    provider = FactsProvider(tmp_path, tuple(sources), registry=None, source_overrides=sources)
+    for name, kinds in (
+        ("target", ("function",)),
+        ("Target", ("class",)),
+        ("absent", ("function",)),
+    ):
+        indexed = _defining_files(provider, "rule-x", name, kinds=kinds)
+        assert indexed == _scan_defining_files(provider, "rule-x", name, kinds=kinds)
+        assert [failure.path for failure in indexed[1]] == ["src/apm_cli/broken.py"]
+    definers, _ = _defining_files(provider, "rule-x", "target", kinds=("function",))
+    assert "src/apm_cli/a.py" in definers
+
+
+def test_every_binary_selection_detector_is_gated_or_always_runs() -> None:
+    """A detector added without a pre-filter gate can never be skipped silently (#5196)."""
+    from dataclasses import fields
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _BINARY_DETECTORS,
+        _BinaryNeeds,
+    )
+
+    gates = [detector.gate for detector in _BINARY_DETECTORS if detector.gate is not None]
+    assert len(gates) == len(set(gates)), gates
+    assert set(gates) == {field.name for field in fields(_BinaryNeeds)}
+
+
+def test_a_token_free_file_skips_every_binary_selection_detector(tmp_path: Path) -> None:
+    """A synthetic token-free file needs no detector; a file with the tokens needs its own."""
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    plain = "def helper(value):\n    if value:\n        return value\n    return None\n"
+    tokened = 'import subprocess\n\n\ndef helper():\n    subprocess.run(["apm"], check=False)\n'
+    provider = FactsProvider(
+        tmp_path,
+        ("plain.py", "tokened.py"),
+        registry=None,
+        source_overrides={"plain.py": plain, "tokened.py": tokened},
+    )
+    assert not any(asdict(_binary_needs(provider.tree_index("plain.py"))).values())
+    needs = asdict(_binary_needs(provider.tree_index("tokened.py")))
+    assert {flag for flag, on in needs.items() if on} == {"subprocess"}

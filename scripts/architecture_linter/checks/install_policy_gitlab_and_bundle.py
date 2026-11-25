@@ -44,6 +44,7 @@ RULE_WINNER_SELECTION = "install-deployment-dependency-winner-selection"
 
 
 RULE_REMOTE_ORIGIN_OWNER = "install-deployment-policy-remote-origin-owner"
+RULE_REMOTE_READ_REUSE = "install-deployment-remote-read-reuse"
 
 
 def _count_text(lines: Sequence[tuple[int, str]], needle: str) -> int:
@@ -134,6 +135,14 @@ _REMOTE_ORIGIN_READ_COUNT = 1
 
 
 _REMOTE_MODULE = "src/apm_cli/policy/_remote.py"
+
+
+# The process-scoped remote reuse is a closed seam: only the verified-state
+# record's writer enters it, and the owner drops answers read before
+# user code ran (#4977).
+_REUSE_CALL = re.compile(r"\breuse_remote_reads\(")
+_REUSE_CALLER = "src/apm_cli/install/verdict_record.py"
+_REUSE_EPOCH = re.compile(r"\bforget_epoch\(\)")
 
 
 def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -240,18 +249,23 @@ def check_gitlab_facade_orchestration(provider: FactsProvider) -> tuple[Violatio
 
 
 _LOCAL_BUNDLE_HANDLER = "src/apm_cli/install/local_bundle_handler.py"
+# Bundle installs reach the preflight through the shared bundle admission owner.
+_BUNDLE_ADMISSION = "src/apm_cli/install/bundle_admission.py"
 
 
 _LOCAL_BUNDLE_PREFLIGHT_NEEDLES = (
     "from ..policy.install_preflight import run_policy_preflight",
     "policy_fetch, _enforcement_active = run_policy_preflight(",
-    "mcp_deps=bundle_mcp_deps",
 )
 
 
-def _has_cache_only_preflight(provider: FactsProvider) -> bool:
-    """Return whether the sole canonical preflight call explicitly runs cache-only."""
-    index = provider.tree_index(_LOCAL_BUNDLE_HANDLER)
+def _has_online_preflight(provider: FactsProvider) -> bool:
+    """Return whether the sole canonical preflight call resolves policy online.
+
+    A local bundle install resolves org policy as a package install does; a
+    cache-only lookup reads a cold cache as "no policy" (#4027).
+    """
+    index = provider.tree_index(_BUNDLE_ADMISSION)
     if index is None:
         return False
     calls = tuple(
@@ -263,35 +277,43 @@ def _has_cache_only_preflight(provider: FactsProvider) -> bool:
             and node.func.id == "run_policy_preflight"
         )
     )
-    return len(calls) == 1 and any(
-        keyword.arg == "cache_only"
-        and isinstance(keyword.value, ast.Constant)
-        and keyword.value.value is True
-        for keyword in calls[0].keywords
+    return len(calls) == 1 and not any(
+        keyword.arg in ("cache_only", None) for keyword in calls[0].keywords
     )
 
 
 def check_local_bundle_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
     """Local bundle installs must route policy through install_preflight.py."""
     rule_id = RULE_LOCAL_BUNDLE_PREFLIGHT
-    lines, failures = _configured(provider, _LOCAL_BUNDLE_HANDLER, rule_id)
-    if failures:
-        return failures
+    lines, failures = _configured(provider, _BUNDLE_ADMISSION, rule_id)
+    handler_lines, handler_failures = _configured(provider, _LOCAL_BUNDLE_HANDLER, rule_id)
+    if failures or handler_failures:
+        return (*failures, *handler_failures)
     findings = list(
         _require_all(
             rule_id,
-            _LOCAL_BUNDLE_HANDLER,
+            _BUNDLE_ADMISSION,
             lines,
             _LOCAL_BUNDLE_PREFLIGHT_NEEDLES,
             "Local bundle installs must route policy through install_preflight.py",
         )
     )
-    if not _has_cache_only_preflight(provider):
+    findings.extend(
+        _require_all(
+            rule_id,
+            _LOCAL_BUNDLE_HANDLER,
+            handler_lines,
+            ("mcp_deps=bundle_mcp_deps",),
+            "Local bundle installs must hand their MCP servers to the policy preflight",
+        )
+    )
+    if not _has_online_preflight(provider):
         findings.append(
             _report(
                 rule_id,
-                _LOCAL_BUNDLE_HANDLER,
-                "Local bundle policy preflight must explicitly run cache-only",
+                _BUNDLE_ADMISSION,
+                "Local bundle policy preflight must resolve org policy as package "
+                "installs do, never cache-only",
             )
         )
     return tuple(findings)
@@ -312,7 +334,7 @@ def check_require_hashes_enforcement(provider: FactsProvider) -> tuple[Violation
         _banned(
             provider,
             rule_id=RULE_REQUIRE_HASHES,
-            paths=(_INSTALL_PIPELINE, _LOCAL_BUNDLE_HANDLER, _POLICY_CHECKS),
+            paths=(_INSTALL_PIPELINE, _LOCAL_BUNDLE_HANDLER, _BUNDLE_ADMISSION, _POLICY_CHECKS),
             pattern=_REQUIRE_HASHES,
             message=(
                 "require_hashes enforcement must route through install/integrity.py, "
@@ -361,4 +383,41 @@ def check_dependency_winner_selection(provider: FactsProvider) -> tuple[Violatio
                 _first_line(lines, _WINNER_SELECTOR_CALL),
             )
         )
+    return tuple(findings)
+
+
+def check_remote_read_reuse(provider: FactsProvider) -> tuple[Violation, ...]:
+    """The process-scoped remote-read reuse is a closed seam (#4977).
+
+    Only the verified-state record's writer (install/verdict_record.py) may
+    enter ``reuse_remote_reads``, and the owner must drop an answer read
+    before user code ran (``core/invocation_memo.forget_epoch``).
+    """
+    rule_id = RULE_REMOTE_READ_REUSE
+    owner, owner_fail = _configured(provider, _REMOTE_MODULE, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
+    findings: list[Violation] = []
+    if _count_re(owner, _REUSE_EPOCH) < 1:
+        findings.append(
+            _report(
+                rule_id,
+                _REMOTE_MODULE,
+                "policy/_remote.py must drop a reused remote read once user code ran "
+                "(core/invocation_memo.forget_epoch)",
+            )
+        )
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(
+                provider, "src/apm_cli/", excluded=(_REMOTE_MODULE, _REUSE_CALLER)
+            ),
+            pattern=_REUSE_CALL,
+            message="Only install/verdict_record.py may reuse a remote read",
+            configured=False,
+            respect_exempt=False,
+        )
+    )
     return tuple(findings)

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import threading
 import time
@@ -86,27 +85,35 @@ class AzureCliBearerProvider:
         # Azure CLI ships as az.cmd (a batch wrapper), and Python's
         # subprocess.run -> CreateProcessW does NOT honor PATHEXT for
         # non-.exe executables, so a bare "az" token fails with
-        # FileNotFoundError even though `shutil.which("az")` resolves it.
-        # See microsoft/apm#1430. Resolving via shutil.which here (which
-        # DOES honor PATHEXT) and storing the absolute path keeps every
-        # downstream subprocess.run call portable across platforms.
+        # FileNotFoundError even though a PATHEXT-aware lookup resolves it.
+        # See microsoft/apm#1430. Resolving via trusted_executable here
+        # (PATHEXT-aware, PATH outside the project only) and storing the
+        # absolute path keeps every downstream subprocess.run call portable.
         #
         # Edge case: callers (notably tests) may pass an explicit absolute
         # path. We trust absolute paths verbatim and skip re-resolution.
-        # Relative tokens always flow through shutil.which so a
+        # Relative tokens always flow through trusted_executable so a
         # CWD-relative form like "subdir/az" cannot bypass resolution.
         #
         # PATH changes mid-process won't be detected; restart the CLI.
         if os.path.isabs(az_command):
             self._az_command: str | None = az_command
         else:
-            self._az_command = shutil.which(az_command)
+            from apm_cli.utils.git_env import trusted_executable
+
+            self._az_command = trusted_executable(az_command)
         # Cache stores (token, expires_at_epoch_seconds). expires_at is None
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring
         # within this process, matching the prior behaviour.
         self._cache: dict[str, tuple[str, float | None]] = {}
         self._lock = threading.Lock()
+        # #3753: keep the last acquisition failure and the tenant lookup so
+        # diagnostics report the real az reason with one ``az`` call.
+        self._last_error: AzureCliBearerError | None = None
+        self._tenant_cached = False
+        self._tenant_id: str | None = None
+        self._tenant_lock = threading.Lock()
 
     # -- public API ---------------------------------------------------------
 
@@ -158,16 +165,36 @@ class AzureCliBearerProvider:
                     kind="az_not_found",
                 )
 
-            token, expires_at = self._run_get_access_token()
+            try:
+                token, expires_at = self._run_get_access_token()
+            except AzureCliBearerError as exc:
+                self._last_error = exc
+                raise
+            self._last_error = None
             self._cache[self.ADO_RESOURCE_ID] = (token, expires_at)
             return token
+
+    @property
+    def last_error(self) -> AzureCliBearerError | None:
+        """Return the most recent token-acquisition failure, if any."""
+        return self._last_error
 
     def get_current_tenant_id(self) -> str | None:
         """Return the active Entra tenant ID (best-effort).
 
         Uses ``az account show --query tenantId -o tsv``.  Returns ``None``
-        on any failure -- this method never raises.
+        on any failure -- this method never raises. The answer is cached for
+        the life of the provider (one ``az`` call per process).
         """
+        # Singleflight: concurrent diagnostics wait for one ``az`` call.
+        with self._tenant_lock:
+            if not self._tenant_cached:
+                self._tenant_id = self._lookup_tenant_id()
+                self._tenant_cached = True
+            return self._tenant_id
+
+    def _lookup_tenant_id(self) -> str | None:
+        """Run ``az account show`` once; never raises."""
         # Explicit early-return when az was not resolved at __init__: avoids
         # passing None as argv[0] to subprocess.run (which would TypeError
         # and only be swallowed by the broad except below). Mirrors the
@@ -196,6 +223,10 @@ class AzureCliBearerProvider:
         """
         with self._lock:
             self._cache.clear()
+            self._last_error = None
+        with self._tenant_lock:
+            self._tenant_cached = False
+            self._tenant_id = None
 
     # -- internals ----------------------------------------------------------
 

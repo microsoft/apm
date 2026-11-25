@@ -6,7 +6,9 @@ the base" in the header, and the run never modifies the project tree,
 ``apm.lock.yaml``, ``apm.yml``, or ``apm_modules/``.
 
 The shipped e2e test fabricates ``apm_modules`` by hand; these scenarios drive
-the real install so the package source tree is whatever APM really caches.
+the real install so the package source tree is whatever APM really caches. The Claude-format
+plugin scenarios target ``cursor``, which deploys a plugin split: Claude and
+Copilot load it intact from ``.agents/plugins`` at project scope (#3921).
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import LOCAL_EDITS_EXPORT, RESTORE_EDITED, either_sentence
+from apm_cli.integration.base_integrator import kept_edit_message
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
     output,
@@ -29,6 +33,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 
@@ -100,11 +105,11 @@ def test_export_patch_claude_plugin_package_exports_upstream_files(
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
         "consumer-plugin",
-        targets=("claude",),
+        targets=("cursor",),
         deps=({"git": remote_url("rawplug"), "ref": commits["rawplug"]},),
     )
     world.apm(project, "install", "--no-policy")
-    skill = project / ".claude" / "skills" / "rx" / "SKILL.md"
+    skill = project / ".agents" / "skills" / "rx" / "SKILL.md"
     assert skill.is_file()
     skill.write_text(skill.read_text() + "plugin edit\n")
 
@@ -132,11 +137,16 @@ def test_export_patch_claude_plugin_package_exports_upstream_files(
 def test_export_patch_two_packages_and_install_hint_then_overwrite(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """Edits in 2 packages -> 2 patches; audit and install point at export-patch."""
+    """Edits in 2 packages -> 2 patches; audit and install point at export-patch.
+
+    Per primitive kind (RA-009): a plain install keeps every edit (#4360);
+    each receipted edit (agent and skills) is kept and named with the true
+    reason, exit 0 (RA-012), and audit points at ``apm export-patch``.
+    """
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
         "consumer-two",
-        targets=("claude",),
+        targets=("cursor",),
         deps=(
             {"git": remote_url("mono"), "path": "packages/tool", "ref": "main"},
             {"git": remote_url("rawplug"), "ref": commits["rawplug"]},
@@ -144,21 +154,43 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     )
     world.apm(project, "install", "--no-policy")
     lock_before = (project / "apm.lock.yaml").read_bytes()
-    for rel in (".claude/skills/tool-skill/SKILL.md", ".claude/skills/rx/SKILL.md"):
+    skills = (".agents/skills/tool-skill/SKILL.md", ".agents/skills/rx/SKILL.md")
+    agent = project / ".cursor" / "agents" / "ra.md"
+    agent_before = agent.read_bytes()
+    for rel in skills:
         target = project / rel
         target.write_text(target.read_text() + "two-package edit\n")
+    agent.write_text(agent.read_text() + "agent edit\n")
 
     audit = world.apm(project, "audit", "--ci", "--no-policy", expect=1)
-    assert "apm export-patch" in output(audit)
+    audit_text = " ".join(output(audit).split())
+    # Every edit is kept by the next install (#4360); all three export.
+    assert "3 local edit(s) to managed files;" in audit_text
+    assert "the next 'apm install' overwrites" not in audit_text
+    assert LOCAL_EDITS_EXPORT.clause() in audit_text
+    assert "apm export-patch" in audit_text
+    restore = RESTORE_EDITED.bind(subject="the edited files")
+    assert either_sentence(restore, LOCAL_EDITS_EXPORT) in audit_text
 
     world.apm(project, "export-patch", "-o", str(tmp_path / "out"))
     patches = sorted((tmp_path / "out").glob("*.patch"))
     assert len(patches) == 2, [p.name for p in patches]
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 
+    # The receipts prove every edit; with nothing new upstream each is kept and
+    # named with the true reason, and the install exits 0 (RA-012, skill parity).
     install = world.apm(project, "install", "--no-policy")
-    assert "apm export-patch" in output(install)
+    install_text = " ".join(output(install).split())
+    assert "overwrites" not in install_text
+    assert (
+        kept_edit_message(".cursor/agents/ra.md", user_scope=False, proven_edit=True)
+        in install_text
+    ), install_text
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
+    assert agent.read_bytes() != agent_before
+    assert agent.read_text().endswith("agent edit\n")
+    for rel in skills:
+        assert (project / rel).read_text().endswith("two-package edit\n")
 
 
 def test_export_patch_keeps_ambiguity_for_authored_apm_plugin_sources(
@@ -182,11 +214,11 @@ def test_export_patch_keeps_ambiguity_for_authored_apm_plugin_sources(
 
     project = world.consumer(
         "consumer-authored",
-        targets=("claude",),
+        targets=("cursor",),
         deps=({"git": remote_url("authoredplug"), "ref": commit.sha},),
     )
     world.apm(project, "install", "--no-policy")
-    deployed = project / ".claude" / "skills" / "own" / "SKILL.md"
+    deployed = project / ".agents" / "skills" / "own" / "SKILL.md"
     assert deployed.read_text() == body
     deployed.write_text(body + "consumer edit\n")
 

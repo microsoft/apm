@@ -1,5 +1,6 @@
 """APM run and preview commands."""
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -37,10 +38,10 @@ def run(ctx, script_name, param, verbose):
                 console = _get_console()
                 if console:
                     try:
-                        from rich.table import Table
+                        from apm_cli.utils.console import new_table
 
                         # Show available scripts in a table
-                        table = Table(show_header=False, box=None, padding=(0, 1))
+                        table = new_table(show_header=False, box=None, padding=(0, 1))
                         table.add_column("Icon", style="cyan")
                         table.add_column("Script", style="highlight")
                         table.add_column("Command", style="white")
@@ -75,9 +76,7 @@ def run(ctx, script_name, param, verbose):
             if not success:
                 logger.error("Script execution failed")
                 sys.exit(1)
-
-            _rich_blank_line()
-            logger.success("Script executed successfully!")
+            # The runner already printed the timed success line (#3994).
 
         except ImportError as ie:
             logger.warning("Script runner not available yet")
@@ -197,9 +196,11 @@ def preview(ctx, script_name, param, verbose):
                     logger.progress("APM only compiles files ending with '.prompt.md' extension.")
 
             _rich_blank_line()
-            logger.success(
-                f"Preview complete! Use 'apm run {script_name}' to execute.",
+            # Repeat the params, or 'apm run' leaves ${input:...} unresolved (#3994).
+            run_cmd = shlex.join(
+                ["apm", "run", script_name, *(f for p in param for f in ("--param", p))]
             )
+            logger.success(f"Preview complete! Execute with: {run_cmd}")
 
         except ImportError:
             logger.warning("Script runner not available yet")

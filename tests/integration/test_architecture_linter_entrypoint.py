@@ -55,6 +55,11 @@ pytestmark = [
 
 ROOT = Path(__file__).resolve().parents[2]
 SHELL_SCRIPT = ROOT / "scripts" / "lint-architecture-boundaries.sh"
+# One full lint of the real repository, per subprocess. On a busy integration shard
+# the clean fixture's two back-to-back runs took 207-359 s together (median ~259 s)
+# across 10 green Integration runs on 2026-11-23 (e.g. 45277522250: 206.97 s,
+# 45277769531: 359.11 s), so one run reaches ~180 s at p95: about 2x that (#5179).
+_FULL_RUN_TIMEOUT = 360
 _DIAGNOSTIC_LINE = re.compile(r"^\S+:\d+:\d+: \S+ .+$")
 _METRICS_KEYS = (
     "ast_visits",
@@ -84,6 +89,8 @@ class CleanShellRun(NamedTuple):
     metrics_path: Path
     metrics_text: str
     metrics: dict[str, object]
+    inventory_before: tuple[str, ...]
+    inventory_after: tuple[str, ...]
 
 
 @pytest.fixture(scope="module")
@@ -94,13 +101,14 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
     Python entrypoint keeps `--metrics-json` as an internal benchmark surface.
     """
     metrics_path = tmp_path_factory.mktemp("clean-shell-metrics") / "metrics.json"
+    inventory_before = build_inventory(ROOT).files
     result = subprocess.run(
         ["bash", str(SHELL_SCRIPT)],
         cwd=str(ROOT),
         capture_output=True,
         text=True,
         check=False,
-        timeout=180,
+        timeout=_FULL_RUN_TIMEOUT,
     )
     metrics_result = subprocess.run(
         [
@@ -115,11 +123,22 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
         capture_output=True,
         text=True,
         check=False,
-        timeout=180,
+        timeout=_FULL_RUN_TIMEOUT,
     )
+    # Snapshot the tree right after the run: tests on other xdist workers keep
+    # creating files, so a re-walk minutes later can drift from the linted tree.
+    inventory_after = build_inventory(ROOT).files
     metrics_text = metrics_path.read_text(encoding="ascii")
     metrics = json.loads(metrics_text)
-    return CleanShellRun(result, metrics_result, metrics_path, metrics_text, metrics)
+    return CleanShellRun(
+        result,
+        metrics_result,
+        metrics_path,
+        metrics_text,
+        metrics,
+        inventory_before,
+        inventory_after,
+    )
 
 
 class MutatedRun(NamedTuple):
@@ -255,10 +274,14 @@ def test_metrics_json_counts_reflect_a_read_once_parse_once_clean_run(
 ) -> None:
     """Every count is sane, and no file was ever read or parsed more than once."""
     metrics = clean_shell_run.metrics
-    real_inventory = build_inventory(ROOT)
+    before = set(clean_shell_run.inventory_before)
+    after = set(clean_shell_run.inventory_after)
 
-    assert metrics["inventory_file_count"] == len(real_inventory.files)
-    assert metrics["excluded_root_count"] == len(EXCLUDED_ROOTS) == 17
+    assert metrics["inventory_file_count"] in {len(before), len(after)}, (
+        f"linted {metrics['inventory_file_count']} files; tree changed during the run: "
+        f"added {sorted(after - before)}, removed {sorted(before - after)}"
+    )
+    assert metrics["excluded_root_count"] == len(EXCLUDED_ROOTS) == 19
     assert metrics["read_errors"] == 0
     assert metrics["parse_errors"] == 0
     assert metrics["max_reads_per_file"] <= 1

@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _suppress_console(monkeypatch):
@@ -29,11 +31,27 @@ class TestRemoveStaleCharacterisation:
         result = MCPIntegrator.remove_stale(stale_names=set(), logger=logger)
         assert result is None
 
-    def test_remove_stale_empty_names(self):
+    def test_remove_stale_empty_names(self, tmp_path):
+        """An empty stale set short-circuits: no config is rewritten, nothing is logged."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        result = MCPIntegrator.remove_stale(stale_names=set())
-        assert result is None
+        config_path = tmp_path / ".vscode" / "mcp.json"
+        config_path.parent.mkdir()
+        original = b'{"servers": {"keep-me": {"command": "srv"}}}'
+        config_path.write_bytes(original)
+        logger = MagicMock()
+
+        with patch("apm_cli.factory.ClientFactory.supported_clients") as supported:
+            MCPIntegrator.remove_stale(
+                stale_names=set(),
+                runtime="vscode",
+                project_root=tmp_path,
+                logger=logger,
+            )
+
+        assert config_path.read_bytes() == original
+        supported.assert_not_called()
+        assert logger.method_calls == []
 
     def test_remove_stale_with_runtime(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -44,16 +62,36 @@ class TestRemoveStaleCharacterisation:
         )
         assert result is None
 
-    def test_remove_stale_returns_none(self):
+    def test_remove_stale_returns_none(self, tmp_path):
+        """remove_stale() reports via side effects: it returns None after real removals."""
+        import json
+
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        logger = MagicMock()
-        logger.verbose = False
-        result = MCPIntegrator.remove_stale(
-            stale_names=set(),
-            logger=logger,
+        config_path = tmp_path / ".vscode" / "mcp.json"
+        config_path.parent.mkdir()
+        config_path.write_text(
+            json.dumps(
+                {
+                    "servers": {
+                        "stale-server": {"command": "old"},
+                        "keep-server": {"command": "keep"},
+                    }
+                }
+            ),
+            encoding="utf-8",
         )
+
+        result = MCPIntegrator.remove_stale(
+            stale_names={"stale-server"},
+            runtime="vscode",
+            project_root=tmp_path,
+            logger=MagicMock(),
+        )
+
         assert result is None
+        servers = json.loads(config_path.read_text(encoding="utf-8"))["servers"]
+        assert servers == {"keep-server": {"command": "keep"}}
 
     def test_remove_stale_with_scope(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -168,6 +206,33 @@ def test_clean_json_atomic_failure_preserves_original_and_mode(tmp_path):
     if hasattr(os, "fchmod"):
         assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
     assert list(tmp_path.glob("apm-atomic-*")) == []
+
+
+def test_clean_json_of_an_unrecorded_config_records_it_for_crash_recovery(tmp_path, monkeypatch):
+    """A cleanup rewrite of a config an older APM wrote into is recorded as legacy (#5038)."""
+    import json
+
+    from apm_cli.integration.config_file_provenance import (
+        Origin,
+        config_file_origin,
+        vouches_for_current_bytes,
+    )
+    from apm_cli.integration.mcp_integrator import _clean_json_mcp_config
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home" / ".apm"))
+    config_path = tmp_path / "project" / "mcp.json"
+    config_path.parent.mkdir()
+    servers = {"stale-server": {"command": "old"}, "user-authored": {"command": "keep"}}
+    config_path.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+    before = config_path.read_bytes()
+
+    removed = _clean_json_mcp_config(config_path, {"stale-server"}, MagicMock(), "test MCP config")
+
+    assert removed == 1
+    kept = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert set(kept) == {"user-authored"}
+    assert config_file_origin(config_path) is Origin.LEGACY
+    assert vouches_for_current_bytes(config_path, before) is True
 
 
 @pytest.mark.windows_compat

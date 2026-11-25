@@ -57,6 +57,8 @@ def _assert_exit(result: CommandResult, expected: int = 0) -> None:
 
 
 def _hook_commands(settings_path: Path) -> set[str]:
+    if not settings_path.exists():
+        return set()  # an emptied settings file APM created is deleted (#4852)
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     return {
         str(handler["command"])
@@ -74,11 +76,12 @@ def test_prune_cascades_dependency_state_and_audit_sees_no_ghost(
     environment = isolated.subprocess_env()
     package_factory = LocalPackageFactory(isolated.package_root)
 
+    # Path-scoped rules keep a .claude/rules/ ledger row per package (#3939).
     alpha = package_factory.create("alpha-kit", targets=("claude",))
     package_factory.add_instruction(
         alpha,
         "alpha",
-        "---\napplyTo: '**'\n---\n# Alpha rule\n",
+        "---\napplyTo: '**/*.md'\n---\n# Alpha rule\n",
     )
     package_factory.add_hook(alpha, "alpha", _hook("echo alpha-hook"))
 
@@ -86,7 +89,7 @@ def test_prune_cascades_dependency_state_and_audit_sees_no_ghost(
     package_factory.add_instruction(
         beta,
         "beta",
-        "---\napplyTo: '**'\n---\n# Beta rule\n",
+        "---\napplyTo: '**/*.md'\n---\n# Beta rule\n",
     )
     package_factory.add_skill(
         beta,
@@ -399,3 +402,59 @@ def test_audit_prune_audit_repairs_injected_ghost_without_deleting_bytes(
     )
     _assert_exit(clean_ci)
     assert json.loads(after_ci.read_text(encoding="utf-8"))["passed"] is True
+
+
+def _assert_output_oracles(result: CommandResult) -> None:
+    """I6 ASCII and I9 no duplicate status lines per stream."""
+    for stream in (result.stdout, result.stderr):
+        assert stream.isascii(), stream
+        status = [line.strip() for line in stream.splitlines() if line.lstrip().startswith("[")]
+        assert len(status) == len(set(status)), stream
+
+
+@pytest.mark.parametrize("with_hook", [False, True], ids=["no-hooks", "hooks"])
+def test_prune_reports_hook_reconciliation_only_when_hooks_change(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    with_hook: bool,
+) -> None:
+    """Prune names hook reconciliation only when merged hooks changed (#4204)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    environment = isolated.subprocess_env()
+    factory = LocalPackageFactory(isolated.package_root)
+    gamma = factory.create("gamma-kit")
+    factory.add_skill(gamma, "gamma", "---\nname: gamma\ndescription: Gamma\n---\n# Gamma\n")
+    factory.add_instruction(gamma, "gamma", "---\napplyTo: '**'\n---\n# Gamma rule\n")
+    if with_hook:
+        factory.add_hook(gamma, "gamma", _hook("echo gamma-hook"))
+    consumer = factory.create("consumer", targets=("claude",))
+    factory.add_relative_dependency(consumer, gamma)
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    def apm(*args: str) -> CommandResult:
+        result = runner.run(args, cwd=consumer.root, env=environment)
+        _assert_exit(result)
+        _assert_output_oracles(result)
+        return result
+
+    apm("install")
+    settings_path = consumer.root / ".claude/settings.json"
+    if with_hook:
+        assert _hook_commands(settings_path) == {"echo gamma-hook"}
+    else:
+        assert not settings_path.exists()
+    assert factory.remove_apm_dependency(consumer, {"path": "../gamma-kit"})
+
+    prune = apm("prune")
+
+    assert not (consumer.root / ".claude/rules/gamma.md").exists()
+    assert not (consumer.root / ".claude/skills/gamma").exists()
+    if with_hook:
+        assert _hook_commands(settings_path) == set()
+    else:
+        assert not settings_path.exists()
+    reconciled = "[i] Reconciled merged hook ownership for pruned package(s)"
+    assert (reconciled in prune.stdout.splitlines()) is with_hook, prune.stdout
+    assert "[*] Pruned 1 orphaned package(s)" in prune.stdout.splitlines(), prune.stdout
+    after = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
+    assert after.deployment_records == ()

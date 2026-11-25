@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile, lockfile_parent_identity
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def test_legacy_parent_identity_ignores_declared_casing() -> None:
@@ -45,3 +49,17 @@ def test_legacy_mixed_case_parent_is_canonicalized_on_read() -> None:
 
     assert loaded.dependencies["test/e"].resolved_by == "test/c"
     assert loaded.dependencies["gitlab.example.com/team/x"].resolved_by == "team/repo"
+
+
+def test_validate_graph_checks_the_parent_graph_without_emitting_yaml() -> None:
+    """The lock owner's public graph check: a row whose parent is gone is refused (#5185)."""
+    from apm_cli.deps.lockfile import LockfileFormatError
+
+    parent = LockedDependency(repo_url="acme/parent")
+    child = LockedDependency(repo_url="acme/child", resolved_by="acme/parent")
+    rows = {dep.get_unique_key(): dep for dep in (parent, child)}
+
+    LockFile(dependencies=rows, replacements=[]).validate_graph()
+    orphaned = LockFile(dependencies={"acme/child": child}, replacements=[])
+    with pytest.raises(LockfileFormatError, match="acme/child is absent from the lockfile"):
+        orphaned.validate_graph()

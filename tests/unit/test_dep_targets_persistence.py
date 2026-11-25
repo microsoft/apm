@@ -8,6 +8,8 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import _levenshtein_distance
 
+pytestmark = pytest.mark.unit
+
 
 class TestLocalPathDepTargets:
     """Regression tests for issue #1982: targets: ignored on path: deps."""
@@ -203,3 +205,20 @@ class TestLockedDependencyTargets:
         restored = LockFile.from_yaml(lock.to_yaml())
 
         assert restored.dependencies["owner/repo"].target_subset == ["codex"]
+
+
+def test_parse_targets_records_an_alias_as_its_canonical_target() -> None:
+    from apm_cli.models.dependency.subsets import parse_target_subset
+
+    assert parse_target_subset(["vscode", "claude"]) == ["claude", "copilot"]
+
+
+def test_parse_targets_unknown_name_without_a_suggestion_has_the_exact_message() -> None:
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.dependency.subsets import parse_target_subset
+
+    with pytest.raises(ValueError) as refused:
+        parse_target_subset(["zzzzzzzzzzzz"])
+    assert str(refused.value) == (
+        f"Unknown target 'zzzzzzzzzzzz'. Valid targets: {', '.join(sorted(KNOWN_TARGETS))}."
+    )

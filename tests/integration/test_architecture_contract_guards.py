@@ -526,7 +526,7 @@ def test_manifest_schema_negotiates_normative_v01_registry_shape(
 
     monkeypatch.setattr(
         "apm_cli.deps.registry.feature_gate.require_package_registry_enabled",
-        lambda _feature, *, create_config=True: None,
+        lambda _feature, *, create_config=True, config_source=None: None,
     )
     manifest = tmp_path / "apm.yml"
     manifest.write_text(
@@ -588,7 +588,7 @@ def test_lifecycle_docs_match_explicit_compilation_contract() -> None:
         / "content"
         / "docs"
         / "concepts"
-        / "lifecycle.md"
+        / "how-apm-works.md"
     ).read_text(encoding="utf-8")
 
     assert "does not run aggregate\ncompilation" in lifecycle

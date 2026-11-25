@@ -4,6 +4,9 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
+from ..core.remediation import PACK_INSTALLED_FILES_MISSING, PACK_LOCKFILE_MISSING
 from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 from ..models.apm_package import APMPackage
@@ -15,6 +18,7 @@ from ..utils.archive import (
 )
 from ..utils.atomic_io import write_text_lf
 from .attest import verify_attested_file
+from .credential_files import refuse_credential_files
 from .formats import BundleFormat, coerce_bundle_format
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
@@ -29,6 +33,33 @@ class PackResult:
     lockfile_enriched: bool = False
     mapped_count: int = 0
     path_mappings: dict[str, str] = field(default_factory=dict)
+
+
+def _bundle_file_paths(
+    project_root: Path, unique_files: list[str], path_mappings: dict[str, str]
+) -> list[str]:
+    """List every bundle-relative file path, expanding deployed directories."""
+    paths: list[str] = []
+    for rel_path in unique_files:
+        src = project_root / path_mappings.get(rel_path, rel_path)
+        if src.is_symlink():
+            continue
+        if not src.is_dir():
+            paths.append(rel_path)
+            continue
+        base = rel_path.rstrip("/")
+        paths.extend(
+            f"{base}/{child.relative_to(src).as_posix()}"
+            for child in sorted(src.rglob("*"))
+            if child.is_file() and not child.is_symlink()
+        )
+    return paths
+
+
+def _with_warnings(warnings: list[str], result: PackResult) -> PackResult:
+    """Put *warnings* (org policy findings) ahead of the format's own pack warnings."""
+    result.warnings[:0] = warnings
+    return result
 
 
 def pack_bundle(
@@ -65,46 +96,55 @@ def pack_bundle(
 
     Raises:
         FileNotFoundError: If ``apm.lock.yaml`` is missing.
-        ValueError: If deployed files referenced in the lockfile are missing on disk.
+        ValueError: If deployed files referenced in the lockfile are missing on disk,
+            or org policy refuses a locked dependency.
     """
     bundle_format = coerce_bundle_format(fmt)
+    # Org policy that refuses a dependency refuses to ship its content too.
+    from .pack_policy import pack_policy_preflight
+
+    policy_warnings = pack_policy_preflight(Path(project_root), logger)
 
     if bundle_format is BundleFormat.AGENT_PLUGIN:
         from .agent_plugin_exporter import export_agent_plugin_bundle
 
-        return export_agent_plugin_bundle(
-            project_root=project_root,
-            output_dir=output_dir,
-            target=target,
-            archive=archive,
-            archive_format=archive_format,
-            dry_run=dry_run,
-            force=force,
-            logger=logger,
+        return _with_warnings(
+            policy_warnings,
+            export_agent_plugin_bundle(
+                project_root=project_root,
+                output_dir=output_dir,
+                target=target,
+                archive=archive,
+                archive_format=archive_format,
+                dry_run=dry_run,
+                force=force,
+                logger=logger,
+            ),
         )
     if bundle_format is BundleFormat.CLAUDE_PLUGIN:
         from .claude_plugin_exporter import export_claude_plugin_bundle
 
-        return export_claude_plugin_bundle(
-            project_root=project_root,
-            output_dir=output_dir,
-            target=target,
-            archive=archive,
-            archive_format=archive_format,
-            dry_run=dry_run,
-            force=force,
-            logger=logger,
+        return _with_warnings(
+            policy_warnings,
+            export_claude_plugin_bundle(
+                project_root=project_root,
+                output_dir=output_dir,
+                target=target,
+                archive=archive,
+                archive_format=archive_format,
+                dry_run=dry_run,
+                force=force,
+                logger=logger,
+            ),
         )
 
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
-        raise FileNotFoundError(
-            "apm.lock.yaml not found  -- run 'apm install' first to resolve dependencies."
-        )
+        raise FileNotFoundError(f"apm.lock.yaml not found -- {PACK_LOCKFILE_MISSING.clause()}.")
 
     # 2. Read apm.yml for name / version / config target
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     skill_md_path = project_root / "SKILL.md"
     is_hybrid_root = apm_yml_path.exists() and skill_md_path.exists()
     try:
@@ -144,7 +184,7 @@ def pack_bundle(
         for dep_ref in package.get_apm_dependencies():
             if dep_ref.is_local:
                 raise ValueError(
-                    f"Cannot pack — apm.yml contains local path dependency: "
+                    f"Cannot pack -- apm.yml contains local path dependency: "
                     f"{dep_ref.local_path}\n"
                     f"Local dependencies are for development only. Replace them with "
                     f"remote references (e.g., 'owner/repo') before packing."
@@ -201,6 +241,17 @@ def pack_bundle(
         if f not in seen:
             seen.add(f)
             unique_files.append(f)
+    # Claude rules #3939 compiles into AGENTS.md still ship as rules (#4005).
+    from .claude_routed_rules import (
+        merged_routed_claude_rules,
+        routed_claude_rules,
+        write_routed_claude_rules,
+    )
+
+    rendered_rules = routed_claude_rules(lockfile, project_root, effective_target)
+    rendered_files = merged_routed_claude_rules(
+        rendered_rules, {path: project_root / path_mappings.get(path, path) for path in seen}
+    )
 
     # 5. Verify each path is safe (no traversal) and exists on disk
     project_root_resolved = project_root.resolve()
@@ -220,9 +271,10 @@ def pack_bundle(
             missing.append(disk_path)
     if missing:
         raise ValueError(
-            f"The following deployed files are missing on disk  -- "  # noqa: F541
-            f"run 'apm install' to restore them:\n" + "\n".join(f"  - {m}" for m in missing)  # noqa: F541
+            f"The following deployed files are missing on disk -- "
+            f"{PACK_INSTALLED_FILES_MISSING.clause()}:\n" + "\n".join(f"  - {m}" for m in missing)
         )
+    refuse_credential_files(_bundle_file_paths(project_root, unique_files, path_mappings))
 
     # Dry-run: return file list without writing anything
     if dry_run:
@@ -234,7 +286,8 @@ def pack_bundle(
         )
         return PackResult(
             bundle_path=bundle_path,
-            files=unique_files,
+            files=[*unique_files, *rendered_files],
+            warnings=list(policy_warnings),
             lockfile_enriched=True,
             mapped_count=len(path_mappings),
             path_mappings=path_mappings,
@@ -268,7 +321,7 @@ def pack_bundle(
     if _scan_findings_total:
         _warn_msg = (
             f"Bundle contains {_scan_findings_total} hidden character(s) across source files "
-            f"— run 'apm audit' to inspect before publishing"
+            f"-- run 'apm audit' to inspect before publishing"
         )
         if logger:
             logger.warning(_warn_msg)
@@ -331,13 +384,38 @@ def pack_bundle(
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest, follow_symlinks=False)
 
+    write_routed_claude_rules(bundle_dir, rendered_files)
+    if rendered_rules:
+        import copy
+        import hashlib
+
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        provenance = DeploymentLedgerCodec.from_lockfile(lockfile)
+        lockfile = copy.deepcopy(lockfile)
+        for dep in lockfile.get_all_dependencies():
+            added = rendered_rules.get(dep.get_unique_key())
+            if not added:
+                continue
+            hashes = dict(dep.deployed_file_hashes)
+            for rel_path, text in added.items():
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                hashes[rel_path] = f"sha256:{digest}"
+            DeploymentLedgerCodec.replace_legacy_owner(
+                lockfile,
+                dep.get_unique_key(),
+                [*dep.deployed_files, *added],
+                hashes,
+                provenance=provenance,
+            )
+
     # 8. Enrich lockfile copy and write to bundle
     enriched_yaml = enrich_lockfile_for_pack(lockfile, bundle_format.lock_value, effective_target)
     write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(
         bundle_path=bundle_dir,
-        files=unique_files,
+        files=[*unique_files, *rendered_files],
         lockfile_enriched=True,
         mapped_count=len(path_mappings),
         path_mappings=path_mappings,
@@ -356,4 +434,4 @@ def pack_bundle(
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 
-    return result
+    return _with_warnings(policy_warnings, result)

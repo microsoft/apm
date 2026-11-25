@@ -31,6 +31,7 @@ from apm_cli.integration.hook_integrator import (
 )
 from apm_cli.integration.hook_ownership import dependency_hook_sources
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _make_package_info(install_path: Path, name: str = "test-pkg") -> PackageInfo:
@@ -1378,9 +1379,10 @@ class TestCursorIntegration:
         assert len(config["hooks"]["stop"]) == 2
         assert all("_apm_source" not in entry for entry in config["hooks"]["stop"])
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
+        # One canonical order by source, whatever the addition order (#5285).
         assert [entry["_apm_source"] for entry in sidecar["stop"]] == [
-            "ralph-loop",
             "other-pkg",
+            "ralph-loop",
         ]
 
     def test_scripts_copied_to_cursor_hooks_dir(self, temp_project):
@@ -1447,23 +1449,34 @@ class TestCursorIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
         assert not (temp_project / ".cursor" / "hooks").exists()
 
     def test_sync_removes_empty_hooks_key_cursor(self, temp_project):
-        """Test that empty hooks key is removed from hooks.json after cleanup."""
+        """A hooks.json left with only Cursor's version skeleton is deleted (#4852)."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
         hooks_path.write_text(
-            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+            json.dumps({"version": 1, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
         )
 
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
 
-        updated = json.loads(hooks_path.read_text())
-        assert "hooks" not in updated
+        assert not hooks_path.exists()
+
+    def test_sync_keeps_cursor_hooks_with_a_non_default_version_type(self, temp_project):
+        """``version: true`` is not Cursor's injected ``version: 1``: the file stays."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps({"version": True, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert json.loads(hooks_path.read_text()) == {"version": True}
 
     def test_cursor_version_emitted_on_fresh_install(self, temp_project):
         """Fresh .cursor/hooks.json must contain top-level "version": 1."""
@@ -1622,6 +1635,7 @@ class TestSyncIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1673,6 +1687,7 @@ class TestSyncIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1686,7 +1701,7 @@ class TestSyncIntegration:
         assert stats["errors"] == 0
 
     def test_sync_removes_empty_hooks_key(self, temp_project):
-        """Test that empty hooks key is removed from settings.json after cleanup."""
+        """Empty hooks key goes; a settings.json left empty is deleted (#4852)."""
         claude_dir = temp_project / ".claude"
         claude_dir.mkdir()
         settings_path = claude_dir / "settings.json"
@@ -1696,8 +1711,61 @@ class TestSyncIntegration:
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
 
-        updated = json.loads(settings_path.read_text())
-        assert "hooks" not in updated  # Completely removed when empty
+        assert not settings_path.exists()
+
+    def test_cleanup_never_deletes_below_a_symlinked_ancestor(self, tmp_path):
+        """A nested hook file under a symlinked ancestor of the root is rewritten, not deleted."""
+        outside = tmp_path / "outside"
+        (outside / "windsurf").mkdir(parents=True)
+        hooks_path = outside / "windsurf" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+        root = tmp_path / "home"
+        root.mkdir()
+        (root / ".codeium").symlink_to(outside, target_is_directory=True)
+        stats = {"files_removed": 0, "errors": 0}
+
+        HookIntegrator._clean_apm_entries_from_json(
+            root / ".codeium" / "windsurf" / "hooks.json", stats, root=root
+        )
+
+        assert json.loads(hooks_path.read_text()) == {}
+
+    def test_sync_never_deletes_through_a_symlinked_target_dir(self, temp_project, tmp_path):
+        """An emptied settings.json behind a symlinked .claude is rewritten, not deleted."""
+        outside = tmp_path / "outside-claude"
+        outside.mkdir()
+        settings_path = outside / "settings.json"
+        settings_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+        (temp_project / ".claude").symlink_to(outside, target_is_directory=True)
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert settings_path.is_file()
+        assert "hooks" not in json.loads(settings_path.read_text())
+
+    @pytest.mark.parametrize(
+        "user_keys",
+        [{"permissions": {"allow": ["Bash(ls)"]}}, {"version": 1}],
+        ids=["permissions", "cursor-default-is-claude-user-key"],
+    )
+    def test_sync_keeps_settings_with_user_keys(self, temp_project, user_keys):
+        """A settings.json that also holds the user's keys stays, without APM's hooks.
+
+        Cursor's injected ``version: 1`` is a user key in Claude's settings.
+        """
+        claude_dir = temp_project / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings = {**user_keys, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}}
+        settings_path.write_text(json.dumps(settings))
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert json.loads(settings_path.read_text()) == user_keys
 
 
 # ─── Script path rewriting tests ─────────────────────────────────────────────
@@ -1728,24 +1796,6 @@ class TestScriptPathRewriting:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
         assert ".github/hooks/scripts/my-pkg/hooks/script.sh" in cmd
-        assert len(scripts) == 1
-
-    def test_rewrite_relative_path(self, temp_project):
-        """Test rewriting relative ./path references."""
-        pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
-        (pkg_dir / "scripts" / "check.sh").write_text("#!/bin/bash")
-
-        integrator = HookIntegrator()
-        cmd, scripts = integrator._rewrite_command_for_target(
-            "./scripts/check.sh",
-            pkg_dir,
-            "my-pkg",
-            "vscode",
-        )
-
-        assert "./" not in cmd
-        assert ".github/hooks/scripts/my-pkg/scripts/check.sh" in cmd
         assert len(scripts) == 1
 
     def test_system_command_unchanged(self, temp_project):
@@ -2836,6 +2886,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
         assert stats["files_removed"] > 0
 
@@ -2883,6 +2934,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
         assert stats["files_removed"] >= 2
         assert not (temp_project / ".github" / "hooks" / "ralph-loop-hooks.json").exists()
@@ -2910,6 +2962,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=native,
             managed_file_hashes={path.replace("/", "\\"): hashes[path] for path in hashes},
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == len(posix) >= 2
@@ -3544,6 +3597,7 @@ class TestScopeResolvedHookDeployment:
             self.root,
             managed_files=managed,
             managed_file_hashes=compute_deployed_hashes(managed, self.root),
+            evidence=receipted_evidence(self.root),
             targets=[copilot_target],
         )
         assert stats["files_removed"] > 0
@@ -4507,7 +4561,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["dep-hooks", "_local/sample-project"]
+        assert sources == ["_local/sample-project", "dep-hooks"]  # canonical order (#5285)
 
     @pytest.mark.parametrize(
         "relative_path",
@@ -4574,7 +4628,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["dep-hooks", "_local/sample-project"]
+        assert sources == ["_local/sample-project", "dep-hooks"]  # canonical order (#5285)
 
     def test_dependency_hook_sources_uses_lockfile_paths(
         self,
@@ -4772,7 +4826,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["matching-dep", "_local/matching-dep"]
+        assert sources == ["_local/matching-dep", "matching-dep"]  # canonical order (#5285)
 
     def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
         self,
@@ -5069,3 +5123,22 @@ class TestHookScriptAdopt:
         for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             assert (scripts_dir_target / script) in result.target_paths
         assert (scripts_dir_target / "pretooluse.py") not in result.target_paths
+
+
+@pytest.mark.parametrize("spec", ["local-bundle/x", "gitlab.com/local-bundle/x"])
+def test_dependency_named_local_bundle_stays_dependency_owned(spec: str) -> None:
+    """A dependency cannot claim the local-bundle hook marker namespace (#3700)."""
+    from apm_cli.integration.hook_ownership import (
+        dependency_hook_source_marker,
+        drop_dependency_owned_entries,
+        is_local_bundle_hook_source,
+        local_bundle_hook_source_marker,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    marker = dependency_hook_source_marker(DependencyReference.parse(spec))
+    bundle_marker = local_bundle_hook_source_marker("x")
+    assert not is_local_bundle_hook_source(marker)
+    hooks = {"PreToolUse": [{"_apm_source": marker}, {"_apm_source": bundle_marker}]}
+    assert drop_dependency_owned_entries(hooks)
+    assert hooks == {"PreToolUse": [{"_apm_source": bundle_marker}]}

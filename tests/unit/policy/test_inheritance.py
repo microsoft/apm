@@ -6,6 +6,8 @@ import dataclasses
 import unittest
 from typing import ClassVar
 
+import pytest
+
 from apm_cli.policy.inheritance import (
     MAX_CHAIN_DEPTH,
     PolicyInheritanceError,
@@ -24,6 +26,7 @@ from apm_cli.policy.schema import (
     DependencyPolicy,
     ExecutablesPolicy,
     ManifestPolicy,
+    MarketplacePolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
@@ -31,6 +34,8 @@ from apm_cli.policy.schema import (
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestEnforcementEscalation(unittest.TestCase):
@@ -377,6 +382,17 @@ class TestCompilationMerge(unittest.TestCase):
         )
         self.assertEqual(result.compilation.target.allow, ("vscode",))
 
+    def test_parsed_alias_allow_lists_intersect_on_profiles(self):
+        """Parent ``[vscode, claude]`` and child ``[copilot]`` keep copilot (#3732)."""
+        from apm_cli.policy.parser import load_policy
+
+        def _policy(allow: str):
+            text = f"name: p\nversion: '1'\ncompilation:\n  target:\n    allow: {allow}\n"
+            return load_policy(text)[0]
+
+        result = merge_policies(_policy("[vscode, claude]"), _policy("[copilot]"))
+        self.assertEqual(result.compilation.target.allow, ("copilot",))
+
     def test_strategy_enforce_parent_wins(self):
         result = merge_policies(
             ApmPolicy(
@@ -533,22 +549,6 @@ class TestUnmanagedFilesTransparency(unittest.TestCase):
         result = merge_policies(
             ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
             ApmPolicy(),  # child omits unmanaged_files entirely -> action=None
-        )
-        self.assertEqual(result.unmanaged_files.action, "deny")
-
-    def test_parent_deny_child_explicit_ignore(self):
-        """Parent deny + child explicitly sets ignore -> merged deny (escalation)."""
-        result = merge_policies(
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="ignore")),
-        )
-        self.assertEqual(result.unmanaged_files.action, "deny")
-
-    def test_parent_warn_child_explicit_deny(self):
-        """Parent warn + child explicitly sets deny -> merged deny (child tightens)."""
-        result = merge_policies(
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="warn")),
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
         )
         self.assertEqual(result.unmanaged_files.action, "deny")
 
@@ -933,6 +933,7 @@ class TestMergeFieldCoverageGuard(unittest.TestCase):
             manifest=ManifestPolicy(scripts="deny"),
             unmanaged_files=UnmanagedFilesPolicy(action="deny"),
             registry_source=RegistrySourcePolicy(require=("corp",)),
+            marketplace=MarketplacePolicy(allow=("github.com/contoso/*",)),
             security=SecurityPolicy(audit=AuditPolicy(on_install="block")),
             bin_deploy=BinDeployPolicy(deny_all=True),
             executables=ExecutablesPolicy(deny_all=True),

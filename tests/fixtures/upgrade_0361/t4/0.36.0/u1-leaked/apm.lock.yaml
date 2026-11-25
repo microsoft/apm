@@ -1,0 +1,36 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: fixture-org/bundle
+  name: bundle
+  host: github.com
+  resolved_commit: 4efda884acd77620fb5060b4235015e3dc133d43
+  version: 0.1.0
+  package_type: skill_bundle
+  deployed_files:
+  - .agents/skills/alpha
+  - .agents/skills/alpha/SKILL.md
+  deployed_file_hashes:
+    .agents/skills/alpha/SKILL.md: sha256:90fba848e8f3c60cf011dc7eb6e2d17a6309be3b7b304c007eed3f52217cfa4e
+  content_hash: sha256:1fe9458d8019649e7b743601ba2a18c5216ba6d2874e226cf0e68963dfe2ac35
+  skill_subset:
+  - alpha
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/alpha
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/alpha/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:90fba848e8f3c60cf011dc7eb6e2d17a6309be3b7b304c007eed3f52217cfa4e

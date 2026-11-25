@@ -12,13 +12,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import yaml
 
+from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.integration.write_seam import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
@@ -30,10 +33,14 @@ from apm_cli.utils.patterns import (
     yaml_globs_scalar,
     yaml_plain_scalar,
 )
+from apm_cli.utils.realpath import resolve_path
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 
@@ -48,6 +55,33 @@ class _PreparedInstruction:
 
     content: str
     body: str
+
+
+def _scannable_frontmatter(value):
+    """Return *value* as JSON-native data, for one sorted JSON scan.
+
+    YAML admits non-string keys (``{1: numeric, note: text}``), sets and
+    other types JSON cannot sort or serialize. Keys become text, keeping keys
+    that render alike as separate entries, and set members become a list, so
+    no decoded value reaches the scan only as a ``repr`` escape.
+    """
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        entries: dict[str, object] = {}
+        for key, item in value.items():
+            name = (
+                key
+                if isinstance(key, str)
+                else json.dumps(_scannable_frontmatter(key), ensure_ascii=False)
+            )
+            while name in entries:
+                name += "'"
+            entries[name] = _scannable_frontmatter(item)
+        return entries
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_scannable_frontmatter(item) for item in value]
+    return str(value)
 
 
 class InstructionIntegrator(BaseIntegrator):
@@ -71,6 +105,23 @@ class InstructionIntegrator(BaseIntegrator):
             dict[Path, tuple[Path, str, int]],
         ] = {}
         self._prepared_instructions: dict[str, dict[Path, _PreparedInstruction]] = {}
+        # (collector, root) pairs: a planning pass reports into its own
+        # throwaway collector and must not silence the real run's warning.
+        self._claude_blocker_warned: set[tuple[object, Path]] = set()
+        # Instruction sources this install routed to compiled AGENTS.md (#3939).
+        self.agents_md_routed: set[str] = set()
+        # Routed sources no compiled AGENTS.md carries yet (new or changed).
+        self.agents_md_stale: set[str] = set()
+        # Rule path -> the compiled AGENTS.md that now carries it, for each rule
+        # on disk this install stops writing (#5343); finalize names the moves.
+        self.agents_md_carried: dict[Path, Path] = {}
+        # Claude rule path -> (identity, label, content) the first package wrote
+        # this install; install order is declaration order, so it wins (#5343).
+        self._claude_rule_writers: dict[Path, tuple[str, str, str]] = {}
+        # One compiled-coverage snapshot per project root for this install.
+        self._compiled_coverage: dict[Path, Any] = {}
+        # Routing verdicts per root and directory for this install (#4787).
+        self._routing_cache: dict = {}
 
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
@@ -134,7 +185,7 @@ class InstructionIntegrator(BaseIntegrator):
         """Raise the package-facing malformed-frontmatter error."""
         raise yaml.YAMLError(
             f"Rejected frontmatter in {source.name}: {exc}\n"
-            "Fix or remove the invalid frontmatter, then rerun apm install."
+            f"{INSTRUCTION_FRONTMATTER_REJECTED.sentence()}"
         ) from exc
 
     def _prepare_instruction(
@@ -146,17 +197,48 @@ class InstructionIntegrator(BaseIntegrator):
         package_name: str = "",
     ) -> _PreparedInstruction:
         """Read and validate one instruction without writing target files."""
-        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
-
         content = source.read_text(encoding="utf-8")
         try:
             metadata, body = self._parse_frontmatter(content)
         except yaml.YAMLError as exc:
             self._raise_frontmatter_error(source, exc)
-        decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        if self.decoded_frontmatter_blocked(
+            metadata,
+            str(source),
+            source.name,
+            force=force,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        ):
+            raise yaml.YAMLError(
+                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
+            )
+        return _PreparedInstruction(content=content, body=body)
+
+    @staticmethod
+    def decoded_frontmatter_blocked(
+        metadata: dict,
+        label: str,
+        file_name: str,
+        *,
+        force: bool = False,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Scan decoded frontmatter values for critical hidden characters.
+
+        YAML escapes such as ``"\\u202e"`` decode to characters a byte scan of
+        the file never sees. Reports findings to *diagnostics* and returns
+        whether the instruction must be rejected (``force`` allows it).
+        """
+        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
+        decoded_metadata = json.dumps(
+            _scannable_frontmatter(metadata), ensure_ascii=False, sort_keys=True, default=str
+        )
         verdict = SecurityGate.scan_text(
             decoded_metadata,
-            f"{source}#decoded-frontmatter",
+            f"{label}#decoded-frontmatter",
             policy=BLOCK_POLICY,
             force=force,
         )
@@ -169,14 +251,10 @@ class InstructionIntegrator(BaseIntegrator):
                 force_action="Allowed by preflight",
                 force_detail=(
                     "Decoded frontmatter contains critical hidden characters; "
-                    f"edit the escaped value in {source.name}"
+                    f"edit the escaped value in {file_name}"
                 ),
             )
-        if verdict.should_block:
-            raise yaml.YAMLError(
-                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
-            )
-        return _PreparedInstruction(content=content, body=body)
+        return verdict.should_block
 
     def _render_instruction(
         self,
@@ -198,14 +276,40 @@ class InstructionIntegrator(BaseIntegrator):
         is copied verbatim (identity transform).
         """
         content = prepared.content if prepared is not None else source.read_text(encoding="utf-8")
-        if fmt in RULE_FORMATS:
-            converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
-            try:
-                content = converter(content)
-            except yaml.YAMLError as exc:
-                self._raise_frontmatter_error(source, exc)
+        try:
+            content = self.convert_rule_content(content, fmt)
+        except yaml.YAMLError as exc:
+            self._raise_frontmatter_error(source, exc)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
+
+    # Scoping keys the rule converters emit; ``applyTo`` marks APM instructions.
+    _NATIVE_RULE_SCOPE_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"paths", "globs", "alwaysApply", "trigger", "inclusion", "fileMatchPattern"}
+    )
+
+    @classmethod
+    def is_native_rule(cls, content: str) -> bool:
+        """Return whether *content* is already a target rule, not an APM instruction.
+
+        A native rule scopes itself with a target key (Claude ``paths:``,
+        Cursor ``globs:``) and has no ``applyTo``; converting it again would
+        drop that scoping. Raises :class:`yaml.YAMLError` on malformed
+        frontmatter.
+        """
+        metadata, _body = cls._parse_frontmatter(content)
+        return "applyTo" not in metadata and bool(cls._NATIVE_RULE_SCOPE_KEYS & set(metadata))
+
+    @classmethod
+    def convert_rule_content(cls, content: str, fmt: str) -> str:
+        """Convert APM instruction *content* to rule format *fmt*.
+
+        Formats outside :data:`targets.RULE_FORMATS` are returned unchanged.
+        Raises :class:`yaml.YAMLError` on malformed frontmatter.
+        """
+        if fmt not in RULE_FORMATS:
+            return content
+        return getattr(cls, cls._FORMAT_CONVERTERS[fmt])(content)
 
     @staticmethod
     def _plan_key(
@@ -217,9 +321,9 @@ class InstructionIntegrator(BaseIntegrator):
     ) -> tuple[str, str, str, str, str]:
         """Return the per-package, per-target identity for a prepared rule plan."""
         return (
-            str(package_path.resolve()),
-            str(project_root.resolve()),
-            str(deploy_dir.resolve()),
+            str(resolve_path(package_path)),
+            str(resolve_path(project_root)),
+            str(resolve_path(deploy_dir)),
             extension,
             fmt,
         )
@@ -248,6 +352,31 @@ class InstructionIntegrator(BaseIntegrator):
             )
             plan[source_file] = (target_path, content, links_resolved)
         return plan
+
+    @staticmethod
+    def _deploy_dir(target: TargetProfile, mapping, project_root: Path) -> Path:
+        return project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+
+    @staticmethod
+    def _verbatim_target(deploy_dir: Path, source_file: Path) -> Path:
+        return deploy_dir / source_file.name
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, target: TargetProfile, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` this integrator copies for *target*, or ``None`` if it renders.
+
+        The same directory and file name ``integrate_instructions_for_target``
+        uses; rule-dir formats transform their sources, so they are ``None``.
+        """
+        mapping = target.primitives.get("instructions")
+        if not mapping:
+            return {}
+        if mapping.output_compare:
+            return None
+        deploy_dir = self._deploy_dir(target, mapping, project_root)
+        files = self.find_instruction_files(Path(package_info.install_path), source_plan)
+        return self.unique_destinations((self._verbatim_target(deploy_dir, f), f) for f in files)
 
     def deployed_rule_matches(self, source: Path, target: TargetProfile, deploy_root: Path) -> bool:
         """Prove native delivery using the same filename and renderer as install.
@@ -368,8 +497,6 @@ class InstructionIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
 
-        effective_root = mapping.deploy_root or target.root_dir
-        target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
@@ -394,9 +521,20 @@ class InstructionIntegrator(BaseIntegrator):
                 )
                 for source_file in instruction_files
             }
+        instruction_files = self._claude_rule_sources(
+            target,
+            instruction_files,
+            prepared_instructions,
+            package_info,
+            project_root,
+            scope,
+            diagnostics,
+        )
+        if not instruction_files:
+            return IntegrationResult(0, 0, 0, [])
 
-        deploy_dir = target_root / mapping.subdir
-        deploy_dir.mkdir(parents=True, exist_ok=True)
+        deploy_dir = self._deploy_dir(target, mapping, project_root)
+        write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
 
         fmt = mapping.format_id
 
@@ -437,7 +575,7 @@ class InstructionIntegrator(BaseIntegrator):
             if rule_dir_format:
                 target_path, new_content, links_resolved = rendered_rules[source_file]
             else:
-                target_path = deploy_dir / source_file.name
+                target_path = self._verbatim_target(deploy_dir, source_file)
                 # source_file.name has no separators, so traversal via
                 # deploy_dir is impossible. Validate against deploy_dir (not
                 # project_root) so user-scope targets outside the workspace work.
@@ -450,6 +588,12 @@ class InstructionIntegrator(BaseIntegrator):
                 )
 
             rel_path = portable_relpath(target_path, project_root)
+            claude_rule = target.compile_family == "claude"
+            if claude_rule and self._claude_rule_taken(
+                target_path, rel_path, source_file, new_content, package_info, diagnostics
+            ):
+                files_skipped += 1
+                continue
 
             # Compare against the rendered output, not the source: rule-dir
             # formats transform content, so a source-based adopt never matches
@@ -466,6 +610,23 @@ class InstructionIntegrator(BaseIntegrator):
                 target_paths,
                 expected_content=new_content,
             )
+            # Written, adopted or already identical in the real pass (never a
+            # planning pass, which may be skipped): this package holds the path.
+            if (
+                claude_rule
+                and self._overwrite_plan is None
+                and (
+                    not skip
+                    or adopted
+                    or self.is_content_identical_to_text(
+                        target_path, new_content, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+                    )
+                )
+            ):
+                self._claude_rule_writers.setdefault(
+                    target_path,
+                    (_package_identity(package_info), _package_label(package_info), new_content),
+                )
             if skip:
                 if adopted:
                     files_adopted += 1
@@ -476,6 +637,7 @@ class InstructionIntegrator(BaseIntegrator):
                 continue
 
             write_text_lf(target_path, new_content)
+            self.note_rendered_write(target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -491,12 +653,191 @@ class InstructionIntegrator(BaseIntegrator):
             files_adopted=files_adopted,
         )
 
+    def _claude_rule_taken(
+        self,
+        target_path: Path,
+        rel_path: str,
+        source_file: Path,
+        content,
+        package_info,
+        diagnostics,
+    ) -> bool:
+        """Whether an earlier-declared package already wrote a different rule here (#5343).
+
+        Two packages can ship instructions that render to one ``.claude/rules/``
+        path. The first one integrated (declared first) keeps it, the later one
+        is skipped, and the user is told both names so no instruction is lost
+        silently. The project's own instruction always wins, as a deliberate
+        local override, in install and replay alike.
+        """
+        from apm_cli.utils.diagnostics import printable_ascii_text
+
+        identity = _package_identity(package_info)
+        package = _package_label(package_info)
+        if identity == ".":
+            self._claude_rule_writers[target_path] = (identity, package, content)
+            return False
+        winner = self._claude_rule_writers.get(target_path)
+        if winner is None or winner[0] == identity or winner[2] == content:
+            return False
+        if diagnostics is not None and winner[0] != ".":
+            name = source_file.name.removesuffix(".instructions.md")
+            kept, skipped = printable_ascii_text(winner[1]), printable_ascii_text(package)
+            diagnostics.warn(
+                f"{printable_ascii_text(rel_path)}: {kept} and {skipped} both ship an "
+                f"instruction named '{printable_ascii_text(name)}'; kept {kept}'s (declared "
+                f"first), skipped {skipped}'s. Rename one of the instruction files."
+            )
+        return True
+
+    def _claude_rule_sources(
+        self,
+        target: TargetProfile,
+        instruction_files: list[Path],
+        prepared_instructions: dict[Path, _PreparedInstruction],
+        package_info,
+        project_root: Path,
+        scope,
+        diagnostics,
+        *,
+        all_routed: bool = False,
+    ) -> list[Path]:
+        """Drop project instructions Claude already loads from AGENTS.md (#3939).
+
+        Always-on and single-directory instructions route to the compiled
+        ``AGENTS.md`` that ``CLAUDE.md`` imports, but each one is dropped from
+        ``.claude/rules/`` only once a compiled file Claude loads carries its
+        exact scope and body; until then its rule stays (#5343). Routed
+        sources are recorded so install can ask for ``apm compile``. With
+        *all_routed* (pack), every routed source is dropped, carried or not.
+        Drift replay keeps a carried rule the live root still has and the
+        lockfile records for this package, since only install retires it.
+        User scope and projects with a blocking hand-authored root file keep
+        every instruction in ``.claude/rules/``. Drift replay writes to a
+        scratch root, so scope and the blocker come from the live root it replays.
+        """
+        from apm_cli.compilation.claude_agents_md import (
+            CompiledCoverage,
+            claude_agents_md_blocker,
+            claude_agents_md_blocker_warning,
+            routes_to_agents_md,
+        )
+        from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
+
+        if target.compile_family != "claude" or is_user_scope(scope):
+            return instruction_files
+        frame = getattr(package_info, "deployment_frame", None)
+        live_root = Path(
+            frame[1]
+            if frame is not None
+            else getattr(package_info, "root_local_project_root", None) or project_root
+        )
+        if live_root.resolve() == get_deploy_root(InstallScope.USER).resolve():
+            return instruction_files
+        routed = {
+            source
+            for source in instruction_files
+            if routes_to_agents_md(
+                self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo"),
+                live_root,
+                cache=self._routing_cache,
+            )
+        }
+        if not routed:
+            return instruction_files
+        blocker = claude_agents_md_blocker(live_root, cache=self._routing_cache)
+        if blocker is not None:
+            warned = (diagnostics, live_root)
+            if diagnostics is not None and warned not in self._claude_blocker_warned:
+                self._claude_blocker_warned.add(warned)
+                diagnostics.warn(claude_agents_md_blocker_warning(blocker))
+            return instruction_files
+        if all_routed:
+            return [source for source in instruction_files if source not in routed]
+        self.agents_md_routed.update(source.name for source in routed)
+        coverage = self._compiled_coverage.setdefault(live_root, CompiledCoverage(live_root))
+        mapping = target.primitives["instructions"]
+        carried = set()
+        for source in routed:
+            prepared = prepared_instructions[source]
+            apply_to = self._parse_frontmatter(prepared.content)[0].get("applyTo")
+            agents_md = coverage.carrier(apply_to, prepared.body)
+            if agents_md is None:
+                self.agents_md_stale.add(source.name)
+                continue
+            stem = source.name.removesuffix(".instructions.md")
+            rule = live_root / target.root_dir / mapping.subdir / f"{stem}{mapping.extension}"
+            if frame is not None:
+                # Drift replay: retiring a recorded rule is install's step, so
+                # a compile in between is not drift (#5343).
+                recorded = getattr(package_info, "replay_recorded_files", frozenset())
+                if rule.is_file() and portable_relpath(rule, live_root) in recorded:
+                    continue
+            elif rule.is_file():
+                self.agents_md_carried[rule] = agents_md
+            carried.add(source)
+        # Never drop without a replacement (#5343): a routed rule stays, in the
+        # 0.37 layout, until a compiled AGENTS.md Claude loads carries it.
+        return [source for source in instruction_files if source not in carried]
+
+    def render_agents_md_routed_rules(
+        self, package_info, project_root: Path, source_plan, *, every_rule: bool = False
+    ) -> dict[str, str]:
+        """Render the ``.claude/rules/`` files Claude routing left undeployed.
+
+        ``apm pack --format apm`` ships deployed files, and bundle consumers do
+        not compile, so a pack still carries each instruction that #3939 routed
+        to ``AGENTS.md`` as the rule a pre-#3939 install deployed. Routing and
+        rendering reuse this integrator's install decision and projection.
+        With *every_rule*, every Claude rule the package ships renders, routed
+        or not. Returns ``{project-relative rule path: content}``.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["claude"]
+        mapping = target.primitives["instructions"]
+        package_path = Path(package_info.install_path)
+        # Only the sources install admits (the canonical source plan, #4787).
+        sources = self.find_instruction_files(package_path, source_plan)
+        if not sources:
+            return {}
+        self.init_link_resolver(package_info, project_root)
+        prepared = {source: self._prepare_instruction(source) for source in sources}
+        kept = (
+            set()
+            if every_rule
+            else set(
+                self._claude_rule_sources(
+                    target,
+                    sources,
+                    prepared,
+                    package_info,
+                    project_root,
+                    None,
+                    None,
+                    all_routed=True,
+                )
+            )
+        )
+        routed = [source for source in sources if source not in kept]
+        if not routed:
+            return {}
+        deploy_dir = project_root / target.root_dir / mapping.subdir
+        plan = self._prepare_rule_plan(
+            routed, deploy_dir, mapping.extension, mapping.format_id, prepared
+        )
+        return {
+            portable_relpath(rule_path, project_root): normalize_crlf_to_lf(content)
+            for rule_path, content, _links in plan.values()
+        }
+
     def sync_for_target(
         self,
         target: TargetProfile,
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed instruction files for a single *target*."""
         mapping = target.primitives.get("instructions")
@@ -512,6 +853,7 @@ class InstructionIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------
@@ -836,4 +1178,170 @@ class InstructionIntegrator(BaseIntegrator):
             apm_package,
             project_root,
             managed_files=managed_files,
+        )
+
+
+def _package_identity(package_info) -> str:
+    """A stable identity for *package_info*: its dependency key, or ``.`` for the project."""
+    dependency_ref = getattr(package_info, "dependency_ref", None)
+    if dependency_ref is not None:
+        return dependency_ref.get_unique_key()
+    if getattr(getattr(package_info, "package", None), "name", None) == "_local":
+        return "."
+    return str(getattr(package_info, "install_path", "") or "")
+
+
+def _package_label(package_info) -> str:
+    """The name the user knows *package_info* by, for collision messages."""
+    package = getattr(package_info, "package", None)
+    name = getattr(package, "name", "") or ""
+    return name or Path(getattr(package_info, "install_path", "") or ".").name
+
+
+def routed_claude_rule_renders(
+    lockfile,
+    project_root: Path,
+    modules_root: Path,
+    *,
+    include_local: bool,
+    verified: bool = False,
+    dependency_keys: Collection[str] | None = None,
+    every_rule: bool = False,
+) -> dict[str, dict[str, str]]:
+    """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
+
+    With *every_rule*, each dependency's every Claude rule renders, so pack can
+    find two dependencies whose same-named instructions collide (#5343).
+
+    Each locked dependency installed under *modules_root* is rendered through
+    :meth:`InstructionIntegrator.render_agents_md_routed_rules`: the
+    ``.claude/rules/`` files a pre-#3939 install deployed for it. Pack ships
+    them; cleanup proves a legacy rule file against them. A dependency whose
+    edge or own ``targets:`` exclude Claude renders nothing, as at install.
+    *dependency_keys*, when given, limits rendering to the dependencies the
+    caller ships (the plugin pack skips dev dependencies). With *verified*
+    (pack), only rules the lock does not already record as deployed are
+    returned. ``apm_modules`` is not attested: a cached copy whose lock row
+    records a ``content_hash`` must match it before its manifest or its
+    instructions (or their absence) decide routing, so a deleted routed
+    instruction fails too. An older row without one renders nothing it
+    does not already record as deployed. A missing cached copy of an
+    attested dependency fails too unless the lock proves it gives Claude
+    nothing (:func:`_lock_proves_claude_excluded`).
+    """
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.install.package_resolution import effective_dependency_selection
+    from apm_cli.install.target_filter import resolve_effective_package_targets
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import APMPackage, PackageInfo
+
+    rules: dict[str, dict[str, str]] = {}
+    # The "." self entry is the project's own content, never a dependency under
+    # apm_modules: it has no install path to render from (#5336).
+    for dep in lockfile.get_package_dependencies():
+        if dep.source == "local" and not include_local:
+            continue
+        if dependency_keys is not None and dep.get_unique_key() not in dependency_keys:
+            continue
+        dep_ref = dep.to_dependency_ref()
+        install_path = dep_ref.get_install_path(modules_root)
+        attested = bool(getattr(dep, "content_hash", None))
+        if not install_path.is_dir():
+            if verified and attested and not _lock_proves_claude_excluded(dep, dep_ref):
+                _refuse_missing_source(dep, install_path, project_root)
+            continue
+        if verified and attested:
+            _require_locked_source(lockfile, dep, install_path, project_root)
+        manifest = manifest_file(install_path)
+        package = (
+            APMPackage.from_apm_yml(manifest)
+            if manifest.is_file()
+            else APMPackage(name=dep.name or install_path.name, version=dep.version or "0.0.0")
+        )
+        dependency_selection = effective_dependency_selection(dep_ref)
+        selection = resolve_effective_package_targets(
+            [KNOWN_TARGETS["claude"]],
+            dependency_selection.target_subset,
+            package,
+            None,
+            dep.get_unique_key(),
+        )
+        if not selection.targets:
+            continue
+        package_info = PackageInfo(
+            package=package, install_path=install_path, dependency_ref=dep_ref
+        )
+        source_plan = DeployableSourcePlan.create(
+            package_info,
+            [KNOWN_TARGETS["claude"]],
+            skill_subset=dependency_selection.skill_subset,
+            hooks_approved=False,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        rendered = InstructionIntegrator().render_agents_md_routed_rules(
+            package_info, project_root, source_plan, every_rule=every_rule
+        )
+        if verified:
+            deployed = set(dep.deployed_files)
+            rendered = {path: text for path, text in rendered.items() if path not in deployed}
+            if rendered and not attested:
+                _require_locked_source(lockfile, dep, install_path, project_root)
+        if rendered:
+            rules[dep.get_unique_key()] = rendered
+    return rules
+
+
+def _lock_proves_claude_excluded(dep, dep_ref) -> bool:
+    """Return True when the lock records that *dep* excludes Claude.
+
+    Without its cached copy, pack cannot read the dependency's ``targets:``
+    or instructions, so only a recorded exclusion is authoritative: the
+    edge's target subset, or the package's own ``targets:`` install recorded
+    (#4850), judged by the same rule install applies. A missing Claude
+    deployment proves nothing: a collision can block one target while another
+    deploys, and Claude lacks some primitives.
+    """
+    from apm_cli.install.package_resolution import effective_dependency_selection
+    from apm_cli.install.target_filter import recorded_targets_exclude
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    subset = effective_dependency_selection(dep_ref).target_subset
+    if subset and "claude" not in subset:
+        return True
+    recorded = getattr(dep, "package_targets", None) or ()
+    return recorded_targets_exclude(KNOWN_TARGETS["claude"], recorded)
+
+
+def _refuse_missing_source(dep, install_path: Path, project_root: Path) -> None:
+    """Refuse to pack a Claude dependency whose cached copy is gone (#4755)."""
+    from apm_cli.core.remediation import PACK_INSTALLED_FILES_MISSING
+
+    cached = portable_relpath(install_path, project_root)
+    raise ValueError(
+        f"Cannot pack dependency {dep.repo_url}: its installed copy {cached} is missing, so "
+        "its Claude instructions routed to AGENTS.md cannot be rendered into the bundle. "
+        f"{PACK_INSTALLED_FILES_MISSING.sentence()}"
+    )
+
+
+def _require_locked_source(lockfile, dep, install_path: Path, project_root: Path) -> None:
+    """Refuse to render from a cached copy its locked content hash does not attest."""
+    from apm_cli.core.remediation import PACK_DEPENDENCY_UNATTESTED, PACK_INSTALLED_FILE_TAMPERED
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    if not getattr(dep, "content_hash", None):
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: apm.lock.yaml records no content hash "
+            "for it, so its Claude rules cannot be rendered from the apm_modules cache. "
+            f"{PACK_DEPENDENCY_UNATTESTED.sentence()}"
+        )
+    key = dep.get_unique_key()
+    if locked_content_mismatch(key, dep, install_path, lockfile=lockfile):
+        cached = portable_relpath(install_path, project_root)
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: {cached} does not match the content "
+            "hash recorded in apm.lock.yaml, so its Claude rules cannot be rendered. "
+            f"{PACK_INSTALLED_FILE_TAMPERED.bind(path=cached).sentence()}"
         )

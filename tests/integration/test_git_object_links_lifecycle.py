@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.content_hash import compute_package_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -43,18 +44,22 @@ _LINKS = {
     ".apm/skills/linked/assets": "../../../{root}shared/notes",
     "AGENTS.md": "{root}shared/reference.md",
 }
-# Hash of the tree a POSIX install records when it follows these links; every
-# platform must reproduce it so a lockfile from any host replays anywhere.
+# Hashes of the tree a POSIX install materializes when it follows these links;
+# every platform must reproduce them so a lockfile from any host replays
+# anywhere. The legacy stream (lockfile versions 1-3) pins the tree bytes; the
+# framed stream is what a version 4 lockfile records (hash framing hardening).
 # ``subdirectory`` installs ``packages/linked`` of a monorepo whose links
 # leave the package path (and its sparse cone) for the repository root.
 _LAYOUTS = {
     "whole-repo": (
         "",
         "sha256:5dc1b14f6eee2410d3f84e28ebcea1f0ed163c4d7b00e4849403612c8862d63f",
+        "sha256:ad49bfe7a9e1503339d44d8dda7a49b324ab2a0018c1c6dbdfb986146daaf881",
     ),
     "subdirectory": (
         "packages/linked",
         "sha256:53a8b0e13ce1bed0f3aca44c710a35ce9935fd48c6fe2726ec96a56e4b4d3a4c",
+        "sha256:72b569a05975e288e3ac616befb0a4ffac17b0c0794606949eaa9d8eff555be3",
     ),
 }
 
@@ -155,7 +160,7 @@ def _regular_tree(root: Path) -> dict[str, bytes]:
 def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
     short_root: Path, apm_binary_path: Path, layout: str
 ) -> None:
-    prefix, golden = _LAYOUTS[layout]
+    prefix, legacy_golden, golden = _LAYOUTS[layout]
     project, env, sha = _scenario(short_root, _LINKS, prefix)
     install_root = project / "apm_modules" / "acme" / "linked-pkg" / prefix
 
@@ -164,6 +169,7 @@ def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
     locked = _locked(project)
     assert locked["resolved_commit"] == sha
     assert locked["content_hash"] == golden
+    assert compute_package_hash(install_root, framed=False) == legacy_golden
     installed = _regular_tree(install_root)
     assert installed["AGENTS.md"] == _REFERENCE
     assert installed[".apm/skills/linked/reference.md"] == _REFERENCE
@@ -195,7 +201,7 @@ def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
 def test_unresolvable_link_fails_before_hashing(
     short_root: Path, apm_binary_path: Path, target: str, message: str, layout: str
 ) -> None:
-    prefix, _ = _LAYOUTS[layout]
+    prefix = _LAYOUTS[layout][0]
     links = {**_LINKS, ".apm/skills/linked/bad.md": target}
     project, env, _ = _scenario(short_root, links, prefix)
 

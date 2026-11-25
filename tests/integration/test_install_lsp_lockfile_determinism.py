@@ -3,11 +3,14 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+pytestmark = pytest.mark.component
 
 
 def _write_lsp_manifest(project_root: Path) -> None:
@@ -190,7 +193,8 @@ def test_apm_only_dry_run_only_mcp_reports_selected_empty_plan(
     result = CliRunner().invoke(cli, ["install", "--dry-run", "--only=mcp"])
 
     assert result.exit_code == 0, result.output
-    assert "APM dependencies" not in result.output
+    # No APM dependency listing; the hint may name them (no hard wrap, RA-010).
+    assert "APM dependencies (" not in result.output
     assert "No MCP/LSP dependencies selected by --only=mcp" in result.output
     assert "would clean up stale deployed files" not in result.output
     assert not (tmp_path / "apm.lock.yaml").exists()

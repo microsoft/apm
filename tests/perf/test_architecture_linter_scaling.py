@@ -48,12 +48,14 @@ live'`) the same way every other perf/benchmark test in this repo is.
 from __future__ import annotations
 
 import ast
+import itertools
 import json
 import os
 import shutil
 import statistics
+import time
 import types
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +66,12 @@ from scripts.architecture_linter.checks.tree_index import TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.inventory import EXCLUDED_ROOTS
 from scripts.architecture_linter.models import Rule, Violation
+from scripts.architecture_linter.session_cache import linter_session
+from tests.integration.test_architecture_owner_rule_mutations import (
+    EXECUTABLE_MUTATIONS,
+    MutationCase,
+    _mutate,
+)
 
 from .conftest import PERF_ENABLED
 
@@ -426,11 +434,15 @@ def _build_real_catalog_repo(root: Path, count: int) -> Path:
     for index in range(count):
         (directory / f"test_module_{index}.py").write_text(
             "import pytest\n\n"
-            "pytestmark = pytest.mark.integration\n\n\n"
-            f"def helper_{index}(value):\n"
+            "pytestmark = pytest.mark.integration\n\n"
+            # Tokens that open every binary-selection gate (#5196) without forming a
+            # violation, so each detector still does its work at N and 10N.
+            '_GATE_TOKENS = ("apm/.venv", "APM_BINARY_PATH", "-m", "uv")\n\n\n'
+            f"def helper_{index}(value, apm_binary_path=None):\n"
+            "    which = executable = ApmLifecycleRunner = subprocess = None\n"
             "    if value:\n"
             "        return value\n"
-            "    return None\n",
+            "    return (which, executable, ApmLifecycleRunner, subprocess, apm_binary_path)\n",
             encoding="ascii",
         )
     return root
@@ -481,6 +493,19 @@ def test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtractio
     samples = {label: _catalog_sample(root, work_units) for label, root in roots.items()}
     for sample in samples.values():
         _assert_catalog_sample(sample)
+        assert sample.report.violations == ()
+    # Every corpus file opens every binary-selection gate, so the ratio below still
+    # bounds the detectors' own work, not only the pre-filter's (#5196).
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+
+    corpus_file = "tests/integration/perf_catalog/test_module_0.py"
+    provider = FactsProvider(roots["n"], (corpus_file,), registry=None)
+    needs = asdict(_binary_needs(provider.tree_index(corpus_file)))
+    assert all(needs.values()), needs
 
     fixed = samples["zero"].walk_work_units
     incremental_n = samples["n"].walk_work_units - fixed
@@ -561,3 +586,134 @@ def test_real_six_group_catalog_wall_time_scales_below_fifteen_x(
         )
     assert incremental_n_work > 0
     assert incremental_ten_n_work / incremental_n_work < _MAX_REAL_CATALOG_RATIO
+
+
+# ---------------------------------------------------------------------------
+# Section D: session-cached owner mutation matrix at N and 2N cases (#4119).
+# Non-gating scaling evidence: reported by the Architecture Scaling job.
+# ---------------------------------------------------------------------------
+_MATRIX_SMALL_N = 10
+_MATRIX_SAMPLES = 3
+_MAX_MATRIX_RATIO = 2.2
+
+
+def _replay_seconds(cases: Sequence[MutationCase], repetitions: int, tags: Iterator[int]) -> float:
+    """Time `repetitions` passes over `cases`, each run with never-seen content.
+
+    A unique trailing comment gives every run a fresh content hash, so each
+    run rebuilds exactly its overridden file and reuses every other parse.
+    """
+    started = time.perf_counter()
+    for _ in range(repetitions):
+        for case in cases:
+            source = f"{_mutate(case)}\n# scaling-sample {next(tags)}\n"
+            runner.run_selected_rules(ROOT, (case.rule_id,), source_overrides={case.path: source})
+    return time.perf_counter() - started
+
+
+def test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n() -> None:
+    """Warm mutation cases cost linear time: 2N cases stay within 2.2x of N.
+
+    N and 2N replay the same Python cases (2N = two passes), so per-case work
+    is identical and only session growth can bend the ratio. Both sizes run
+    in one prewarmed session and take the median of interleaved samples.
+    """
+    cases = tuple(case for case in EXECUTABLE_MUTATIONS if case.path.endswith(".py"))
+    cases = cases[:_MATRIX_SMALL_N]
+    tags = itertools.count()
+    with linter_session():
+        for rule_id in dict.fromkeys(case.rule_id for case in cases):
+            runner.run_selected_rules(ROOT, (rule_id,))
+        _replay_seconds(cases, 1, tags)
+        small_samples: list[float] = []
+        large_samples: list[float] = []
+        for _ in range(_MATRIX_SAMPLES):
+            small_samples.append(_replay_seconds(cases, 1, tags))
+            large_samples.append(_replay_seconds(cases, 2, tags))
+    small = statistics.median(small_samples)
+    large = statistics.median(large_samples)
+    print(
+        f"mutation matrix N={len(cases)} median {small:.2f}s 2N median {large:.2f}s "
+        f"ratio {large / small:.2f}"
+    )
+    assert large / small <= _MAX_MATRIX_RATIO
+
+
+def test_definition_index_answers_every_real_query_like_the_direct_scan() -> None:
+    """On a full run of the real repository, every ``_defining_files`` query the
+    registry guards make gets the same answer from the per-run index as from the
+    direct scan it replaced (#5196)."""
+    import scripts.architecture_linter.checks.registry_owner_guards as guards
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+
+    queried: list[str] = []
+    differing: list[str] = []
+    found: list[str] = []
+
+    def compared(
+        provider: FactsProvider, rule_id: str, name: str, *, kinds: tuple[str, ...]
+    ) -> tuple[frozenset[str], tuple[Violation, ...]]:
+        indexed = _defining_files(provider, rule_id, name, kinds=kinds)
+        if indexed != _scan_defining_files(provider, rule_id, name, kinds=kinds):
+            differing.append(name)
+        queried.append(name)
+        if indexed[0]:
+            found.append(name)
+        return indexed
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(guards, "_defining_files", compared)
+        report = runner.run(Path(__file__).resolve().parents[2])
+    assert report.failures == ()
+    # The queries the registry guards make today; a new one is added here on purpose.
+    assert sorted(set(queried)) == [
+        "_create_minimal_apm_yml",
+        "_get_bootstrap_config",
+        "bootstrap_config",
+        "configured_user_root",
+        "get_apm_home",
+        "print_version",
+        "resolve_audit_target_decision",
+        "resolve_audit_targets",
+        "resolve_bootstrap_project_name",
+        "resolve_deployment_target_decision",
+        "resolve_user_invocable",
+        "resolve_user_root",
+        "validate_project_name",
+        "write_minimal_manifest",
+    ]
+    # Non-vacuous: real definers are found (an empty scan would agree with an empty index).
+    assert "get_apm_home" in found and len(set(found)) >= 10, sorted(set(found))
+    assert differing == [], differing
+
+
+def test_binary_selection_prefilter_finds_what_every_detector_finds() -> None:
+    """The binary-selection pre-filter (#5196) never hides a finding: on every
+    tracked Python file, the filtered detectors report exactly the unfiltered ones."""
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_subcheck_results,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+    from scripts.architecture_linter.inventory import build_inventory
+
+    root = Path(__file__).resolve().parents[2]
+    inventory = build_inventory(root)
+    provider = FactsProvider(root, inventory.files, registry=None)
+    differences: list[str] = []
+    hits = 0
+    for path in inventory.files:
+        if not path.endswith(".py"):
+            continue
+        index = provider.tree_index(path)
+        if index is None or index.root is None:
+            continue
+        filtered = [lines for lines, _ in _binary_subcheck_results(index)]
+        unfiltered = [lines for lines, _ in _binary_subcheck_results(index, prefilter=False)]
+        hits += sum(1 for lines in unfiltered if lines)
+        if filtered != unfiltered:
+            differences.append(path)
+    assert differences == [], f"the pre-filter hides findings in {differences[:5]}"
+    assert hits > 0, "no detector fired anywhere: the comparison proves nothing"

@@ -4,16 +4,37 @@ import json
 import os
 import re
 import time
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
-from apm_cli.marketplace.errors import MarketplaceError, MarketplaceFetchError
+from apm_cli.marketplace.errors import (
+    MarketplaceError,
+    MarketplaceFetchError,
+    MarketplaceFreshnessError,
+    MarketplaceNotCachedError,
+)
 from apm_cli.marketplace.models import MarketplaceSource
+from tests.utils.scripted_http import (
+    ScriptedTransport,
+    json_body,
+    make_response,
+    status,
+)
+
+pytestmark = pytest.mark.component
+
+
+def _anonymous(url: str):
+    from apm_cli.core.catalog_credentials import anonymous_catalog_credential
+
+    return anonymous_catalog_credential("catalog", url, bound=False)
 
 
 def _quoted_hosts(text: str) -> set[str]:
@@ -41,6 +62,14 @@ def _isolate_cache(tmp_path, monkeypatch):
     monkeypatch.setattr("apm_cli.config._config_cache", None)
     monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
     yield
+
+
+@pytest.fixture
+def transport():
+    """Answer ``requests`` at the socket boundary; the owner's session runs for real."""
+    scripted = ScriptedTransport()
+    with scripted.installed():
+        yield scripted
 
 
 def _make_source(name="acme"):
@@ -168,54 +197,136 @@ class TestFetchMarketplace:
         with pytest.raises(MarketplaceFetchError):
             client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=mock_resolver)
 
-    def test_fetch_remote_marketplace_url_records_digest_and_etag(self, monkeypatch):
+
+def _api_resolver(*, data=None, error=None):
+    resolver = MagicMock()
+    if error is not None:
+        resolver.try_with_fallback.side_effect = error
+    else:
+        resolver.try_with_fallback.return_value = data
+    resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
+    return resolver
+
+
+def _cached_bytes(source) -> bytes:
+    with open(client_mod._cache_data_path(source.name), "rb") as handle:
+        return handle.read()
+
+
+class TestExplicitFreshness:
+    """require_fresh and catalog_freshness_scope (#3279) on a sidecar-cached kind."""
+
+    @pytest.mark.parametrize(
+        "resolver",
+        [
+            _api_resolver(error=Exception("Network error")),
+            _api_resolver(data=["not", "a", "catalog"]),
+        ],
+        ids=["unavailable", "invalid"],
+    )
+    def test_required_refresh_never_serves_or_replaces_cache(self, resolver):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        before = _cached_bytes(source)
+
+        with pytest.raises(MarketplaceFreshnessError, match="Could not verify"):
+            client_mod.fetch_marketplace(source, require_fresh=True, auth_resolver=resolver)
+        assert _cached_bytes(source) == before
+        # Ordinary reads keep their cached availability.
+        assert client_mod.fetch_marketplace(source, auth_resolver=resolver).name == "Cached"
+
+    def test_scope_shares_one_answer_per_source(self):
+        source = _make_source()
+        other = _make_source("other")
+        client_mod._write_cache(source.name, {"name": "Old", "plugins": []})
+        client_mod._write_cache(other.name, {"name": "Other", "plugins": []})
+        resolver = _api_resolver(data={"name": "Fresh", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            first = client_mod.fetch_or_cache(source, auth_resolver=resolver)
+            second = client_mod.fetch_or_cache(source, auth_resolver=resolver)
+            advisory = client_mod.fetch_or_cache(other, auth_resolver=resolver, advisory=True)
+        assert (first.name, second.name, advisory.name) == ("Fresh", "Fresh", "Other")
+        assert resolver.try_with_fallback.call_count == 1
+        assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Fresh"
+
+    def test_required_scope_advisory_reads_never_fetch(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        meta_path = client_mod._cache_meta_path(source.name)
+        with open(meta_path, "w") as f:
+            json.dump({"fetched_at": time.time() - 7200, "ttl_seconds": 3600}, f)
+        resolver = _api_resolver(data={"name": "Fresh", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            stale = client_mod.fetch_or_cache(source, auth_resolver=resolver, advisory=True)
+            fresh = client_mod.fetch_or_cache(source, auth_resolver=resolver)
+        assert (stale.name, fresh.name) == ("Cached", "Fresh")
+        assert resolver.try_with_fallback.call_count == 1
+
+    def test_advisory_read_contract_per_scope(self):
+        """Required scopes skip uncached advisory catalogs; ordinary scopes fetch them."""
+        uncached = _make_source("uncached")
+        resolver = _api_resolver(data={"name": "Fetched", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            with pytest.raises(MarketplaceNotCachedError):
+                client_mod.fetch_or_cache(uncached, auth_resolver=resolver, advisory=True)
+        resolver.try_with_fallback.assert_not_called()
+
+        with client_mod.catalog_freshness_scope(require_fresh=False):
+            read = client_mod.fetch_or_cache(uncached, auth_resolver=resolver, advisory=True)
+        assert read.name == "Fetched"
+        assert resolver.try_with_fallback.call_count == 1
+
+    def test_required_refresh_rejects_malformed_entries(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        before = _cached_bytes(source)
+        resolver = _api_resolver(data={"name": "Bad", "plugins": [None]})
+
+        with pytest.raises(MarketplaceFreshnessError, match="invalid catalog"):
+            client_mod.fetch_marketplace(source, require_fresh=True, auth_resolver=resolver)
+        assert _cached_bytes(source) == before
+        tolerant = client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=resolver)
+        assert tolerant.structural_errors
+
+    def test_scope_shares_one_failure_per_source(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Old", "plugins": []})
+        resolver = _api_resolver(error=Exception("Network error"))
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            for _ in range(2):
+                with pytest.raises(MarketplaceFreshnessError):
+                    client_mod.fetch_or_cache(source, auth_resolver=resolver)
+        assert resolver.try_with_fallback.call_count == 1
+
+    def test_unscoped_and_ordinary_scope_keep_cached_reads(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        resolver = _api_resolver(data={"name": "Fresh", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=False):
+            assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Cached"
+        assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Cached"
+        resolver.try_with_fallback.assert_not_called()
+
+    def test_fetch_remote_marketplace_url_records_digest_and_etag(self, transport):
         source = MarketplaceSource(
             name="catalog",
             url="https://catalog.example.com/marketplace.json",
             path="",
         )
         raw = b'{"name":"catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
-
-        class Response:
-            status_code = 200
-            url = "https://catalog.example.com/marketplace.json"
-
-            def __init__(self):
-                self.headers = {
-                    "ETag": "etag-1",
-                    "Last-Modified": "Mon, 01 Jan 2024 00:00:00 GMT",
-                }
-
-            @property
-            def content(self):
-                raise AssertionError(
-                    "remote marketplace.json fetch must stream, not read response.content"
-                )
-
-            def iter_content(self, chunk_size):
-                yield raw[:chunk_size]
-                yield raw[chunk_size:]
-
-            def raise_for_status(self):
-                return None
-
-            def close(self):
-                return None
-
-        seen_calls: list[tuple[dict, bool]] = []
-
-        class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
-                parsed = urlparse(url)
-                assert (parsed.scheme, parsed.hostname, parsed.path) == (
-                    "https",
-                    "catalog.example.com",
-                    "/marketplace.json",
-                )
-                seen_calls.append((headers or {}, stream))
-                return Response()
-
-        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+        transport.always(
+            lambda request: make_response(
+                request,
+                200,
+                body=raw,
+                headers={"ETag": "etag-1", "Last-Modified": "Mon, 01 Jan 2024 00:00:00 GMT"},
+            )
+        )
 
         manifest = client_mod.fetch_marketplace(source, force_refresh=True)
 
@@ -227,12 +338,25 @@ class TestFetchMarketplace:
         )
         assert manifest.source_digest.startswith("sha256:")
         assert len(manifest.source_digest) == len("sha256:") + 64
-        assert seen_calls == [({"User-Agent": "apm-cli"}, True)]
-        meta = client_mod._read_stale_meta(client_mod._cache_key(source))
+        [request] = transport.requests
+        sent = urlparse(request.url)
+        assert (sent.scheme, sent.hostname, sent.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert request.headers["User-Agent"] == "apm-cli"
+        assert "Authorization" not in request.headers
+        assert transport.send_kwargs[0]["stream"] is True
+        assert transport.responses[0]._content is False
+        meta_path = Path(client_mod._cache_meta_path(client_mod._cache_key(source)))
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
         assert meta["etag"] == "etag-1"
         assert meta["index_digest"] == manifest.source_digest
+        cached = Path(client_mod._cache_data_path(client_mod._cache_key(source)))
+        assert json.loads(cached.read_text(encoding="utf-8")) == json.loads(raw)
 
-    def test_fetch_remote_marketplace_url_sends_conditional_headers(self, monkeypatch):
+    def test_fetch_remote_marketplace_url_sends_conditional_headers(self, transport):
         source = MarketplaceSource(
             name="catalog",
             url="https://catalog.example.com/marketplace.json",
@@ -247,164 +371,103 @@ class TestFetchMarketplace:
             etag="etag-1",
             last_modified="Mon, 01 Jan 2024 00:00:00 GMT",
         )
-
-        seen_headers: list[dict] = []
-
-        class Response:
-            status_code = 304
-            url = "https://catalog.example.com/marketplace.json"
-
-            def __init__(self):
-                self.headers = {}
-
-            def raise_for_status(self):
-                return None
-
-            def close(self):
-                return None
-
-        class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
-                seen_headers.append(headers or {})
-                assert stream is True
-                return Response()
-
-        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+        transport.always(status(304))
 
         manifest = client_mod.fetch_marketplace(source, force_refresh=True)
 
         assert manifest.name == "catalog"
         assert manifest.source_digest == "sha256:" + "a" * 64
-        assert seen_headers[0]["If-None-Match"] == "etag-1"
-        assert seen_headers[0]["If-Modified-Since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+        [request] = transport.requests
+        assert request.headers["If-None-Match"] == "etag-1"
+        assert request.headers["If-Modified-Since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+        assert transport.send_kwargs[0]["stream"] is True
+        assert Path(client_mod._cache_data_path(cache_key)).is_file()
 
-    def test_fetch_remote_marketplace_url_rejects_redirect_to_http(self, monkeypatch):
+    def test_fetch_remote_marketplace_url_rejects_redirect_to_http(self, transport):
+        """The origin-bounded owner refuses an HTTPS downgrade; it is never followed."""
         source_url = "https://catalog.example.com/marketplace.json"
+        transport.always(status(302, Location="http://catalog.example.com/marketplace.json"))
 
-        class Response:
-            status_code = 200
-            url = "http://catalog.example.com/marketplace.json"
+        with pytest.raises(MarketplaceFetchError, match="downgrades HTTPS to HTTP"):
+            client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
+        assert [request.url for request in transport.requests] == [source_url]
 
-            def __init__(self):
-                self.headers: dict[str, str] = {}
+    def test_http_get_clears_session_cookies_between_hosts(self, transport):
+        """A cookie set by one host is never replayed, even to the next request."""
+        transport.always(
+            lambda request: make_response(
+                request, 200, headers={"Set-Cookie": "session=sentinel-cookie; Path=/"}
+            )
+        )
 
-            def raise_for_status(self):
-                return None
+        assert client_mod._http_get("https://one.example.test").status_code == 200
+        assert client_mod._http_get("https://two.example.test").status_code == 200
+        assert client_mod._http_get("https://one.example.test").status_code == 200
 
-            def close(self):
-                return None
+        assert [urlparse(r.url).hostname for r in transport.requests] == [
+            "one.example.test",
+            "two.example.test",
+            "one.example.test",
+        ]
+        assert all("Cookie" not in request.headers for request in transport.requests)
+        assert len(client_mod._HTTP_SESSION.cookies) == 0
 
-        class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
-                assert stream is True
-                return Response()
+    def test_http_get_keeps_credentials_on_the_request_origin(self, transport):
+        """Same-origin hops keep the credential; other origins never see it."""
+        transport.sequence(
+            status(301, Location="/repos/1/contents"),
+            status(302, Location="https://cdn.example.test/blob"),
+            status(200),
+        )
 
-        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+        client_mod._http_get(
+            "https://api.example.test/repos/o/r/contents",
+            headers={"Authorization": "token marketplace-sentinel"},
+        )
 
-        with pytest.raises(MarketplaceFetchError, match="redirect to non-HTTPS URL rejected"):
-            client_mod._fetch_url_direct(source_url)
+        assert [
+            (urlparse(r.url).hostname, r.headers.get("Authorization")) for r in transport.requests
+        ] == [
+            ("api.example.test", "token marketplace-sentinel"),
+            ("api.example.test", "token marketplace-sentinel"),
+            ("cdn.example.test", None),
+        ]
 
-    def test_http_get_clears_session_cookies_between_hosts(self, monkeypatch):
-        class Cookies:
-            def __init__(self):
-                self.clear_count = 0
-
-            def clear(self):
-                self.clear_count += 1
-
-        class Session:
-            def __init__(self):
-                self.cookies = Cookies()
-                self.calls: list[str] = []
-
-            def get(self, url, **kwargs):
-                self.calls.append(url)
-                return object()
-
-        session = Session()
-        monkeypatch.setattr(client_mod, "_HTTP_SESSION", session, raising=False)
-
-        assert client_mod._http_get("https://one.example.test") is not None
-        assert client_mod._http_get("https://two.example.test") is not None
-        assert session.calls == ["https://one.example.test", "https://two.example.test"]
-        assert session.cookies.clear_count == 4
-
-    def test_fetch_remote_marketplace_url_streams_without_content_length(self, monkeypatch):
+    def test_fetch_remote_marketplace_url_streams_without_content_length(self, transport):
         source_url = "https://catalog.example.com/marketplace.json"
-        raw = b'{"name":"catalog","plugins":[]}'
-        seen_calls: list[dict[str, object]] = []
+        transport.always(
+            lambda request: make_response(request, 200, body=b'{"name":"catalog","plugins":[]}')
+        )
 
-        class Response:
-            status_code = 200
-            url = source_url
-
-            def __init__(self):
-                self.headers: dict[str, str] = {}
-
-            @property
-            def content(self):
-                raise AssertionError("remote marketplace.json fetch must stream bounded chunks")
-
-            def iter_content(self, chunk_size):
-                for idx in range(0, len(raw), 5):
-                    yield raw[idx : idx + 5]
-
-            def raise_for_status(self):
-                return None
-
-            def close(self):
-                return None
-
-        class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
-                seen_calls.append({"url": url, "timeout": timeout, "stream": stream})
-                return Response()
-
-        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
-
-        result = client_mod._fetch_url_direct(source_url)
+        result = client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
 
         assert result is not None
         assert result.data == {"name": "catalog", "plugins": []}
-        assert seen_calls == [{"url": source_url, "timeout": 30, "stream": True}]
+        assert [request.url for request in transport.requests] == [source_url]
+        assert transport.send_kwargs[0]["stream"] is True
+        assert transport.send_kwargs[0]["timeout"] == 30
+        # Read through iter_content, never buffered whole via response.content.
+        assert transport.responses[0]._content is False
 
     def test_fetch_remote_marketplace_url_rejects_oversized_stream_without_content_length(
-        self, monkeypatch
+        self, transport
     ):
         source_url = "https://catalog.example.com/marketplace.json"
-        monkeypatch.setattr(client_mod, "_MAX_MARKETPLACE_JSON_BYTES", 8)
-
-        class Response:
-            status_code = 200
-            url = source_url
-
-            def __init__(self):
-                self.headers: dict[str, str] = {}
-
-            @property
-            def content(self):
-                raise AssertionError("remote marketplace.json fetch must stream bounded chunks")
-
-            def iter_content(self, chunk_size):
-                yield b"1234"
-                yield b"5678"
-                yield b"9"
-
-            def raise_for_status(self):
-                return None
-
-            def close(self):
-                return None
-
-        class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
-                assert stream is True
-                return Response()
-
-        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+        oversized = b"x" * (client_mod._MAX_MARKETPLACE_JSON_BYTES + 1)
+        transport.always(lambda request: make_response(request, 200, body=oversized))
 
         with pytest.raises(MarketplaceFetchError, match=r"marketplace\.json exceeds"):
-            client_mod._fetch_url_direct(source_url)
+            client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
+        assert transport.send_kwargs[0]["stream"] is True
+        # Rejected while streaming: the body was never buffered whole.
+        assert transport.responses[0]._content is False
+
+
+def test_bounded_reader_skips_empty_keep_alive_chunks():
+    """Empty keep-alive chunks are skipped and never count toward the byte cap."""
+    response = SimpleNamespace(iter_content=lambda chunk_size: iter([b"ab", b"", b"cd", b""]))
+
+    assert client_mod._read_bounded_response_bytes(response, "u", max_bytes=4) == b"abcd"
 
 
 class TestAutoDetectPath:
@@ -516,8 +579,9 @@ class TestProxyAwareFetch:
         assert result == self._MARKETPLACE_JSON
         mock_resolver.try_with_fallback.assert_called_once()
 
-    def test_proxy_only_blocks_github_fallback(self):
+    def test_proxy_only_blocks_github_fallback(self, monkeypatch):
         """Proxy returns None + enforce_only -- returns None, no GitHub call."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = _make_source()
         cfg = self._make_cfg(enforce_only=True)
         with (
@@ -599,7 +663,6 @@ class TestProxyAwareFetch:
         assert manifest.plugins[0].name == "p1"
 
 
-@patch("apm_cli.marketplace.client._try_proxy_fetch", return_value=None)
 class TestPrivateRepoAuth:
     """Verify unauth_first=False so private repos get credentials before unauthenticated fallback.
 
@@ -611,7 +674,7 @@ class TestPrivateRepoAuth:
 
     _MARKETPLACE_JSON = {"name": "Private Plugins", "plugins": []}  # noqa: RUF012
 
-    def test_fetch_file_private_repo_auth_first(self, _proxy):
+    def test_fetch_file_private_repo_auth_first(self):
         """_fetch_file passes unauth_first=False so private repos are reached via auth first."""
         source = _make_source()
         with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
@@ -628,7 +691,7 @@ class TestPrivateRepoAuth:
             "unauth_first must be False -- private repos respond 404 to unauthenticated requests"
         )
 
-    def test_fetch_file_no_proxy_passes_unauth_first_false(self, _proxy):
+    def test_fetch_file_no_proxy_passes_unauth_first_false(self):
         """With no proxy, try_with_fallback is explicitly called with unauth_first=False (not True)."""
         source = _make_source()
         with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
@@ -648,7 +711,7 @@ class TestPrivateRepoAuth:
             f"Expected unauth_first=False, got {call_kwargs['unauth_first']!r}"
         )
 
-    def test_auto_detect_private_repo_succeeds_with_auth(self, _proxy):
+    def test_auto_detect_private_repo_succeeds_with_auth(self):
         """_auto_detect_path finds a private repo's manifest via auth on the third candidate path."""
         source = _make_source()
         call_count = [0]
@@ -678,24 +741,6 @@ class TestPrivateRepoAuth:
             )
 
 
-def _streamed_json(text: str, status: int = 200):
-    """Fake HTTP response matching the streamed ``iter_content`` + ``stream=True``
-    contract the capped API reader now requires.
-
-    ``headers`` must be a real dict so the Content-Length precheck reads "" rather
-    than a truthy MagicMock that would raise a non-suppressed ``TypeError``.
-    """
-    m = MagicMock()
-    m.status_code = status
-    m.text = text
-    m.headers = {}
-    m.iter_content.side_effect = lambda chunk_size=65536: iter(
-        [text.encode("utf-8")] if text else []
-    )
-    m.close.side_effect = lambda: None
-    return m
-
-
 class TestDirectFetchHostRouting:
     """GitLab v4 Files API vs GitHub Contents; proxy-first unchanged."""
 
@@ -707,7 +752,7 @@ class TestDirectFetchHostRouting:
         with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
             yield
 
-    def test_gitlab_uses_v4_files_raw_url(self):
+    def test_gitlab_uses_v4_files_raw_url(self, transport):
         source = MarketplaceSource(
             name="gl",
             owner="acme",
@@ -715,30 +760,21 @@ class TestDirectFetchHostRouting:
             host="gitlab.com",
             branch="main",
         )
-        captured_urls = []
+        transport.always(json_body(self._JSON))
 
-        def fake_get(url, headers=None, timeout=None, **kwargs):
-            captured_urls.append((url, dict(headers or {})))
-            return _streamed_json(json.dumps(self._JSON))
-
-        with (
-            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
-        ):
+        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
             resolver = AuthResolver()
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
 
         assert result == self._JSON
-        assert len(captured_urls) == 1
-        url, headers = captured_urls[0]
-        assert "/api/v4/projects/" in url
-        assert "acme%2Fplugins" in url
-        assert "/repository/files/" in url and "/raw?" in url
-        assert "ref=main" in url
-        assert "/repos/" not in url
-        assert headers.get("User-Agent") == "apm-cli"
+        [request] = transport.requests
+        sent = urlparse(request.url)
+        assert (sent.scheme, sent.hostname) == ("https", "gitlab.com")
+        assert sent.path == "/api/v4/projects/acme%2Fplugins/repository/files/marketplace.json/raw"
+        assert parse_qs(sent.query)["ref"] == ["main"]
+        assert request.headers.get("User-Agent") == "apm-cli"
 
-    def test_gitlab_private_project_uses_auth_first(self):
+    def test_gitlab_private_project_uses_auth_first(self, transport):
         """Private GitLab projects should use PAT before unauthenticated probing."""
         source = MarketplaceSource(
             name="gl",
@@ -747,69 +783,54 @@ class TestDirectFetchHostRouting:
             host="gitlab.com",
             branch="main",
         )
-        captured = []
-
-        def fake_get(url, headers=None, timeout=None, **kwargs):
-            hdrs = dict(headers or {})
-            captured.append(hdrs)
-            if hdrs.get("PRIVATE-TOKEN"):
-                return _streamed_json(json.dumps(self._JSON), 200)
-            return _streamed_json("", 404)
+        transport.on(
+            lambda request: request.headers.get("PRIVATE-TOKEN") == "glpat-test",
+            json_body(self._JSON),
+        ).always(status(404))
 
         with (
             patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-test"}, clear=False),
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
         ):
             resolver = AuthResolver()
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
 
         assert result == self._JSON
-        assert len(captured) == 1
-        assert captured[0].get("PRIVATE-TOKEN") == "glpat-test"
+        assert [r.headers.get("PRIVATE-TOKEN") for r in transport.requests] == ["glpat-test"]
 
-    def test_gitlab_nested_group_project_path_encoded(self):
+    def test_gitlab_nested_group_project_path_encoded(self, transport):
         source = MarketplaceSource(
             name="gl",
             owner="group/subgroup",
             repo="repo",
             host="gitlab.com",
         )
-        captured_urls = []
+        transport.always(json_body(self._JSON))
 
-        def fake_get(url, headers=None, timeout=None, **kwargs):
-            captured_urls.append(url)
-            return _streamed_json(json.dumps(self._JSON))
-
-        with (
-            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
-        ):
+        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
             resolver = AuthResolver()
-            client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
 
-        assert "group%2Fsubgroup%2Frepo" in captured_urls[0]
+        assert result == self._JSON
+        path = urlparse(transport.requests[0].url).path
+        assert path.startswith("/api/v4/projects/group%2Fsubgroup%2Frepo/")
 
-    def test_github_com_uses_contents_api_regression(self):
+    def test_github_com_uses_contents_api_regression(self, transport):
         source = _make_source()
-        captured_urls = []
+        transport.always(json_body(self._JSON))
 
-        def fake_get(url, headers=None, timeout=None, **kwargs):
-            captured_urls.append(url)
-            return _streamed_json(json.dumps(self._JSON))
-
-        with (
-            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
-        ):
+        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
             resolver = AuthResolver()
-            client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
 
-        assert len(captured_urls) == 1
-        assert "/repos/acme-org/plugins/contents/marketplace.json" in captured_urls[0]
-        assert "/api/v4/projects/" not in captured_urls[0]
+        assert result == self._JSON
+        [request] = transport.requests
+        sent = urlparse(request.url)
+        assert sent.hostname == "api.github.com"
+        assert sent.path == "/repos/acme-org/plugins/contents/marketplace.json"
 
-    def test_ghes_uses_v3_contents_api(self):
+    def test_ghes_uses_v3_contents_api(self, transport):
+        transport.always(json_body(self._JSON))
         with patch.dict(os.environ, {"GITHUB_HOST": "ghe.example.com"}, clear=False):
             source = MarketplaceSource(
                 name="x",
@@ -817,26 +838,17 @@ class TestDirectFetchHostRouting:
                 repo="plugins",
                 host="ghe.example.com",
             )
-            captured_urls = []
-
-            def fake_get(url, headers=None, timeout=None, **kwargs):
-                captured_urls.append(url)
-                return _streamed_json(json.dumps(self._JSON))
-
-            with (
-                patch(
-                    "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
-                    return_value=None,
-                ),
-                patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
-            ):
+            with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
                 resolver = AuthResolver()
-                client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+                result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
 
-        assert len(captured_urls) == 1
-        assert "/api/v3/repos/org/plugins/contents/" in captured_urls[0]
+        assert result == self._JSON
+        [request] = transport.requests
+        sent = urlparse(request.url)
+        assert sent.hostname == "ghe.example.com"
+        assert sent.path == "/api/v3/repos/org/plugins/contents/marketplace.json"
 
-    def test_generic_host_routes_through_git_fetcher(self):
+    def test_generic_host_routes_through_git_fetcher(self, transport):
         """A 'generic' host (e.g. Bitbucket Cloud) now routes to _fetch_git, not rejected.
 
         Behaviour change: previously APM hard-rejected non-GitHub/non-GitLab hosts
@@ -854,7 +866,6 @@ class TestDirectFetchHostRouting:
         mock_git = MagicMock(return_value=None)
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client._http_get") as mock_get,
             patch.dict("apm_cli.marketplace.client._FETCHERS", {"git": mock_git}),
         ):
             resolver = AuthResolver()
@@ -862,10 +873,10 @@ class TestDirectFetchHostRouting:
             mock_git.assert_called_once()
 
         # No HTTP request should be issued -- generic git uses subprocess via GitCache.
-        mock_get.assert_not_called()
+        assert transport.requests == []
         assert result is None
 
-    def test_proxy_success_does_not_call_requests_get(self):
+    def test_proxy_success_does_not_call_requests_get(self, transport):
         """PROXY_REGISTRY_URL path: no direct GitHub/GitLab HTTP when proxy returns JSON."""
         source = _make_source()
         cfg = MagicMock()
@@ -875,7 +886,6 @@ class TestDirectFetchHostRouting:
         cfg.enforce_only = False
         cfg.get_headers.return_value = {"Authorization": "Bearer x"}
         raw = json.dumps(self._JSON).encode()
-        mock_get = MagicMock()
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
@@ -883,14 +893,13 @@ class TestDirectFetchHostRouting:
                 "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
                 return_value=raw,
             ),
-            patch("apm_cli.marketplace.client._http_get", mock_get),
         ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
         assert result == self._JSON
-        mock_get.assert_not_called()
+        assert transport.requests == []
 
-    def test_proxy_only_blocks_gitlab_v4_fallback(self):
+    def test_proxy_only_blocks_gitlab_v4_fallback(self, monkeypatch, transport):
         """PROXY_REGISTRY_ONLY=1 + proxy miss MUST NOT fall through to the GitLab v4 raw API.
 
         Policy-enforcement promise: when the org pins all marketplace fetches to
@@ -899,6 +908,7 @@ class TestDirectFetchHostRouting:
         -- to the GitLab host as a fallback. Mirrors the equivalent guarantee
         for the GitHub Contents API.
         """
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = MarketplaceSource(
             name="gl",
             owner="acme",
@@ -912,7 +922,6 @@ class TestDirectFetchHostRouting:
         cfg.scheme = "https"
         cfg.enforce_only = True
         cfg.get_headers.return_value = {"Authorization": "Bearer x"}
-        mock_get = MagicMock()
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
@@ -920,15 +929,15 @@ class TestDirectFetchHostRouting:
                 "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
                 return_value=None,
             ),
-            patch("apm_cli.marketplace.client._http_get", mock_get),
         ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
         assert result is None
-        mock_get.assert_not_called()
+        assert transport.requests == []
 
-    def test_proxy_only_blocks_github_contents_fallback(self):
+    def test_proxy_only_blocks_github_contents_fallback(self, monkeypatch, transport):
         """Companion guarantee: PROXY_REGISTRY_ONLY=1 also blocks GitHub Contents fallback."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = _make_source()
         cfg = MagicMock()
         cfg.host = "art.example.com"
@@ -936,7 +945,6 @@ class TestDirectFetchHostRouting:
         cfg.scheme = "https"
         cfg.enforce_only = True
         cfg.get_headers.return_value = {"Authorization": "Bearer x"}
-        mock_get = MagicMock()
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
@@ -944,12 +952,66 @@ class TestDirectFetchHostRouting:
                 "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
                 return_value=None,
             ),
-            patch("apm_cli.marketplace.client._http_get", mock_get),
         ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
         assert result is None
-        mock_get.assert_not_called()
+        assert transport.requests == []
+
+
+class TestProxyOnlyRefusesDirectCatalogEgress:
+    """PROXY_REGISTRY_ONLY refuses every catalog fetch without a proxy route (#3994)."""
+
+    @pytest.mark.parametrize(
+        ("url", "path", "kind"),
+        [
+            ("https://catalog.example.com/marketplace.json", "", "url"),
+            ("https://git.example.com/acme/plugins.git", "marketplace.json", "git"),
+            ("https://dev.azure.com/org/proj/_git/plugins", "marketplace.json", "ado"),
+            ("https://github.com/acme/plugins", "marketplace.json", "github"),
+        ],
+    )
+    def test_refuses_without_network(self, monkeypatch, transport, url, path, kind):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+        monkeypatch.delenv("ARTIFACTORY_BASE_URL", raising=False)
+        source = MarketplaceSource(name="mkt", url=url, path=path)
+        assert source.kind == kind
+        clone = MagicMock(side_effect=AssertionError("direct git egress"))
+        with patch("apm_cli.cache.git_cache.GitCache.get_checkout", clone):
+            with pytest.raises(MarketplaceFetchError, match="PROXY_REGISTRY_ONLY"):
+                client_mod.fetch_marketplace(source, force_refresh=True)
+        assert transport.requests == []
+        clone.assert_not_called()
+        assert not Path(client_mod._cache_data_path(client_mod._cache_key(source))).exists()
+
+    def test_refusal_skips_stale_cache_and_hides_query(self, monkeypatch, transport):
+        """A policy refusal is not a network error: no stale catalog, no URL token."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+        source = MarketplaceSource(
+            name="mkt", url="https://catalog.example.com/m.json?sig=SECRET", path=""
+        )
+        key = client_mod._cache_key(source)
+        client_mod._write_cache(key, {"name": "stale-catalog", "plugins": []})
+        meta_path = Path(client_mod._cache_meta_path(key))
+        meta_path.write_text(json.dumps({"fetched_at": time.time() - 7200, "ttl_seconds": 3600}))
+        cached = Path(client_mod._cache_data_path(key)).read_bytes()
+
+        with pytest.raises(MarketplaceFetchError) as excinfo:
+            client_mod.fetch_marketplace(source, force_refresh=True)
+
+        assert "SECRET" not in str(excinfo.value)
+        assert "stale-catalog" not in str(excinfo.value)
+        assert transport.requests == []
+        assert Path(client_mod._cache_data_path(key)).read_bytes() == cached
+
+    def test_fetch_raw_without_proxy_is_refused(self, monkeypatch, transport):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
+            with pytest.raises(MarketplaceError, match="set PROXY_REGISTRY_URL"):
+                client_mod.fetch_raw(host="github.com", owner="o", repo="r", file_path="f", ref="m")
+        assert transport.requests == []
 
 
 class TestCacheKey:
@@ -1019,7 +1081,7 @@ class TestFetchFileHostKindGuard:
     aimed at an unrelated host, leaking credentials.
     """
 
-    def test_generic_host_routes_through_git_fetcher(self):
+    def test_generic_host_routes_through_git_fetcher(self, transport):
         """A 'generic' kind host routes through _fetch_git, never the GitHub API.
 
         Defense-in-depth: even though _fetch_git no longer issues an
@@ -1040,14 +1102,13 @@ class TestFetchFileHostKindGuard:
         mock_git = MagicMock(return_value=None)
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client._http_get") as mock_get,
             patch.dict("apm_cli.marketplace.client._FETCHERS", {"git": mock_git}),
         ):
             client_mod._fetch_file(source, "marketplace.json")
             mock_git.assert_called_once()
 
         # No HTTP request should have been issued -- generic-git uses GitCache subprocess.
-        mock_get.assert_not_called()
+        assert transport.requests == []
 
     def test_github_host_passes_guard(self):
         """github.com sources are untouched by the guard."""
@@ -1097,11 +1158,15 @@ class TestFetchRaw:
         assert "connection reset" in msg
         assert "acme/forge/agents/x/apm.yml@abc123" in msg
 
-    def test_returns_proxy_bytes_when_proxy_hits(self):
+    def test_returns_proxy_bytes_when_proxy_hits(self, transport):
         # Proxy success short-circuits before any auth path is consulted.
-        with patch(
-            "apm_cli.marketplace.client._try_proxy_fetch_raw",
-            return_value=b"hello",
+        cfg = MagicMock(host="art.example.com", prefix="artifactory/github", scheme="https")
+        cfg.get_headers.return_value = {}
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=b"hello"
+            ) as entry,
         ):
             result = client_mod.fetch_raw(
                 host="github.com",
@@ -1111,20 +1176,21 @@ class TestFetchRaw:
                 ref="main",
             )
         assert result == b"hello"
+        assert entry.call_args.kwargs["host"] == "art.example.com"
+        assert transport.requests == []
 
-    def test_raises_when_proxy_only_blocks_github(self):
+    def test_raises_when_proxy_only_blocks_github(self, monkeypatch):
         # PROXY_REGISTRY_ONLY=1 must keep us off GitHub even when the
         # proxy has no entry.  Because that path cannot verify whether
         # the file exists, fetch_raw must raise MarketplaceError instead
         # of returning None -- otherwise audit would silently report the
         # plugin as NO_MANIFEST in proxy-only environments rather than
         # surfacing it as unverifiable.
-        cfg = MagicMock(enforce_only=True)
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        cfg = MagicMock(enforce_only=True, host="art.example.com", prefix="p", scheme="https")
+        cfg.get_headers.return_value = {}
         with (
-            patch(
-                "apm_cli.marketplace.client._try_proxy_fetch_raw",
-                return_value=None,
-            ),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None),
             patch(
                 "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
                 return_value=cfg,
@@ -1148,25 +1214,16 @@ class TestFetchRaw:
         # retry hint that does not apply here.
         assert not isinstance(excinfo.value, MarketplaceFetchError)
 
-    def test_non_github_host_rejected_before_request(self):
+    def test_non_github_host_rejected_before_request(self, transport):
         # Defense-in-depth, mirrors TestFetchFileHostKindGuard for
         # _fetch_file: if a plugin source somehow surfaces a non-GitHub
         # host (e.g. ``gitlab.com``) we MUST NOT attach a GitHub PAT to
         # the fallback request -- doing so would leak credentials.
         # ``fetch_raw`` must fail closed with MarketplaceError and never
         # invoke requests.get.
-        with (
-            patch(
-                "apm_cli.marketplace.client._try_proxy_fetch_raw",
-                return_value=None,
-            ),
-            patch(
-                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
-                return_value=None,
-            ),
-            patch(
-                "apm_cli.marketplace.client._http_get",
-            ) as mock_get,
+        with patch(
+            "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+            return_value=None,
         ):
             with pytest.raises(MarketplaceError) as excinfo:
                 client_mod.fetch_raw(
@@ -1178,7 +1235,7 @@ class TestFetchRaw:
                 )
 
         # No HTTP request must be issued -- proves credentials cannot leak.
-        mock_get.assert_not_called()
+        assert transport.requests == []
         msg = str(excinfo.value)
         assert _quoted_hosts(msg) == {"gitlab.com"}
         assert "not a supported plugin source" in msg

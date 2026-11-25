@@ -11,8 +11,11 @@ import pytest
 
 from apm_cli.cache.git_cache import CachePruneError, GitCache
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.checkout_trust import trust_checkout_contents
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
+
+pytestmark = pytest.mark.component
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +39,7 @@ def test_remote_ref_receipt_is_shared_without_rewriting_git_refs(tmp_path: Path,
     assert replay.read_resolved_ref(url + "-other", ref) == (False, None)
     assert replay._resolve_sha(url, ref, locked_sha="a" * 40) == "a" * 40
     assert replay.read_resolved_ref(url, ref) == (True, "b" * 40)
+    assert cache._resolved_ref_path(url, ref).read_text(encoding="ascii") == "b" * 40
 
 
 @pytest.mark.parametrize("count", [2, 20])
@@ -44,10 +48,11 @@ def test_ref_receipt_stats_count_bytes_not_repositories(tmp_path: Path, count: i
     cache = GitCache(tmp_path)
     for index in range(count):
         cache.remember_resolved_ref("https://github.com/owner/repo", f"ref-{index}", "a" * 40)
-    with patch("apm_cli.cache.git_cache.os.scandir", wraps=os.scandir) as scandir:
+    with patch("os.scandir", wraps=os.scandir) as scandir:
         stats = cache.get_cache_stats()
     assert stats == {"db_count": 0, "checkout_count": 0, "total_size_bytes": 40 * count}
     assert scandir.call_count == 2
+    assert len(list(cache._db_root.glob("*.ref"))) == count
 
 
 def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Path) -> None:
@@ -61,9 +66,10 @@ def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Pat
     cache.remember_resolved_ref(url, "main", "b" * 40)
     cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
     (cache._db_root / cache_shard_key(url)).mkdir()
-    with patch.object(L2BareRevParse, "_rev_parse", return_value="a" * 40) as bare:
+    with patch.object(GitCache, "bare_ref_sha", return_value="a" * 40) as bare:
         assert L2BareRevParse(cache).try_resolve(dependency, "main") is None
     bare.assert_not_called()
+    assert cache._resolved_ref_path(url, "main").read_text(encoding="ascii") == "broken"
 
 
 @pytest.mark.parametrize("receipt_state", ["valid", "absent", "corrupt"])
@@ -88,19 +94,27 @@ def test_receipt_precedence_with_actual_stale_bare_reference(
     bare = cache._db_root / cache_shard_key(url)
     # Pushes can start background auto-maintenance in the origin; skip its
     # transient lock and temp files so the snapshot copy cannot race them.
+    # An APM-shaped cache bare: the fixture's bare objects under the config APM writes.
     shutil.copytree(
         repository.origin, bare, ignore=shutil.ignore_patterns("*.lock", "tmp_*", "gc.pid")
     )
+    shutil.rmtree(bare / "hooks", ignore_errors=True)
+    (bare / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n"
+        f'[remote "origin"]\n\turl = {url}\n\ttagopt = --no-tags\n',
+        encoding="utf-8",
+    )
     payload.write_text("current\n", encoding="ascii")
     current_commit = repositories.commit(repository, message="Current observation")
-    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    assert cache.bare_ref_sha(url, "main") == old_commit.sha
     if receipt_state != "absent":
         cache.remember_resolved_ref(url, "main", current_commit.sha)
         if receipt_state == "corrupt":
             cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
     expected = {"valid": current_commit.sha, "absent": old_commit.sha, "corrupt": None}
     assert L2BareRevParse(cache).try_resolve(dependency, "main") == expected[receipt_state]
-    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    assert cache.bare_ref_sha(url, "main") == old_commit.sha
+    assert cache._resolved_ref_path(url, "main").exists() is (receipt_state != "absent")
 
 
 @pytest.mark.windows_compat
@@ -150,12 +164,14 @@ class TestGitCacheResolveSha:
         sha = "a" * 40
         result = cache._resolve_sha("https://github.com/owner/repo", "main", locked_sha=sha)
         assert result == sha
+        assert not cache._resolved_ref_path("https://github.com/owner/repo", "main").exists()
 
     def test_ref_that_looks_like_sha(self, tmp_path: Path) -> None:
         cache = GitCache(tmp_path)
         sha = "b" * 40
         result = cache._resolve_sha("https://github.com/owner/repo", sha)
         assert result == sha
+        assert not cache._resolved_ref_path("https://github.com/owner/repo", sha).exists()
 
     @patch("subprocess.run")
     def test_ls_remote_resolution(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -169,6 +185,7 @@ class TestGitCacheResolveSha:
         assert result == expected_sha
 
 
+@trust_checkout_contents()
 class TestGitCacheGetCheckout:
     """Test the full cache hit/miss flow."""
 
@@ -186,6 +203,9 @@ class TestGitCacheGetCheckout:
         checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha / "full"
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
+        (checkout_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (checkout_dir / ".git" / "objects").mkdir()
+        (checkout_dir / ".git" / "refs").mkdir()
         (checkout_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -200,6 +220,7 @@ class TestGitCacheGetCheckout:
 
         result = cache.get_checkout(url, None, locked_sha=sha)
         assert result == checkout_dir
+        assert checkout_dir.is_dir()
 
     @patch("subprocess.run")
     def test_cache_hit_integrity_failure_evicts(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -294,6 +315,7 @@ class TestGitCacheStats:
         assert stats["db_count"] == 0
         assert stats["checkout_count"] == 0
         assert stats["total_size_bytes"] == 0
+        assert not any(path.is_file() for path in tmp_path.rglob("*"))
 
     def test_counts_entries(self, tmp_path: Path) -> None:
         cache = GitCache(tmp_path)
@@ -305,6 +327,7 @@ class TestGitCacheStats:
         stats = cache.get_cache_stats()
         assert stats["db_count"] == 2
         assert stats["checkout_count"] == 1
+        assert (tmp_path / "git" / "checkouts_v1" / "shard1" / "sha1").is_dir()
 
 
 class TestGitCachePrune:
@@ -421,6 +444,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (final_dir / ".git" / "objects").mkdir()
+        (final_dir / ".git" / "refs").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -490,6 +516,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (final_dir / ".git" / "objects").mkdir()
+        (final_dir / ".git" / "refs").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",

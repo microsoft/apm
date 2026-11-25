@@ -13,6 +13,7 @@ from click.testing import CliRunner
 from apm_cli.commands.pack import pack_cmd
 from apm_cli.core.auth import AuthResolver
 from apm_cli.marketplace.builder import MarketplaceBuilder, ResolvedPackage
+from tests.utils.metadata_transport import BUILDER_HTTP_SEAM, urlopen_adapter
 
 pytestmark = pytest.mark.component
 
@@ -76,7 +77,7 @@ def test_metadata_prefetch_uses_real_resolver_token_and_anonymous_paths(
             )
         return _Response(b"name: remote-tool\ndescription: Fixture\nversion: 1.0.0\n")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(_urlopen))
     builder = MarketplaceBuilder(
         tmp_path / "apm.yml",
         auth_resolver=AuthResolver(),

@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 
 def test_install_global_hints_compile_and_writes_no_root_file(tmp_path, monkeypatch):
     """`apm install -g` prints the compile hint but writes NO root context file.
@@ -273,6 +275,7 @@ def test_compile_global_broken_user_manifest_fails_closed(
 ) -> None:
     """Invalid user manifests fail before any harness output is written."""
     from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.core.remediation import USER_MANIFEST_INVALID
     from apm_cli.primitives.discovery import clear_discovery_cache
 
     home = tmp_path / "home"
@@ -287,7 +290,7 @@ def test_compile_global_broken_user_manifest_fails_closed(
     clear_discovery_cache()
     assert result.exit_code == 1
     assert expected in result.output.lower()
-    assert "rerun" in result.output.lower()
+    assert USER_MANIFEST_INVALID.bind(path="~/.apm/apm.yml").sentence() in result.output
     assert not (home / ".claude").exists()
     assert not (home / ".codex").exists()
     assert not (home / ".copilot").exists()
@@ -299,6 +302,7 @@ def test_compile_global_unreadable_user_manifest_fails_closed(
 ) -> None:
     """A manifest path that cannot be read never expands to every target."""
     from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.core.remediation import USER_MANIFEST_INVALID
     from apm_cli.primitives.discovery import clear_discovery_cache
 
     home = tmp_path / "home"
@@ -313,8 +317,9 @@ def test_compile_global_unreadable_user_manifest_fails_closed(
     clear_discovery_cache()
     assert result.exit_code == 1
     assert "failed to read" in result.output.lower()
-    assert "readable yaml file" in result.output.lower()
-    assert "rerun 'apm compile -g'" in result.output.lower()
+    assert "must be a regular, non-symlink file" in result.output.lower()
+    assert USER_MANIFEST_INVALID.bind(path="~/.apm/apm.yml").sentence() in result.output
+    assert "run 'apm compile -g'" in result.output
     assert not (home / ".claude").exists()
     assert not (home / ".codex").exists()
     assert not (home / ".copilot").exists()

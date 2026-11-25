@@ -111,6 +111,7 @@ LEGACY_AC_ALIASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "registry_delegation.diagnostic_ascii_owner": ("AC12",),
         "registry_delegation.experimental_target_hints": ("AC1",),
         "registry_delegation.host_backend_dispatch": ("AC1",),
+        "registry_delegation.install_layering": ("AC18",),
         "registry_delegation.install_target_selection": ("AC1",),
         "registry_delegation.lifecycle_docs_aggregate": ("AC6",),
         "registry_delegation.lockfile_version_authority": ("AC2",),

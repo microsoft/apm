@@ -24,6 +24,8 @@ _project_has_root_primitives
     Return True when the project root contains a ``.apm/`` directory.
 _has_local_apm_content
     Return True when ``.apm/`` contains at least one primitive file.
+_root_holds_only_hook_primitives
+    Return True when ``.apm/`` carries hooks and no other primitive.
 _copy_local_package
     Copy a local-path dependency into ``apm_modules/``.
 materialize_local_package
@@ -31,14 +33,23 @@ materialize_local_package
     the uninstall survivor refresh and the audit replay.
 """
 
+import contextlib
 import shutil
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import yaml
 
+from apm_cli.core.remediation import (
+    LOCAL_PACKAGE_CONTENT_INVALID,
+    LOCAL_PACKAGE_PATH_MISSING,
+    LOCAL_PACKAGE_UNREADABLE,
+)
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.virtual_file import materialize_virtual_file_package, virtual_file_subdirectory
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
@@ -67,6 +78,27 @@ def _project_has_root_primitives(project_root) -> bool:
     return (root / ".apm").is_dir()
 
 
+_PRIMITIVE_DIRS = (
+    "skills",
+    "instructions",
+    "chatmodes",
+    "agents",
+    "prompts",
+    "hooks",
+    "commands",
+    "extensions",
+)
+
+
+def _populated_primitive_dirs(apm_dir) -> set[str]:
+    """Return the primitive subdirectories of *apm_dir* holding at least one file."""
+    return {
+        name
+        for name in _PRIMITIVE_DIRS
+        if (apm_dir / name).is_dir() and any(p.is_file() for p in (apm_dir / name).rglob("*"))
+    }
+
+
 def _has_local_apm_content(project_root):
     """Check if the project has local .apm/ content worth integrating.
 
@@ -77,21 +109,21 @@ def _has_local_apm_content(project_root):
     apm_dir = project_root / ".apm"
     if not apm_dir.is_dir():
         return False
-    _PRIMITIVE_DIRS = (
-        "skills",
-        "instructions",
-        "chatmodes",
-        "agents",
-        "prompts",
-        "hooks",
-        "commands",
-        "extensions",
-    )
-    for subdir_name in _PRIMITIVE_DIRS:
-        subdir = apm_dir / subdir_name
-        if subdir.is_dir() and any(p.is_file() for p in subdir.rglob("*")):
-            return True
-    return False
+    return bool(_populated_primitive_dirs(apm_dir))
+
+
+def _root_holds_only_hook_primitives(root) -> bool:
+    """Return True when *root*/.apm/ carries hooks and no other primitive.
+
+    A hook that names no script merges into a shared config and claims no
+    file, so installing such a root records no self-entry (#4837). Every
+    other primitive claims files; a lock with no self-entry for a root that
+    carries them predates user-root recording (#3772), so audit replay
+    leaves that root out exactly as released audits did.
+    """
+    from pathlib import Path as _Path
+
+    return _populated_primitive_dirs(_Path(root) / ".apm") == {"hooks"}
 
 
 # ---------------------------------------------------------------------------
@@ -99,11 +131,12 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def compute_local_package_hash(source: Path) -> str:
+def compute_local_package_hash(source: Path, *, framed: bool = True) -> str:
     """Hash the validated local-copy image without changing installed content.
 
     Use the same directory copier or selected-file materializer as install
     before the existing package hash, rather than hashing transformed output.
+    *framed* is the lock row's stream (``content_hash_framed``).
     """
     from apm_cli.config import get_apm_temp_dir
     from apm_cli.utils.content_hash import compute_package_hash
@@ -122,7 +155,40 @@ def compute_local_package_hash(source: Path) -> str:
             materialize_virtual_file_package(
                 dependency, snapshot, admitted.path.name, admitted.content
             )
-        return compute_package_hash(snapshot)
+        return compute_package_hash(snapshot, framed=framed)
+
+
+def local_source_matches_copy(
+    lock_dep: Any, source: Path, copy: Path, *, source_hash: str | None = None
+) -> bool:
+    """Whether *source* still yields the image install materialized at *copy*.
+
+    Install validates a legacy plugin's copy in place (a synthesized
+    ``apm.yml`` and ``.apm/``), so an unchanged plugin source is compared
+    through the same normalization rather than as raw bytes. A source that
+    cannot be normalized does not match.
+    """
+    from apm_cli.config import get_apm_temp_dir
+    from apm_cli.install.drift import _normalize_legacy_local_plugin_for_replay
+    from apm_cli.utils.content_hash import verify_package_hash
+
+    framed = lock_dep.content_hash_framed
+    expected = compute_local_package_hash(copy, framed=framed)
+    if source_hash is None:
+        source_hash = compute_local_package_hash(source, framed=framed)
+    if source_hash == expected:
+        return True
+    if not source.is_dir():
+        return False
+    with tempfile.TemporaryDirectory(prefix="apm-local-image-", dir=get_apm_temp_dir()) as stage:
+        # The synthesized manifest may take its name from the directory.
+        image = Path(stage) / copy.name
+        _copy_tree_dereferencing_validated(source, image, source)
+        try:
+            _normalize_legacy_local_plugin_for_replay(lock_dep, image)
+        except (OSError, ValueError, TypeError):
+            return False
+        return verify_package_hash(image, expected, framed=framed)
 
 
 class LocalPackageError(ValueError):
@@ -153,7 +219,7 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
         local = selected.resolve(strict=True)
         if local.is_dir():
             if (
-                (local / "apm.yml").exists()
+                manifest_file(local).exists()
                 or (local / "SKILL.md").exists()
                 or find_plugin_json(local, include_codex=True) is not None
                 or has_marketplace_deployable_manifest(dep_ref)
@@ -190,17 +256,17 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
     except FileNotFoundError as exc:
         raise LocalPackageError(
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            f"{LOCAL_PACKAGE_PATH_MISSING.sentence()}"
         ) from exc
     except OSError as exc:
         raise LocalPackageError(
             f"Cannot read local package: {dep_ref.local_path}: {exc}. "
-            "Check the source permissions and symlink target, then rerun apm install."
+            f"{LOCAL_PACKAGE_UNREADABLE.sentence()}"
         ) from exc
     except (UnicodeError, yaml.YAMLError) as exc:
         raise LocalPackageError(
             f"Invalid primitive content in {dep_ref.local_path}: {exc}. "
-            "Use UTF-8 Markdown with valid YAML frontmatter, then rerun apm install."
+            f"{LOCAL_PACKAGE_CONTENT_INVALID.sentence()}"
         ) from exc
 
 
@@ -238,6 +304,24 @@ def materialize_local_package(
             safe_rmtree(install_path, install_path.parent.parent)
         raise
     return install_path
+
+
+@contextlib.contextmanager
+def staged_local_package_image(dep_ref: DependencyReference, base_dir: Path) -> Iterator[Path]:
+    """Yield a private copy of a local package's image, removed on exit (#4566).
+
+    Validation normalizes a plugin directory in place (a synthesized
+    ``apm.yml`` and ``.apm/``); a consumer-owned source directory must never
+    receive those writes, so callers validate this copy instead.
+
+    Raises:
+        LocalPackageError: The source cannot be admitted.
+        PathTraversalError: A link escapes the package, is broken or loops.
+    """
+    from apm_cli.config import get_apm_temp_dir
+
+    with tempfile.TemporaryDirectory(prefix="apm-local-image-", dir=get_apm_temp_dir()) as stage:
+        yield materialize_local_package(dep_ref, Path(stage) / "package", base_dir)
 
 
 def materialize_local_package_for_replay(
@@ -402,3 +486,26 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
     except LocalPackageError as exc:
         logger.error(str(exc))
         return None
+
+
+def copy_local_dependency(dep_ref, install_path, *, declaring_dir, source_root, user_scope):
+    """Anchor and copy a local dependency; return ``None`` or the failure reason.
+
+    The anchor comes from :func:`apm_cli.deps.path_anchoring.local_dep_base_dir`
+    so a relative path resolves against the package that declared it.
+    """
+    from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
+
+    base_dir = local_dep_base_dir(
+        dep_ref.local_path,
+        declaring_dir=declaring_dir,
+        source_root=source_root,
+        user_scope=user_scope,
+    )
+    if base_dir is None:
+        return f"{dep_ref.local_path} -- {USER_SCOPE_RELATIVE_PATH_ERROR}"
+    try:
+        materialize_local_package(dep_ref, install_path, base_dir)
+    except LocalPackageError as exc:
+        return str(exc)
+    return None

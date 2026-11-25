@@ -5,7 +5,9 @@ import re
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePath
+
+from apm_cli.core.scope import manifest_file
 
 from ..output.script_formatters import ScriptExecutionFormatter
 from ..runtime.registry import (
@@ -15,7 +17,12 @@ from ..runtime.registry import (
 )
 from ..runtime.utils import find_runtime_binary
 from .project_name import resolve_bootstrap_project_name
+from .remediation import DEPENDENCIES_NOT_INSTALLED
 from .token_manager import setup_runtime_environment
+
+
+def _folded(path: Path) -> PurePath:
+    return PurePath(str(path).casefold())
 
 
 class ScriptRunner:
@@ -75,6 +82,7 @@ class ScriptRunner:
         discovered_prompt = self._discover_prompt_file(script_name)
 
         if discovered_prompt:
+            self._require_dependency_policy([discovered_prompt])
             # Print discovery message early to allow E2E tests to validate
             # This message appears before runtime detection, which may fail in test environments
             print(f"[i] Auto-discovered: {discovered_prompt.as_posix()}")
@@ -93,6 +101,7 @@ class ScriptRunner:
                 # Retry discovery after install
                 discovered_prompt = self._discover_prompt_file(script_name)
                 if discovered_prompt:
+                    self._require_dependency_policy([discovered_prompt])
                     # Signal successful install before attempting runtime detection
                     # This allows E2E tests to validate auto-install without requiring runtime
                     print(f"\n* Package installed and ready to run\n")  # noqa: F541
@@ -115,8 +124,7 @@ class ScriptRunner:
         error_msg += f"\nTo find available prompts, check:\n"  # noqa: F541
         error_msg += f"  - Local: .apm/prompts/, .github/prompts/, or project root\n"  # noqa: F541
         error_msg += f"  - Dependencies: apm_modules/*/.apm/prompts/\n"  # noqa: F541
-        error_msg += f"\nOr install a prompt package:\n"  # noqa: F541
-        error_msg += f"  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"  # noqa: F541
+        error_msg += "\nRun 'apm list' to see each script and its command.\n"
 
         raise RuntimeError(error_msg)
 
@@ -163,7 +171,9 @@ class ScriptRunner:
 
         try:
             # Set up GitHub token environment for all runtimes using centralized manager
-            env = setup_runtime_environment(os.environ.copy())
+            from apm_cli.utils.git_env import user_script_environment
+
+            env = setup_runtime_environment(user_script_environment(os.environ.copy()))
 
             # Show environment setup if relevant
             env_vars_set = []
@@ -219,7 +229,7 @@ class ScriptRunner:
 
     def _load_config(self) -> dict | None:
         """Load apm.yml from current directory."""
-        config_path = Path("apm.yml")
+        config_path = manifest_file(Path("."))
         if not config_path.exists():
             return None
 
@@ -241,6 +251,9 @@ class ScriptRunner:
         """
         # Find all .prompt.md files in the command using regex
         prompt_files = re.findall(r"(\S+\.prompt\.md)", command)
+        # Judge the file the compiler opens, not the token as written: a bare name
+        # resolves under .github/prompts, .apm/prompts or an installed package.
+        self._require_dependency_policy([self.compiler.resolve(name) for name in prompt_files])
         compiled_prompt_files = []
         runtime_content = None
 
@@ -353,7 +366,9 @@ class ScriptRunner:
         if not match:
             return None
 
-        args_before = match.group(1).strip()
+        # 'llm < x.prompt.md' redirects stdin in a shell; APM passes the compiled
+        # prompt itself, so a literal '<' must not reach the runtime (#3994).
+        args_before = re.sub(r"(?:^|\s)<$", "", match.group(1).strip()).strip()
         args_after = match.group(3).strip()
 
         # In the env-var path, non-codex runtimes strip -p flags (matches
@@ -389,6 +404,8 @@ class ScriptRunner:
         """
         prefix = f"{env_prefix} " if env_prefix else ""
         result = f"{prefix}codex exec"
+        # The documented 'codex exec <flags> x.prompt.md' already names exec (#3994).
+        args_before = re.sub(r"^exec(?:\s+|$)", "", args_before)
         if args_before:
             result += f" {args_before}"
         if args_after:
@@ -563,12 +580,19 @@ class ScriptRunner:
         # Resolve the runtime binary to the APM-managed path (or fallback to PATH).
         # This must happen here, not in _generate_runtime_command, so the command
         # string stays parseable (bare names) by _detect_runtime / _transform_runtime_command.
-        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then shutil.which(),
-        # which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
+        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then PATH outside
+        # the project, which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
         if actual_command_args:
-            resolved = find_runtime_binary(actual_command_args[0])
-            if resolved:
-                actual_command_args[0] = resolved
+            name = actual_command_args[0]
+            resolved = find_runtime_binary(name)
+            if resolved is None:
+                # Never fall back to the bare name: the OS would search the
+                # working directory or a project path the resolver rejected.
+                raise RuntimeError(
+                    f"Runtime '{name}' was not found outside the project directory. "
+                    f"Install it with: apm runtime setup {name}"
+                )
+            actual_command_args[0] = resolved
         return subprocess.run(actual_command_args, check=True, env=env_vars)
 
     def _discover_prompt_file(self, name: str) -> Path | None:
@@ -795,6 +819,55 @@ class ScriptRunner:
         except Exception:
             return False
 
+    def _require_dependency_policy(
+        self, paths: list[Path], *, extra: list[tuple[str, object]] | None = None
+    ) -> None:
+        """Refuse to read prompts from, or install, a package the org policy denies.
+
+        A prompt under ``apm_modules`` or a file the lock records as deployed
+        belongs to its installed package; that package (and any *extra*
+        reference about to be installed) meets the dependency check install
+        applies. ``enforcement: warn`` warns and continues.
+        """
+        from ..install.errors import PolicyViolationError
+        from ..install.exec_gate import policy_denied_dependencies
+        from ..install.installed_dependencies import installed_dependency_subjects
+        from ..policy.outcome_routing import resolve_trust_policy
+        from ..utils.console import _rich_warning
+        from ..utils.paths import portable_relpath
+        from .remediation import RUN_DEPENDENCY_DENIED
+
+        root = Path.cwd()
+        subjects: dict[str, object] = dict(extra or ())
+        if paths:
+            # Case-folded, so a token typed in another case on a case-insensitive
+            # filesystem is still attributed (elsewhere it can only over-attribute).
+            resolved = [_folded(path.resolve()) for path in paths]
+            relative = {portable_relpath(path, root).casefold() for path in paths}
+            for installed in installed_dependency_subjects(root, user_scope=False):
+                owned_root = _folded(installed.root.resolve())
+                deployed = {path.casefold() for path in installed.deployed}
+                if relative & deployed or any(path.is_relative_to(owned_root) for path in resolved):
+                    subjects.setdefault(installed.key, installed.ref)
+        if not subjects:
+            return
+        try:
+            policy = resolve_trust_policy(root)
+        except PolicyViolationError as exc:
+            raise RuntimeError(str(exc)) from exc
+        denied = policy_denied_dependencies(subjects.items(), policy) if policy else {}
+        enforcement = getattr(policy, "enforcement", "block")
+        if not denied or enforcement == "off":
+            return
+        lines = [f"{key}: {reason}" for key, reason in sorted(denied.items())]
+        if enforcement == "warn":
+            for line in lines:
+                _rich_warning(line)
+            return
+        raise RuntimeError(
+            "\n".join([*lines, f"Blocked by org policy -- {RUN_DEPENDENCY_DENIED.sentence()}"])
+        )
+
     def _auto_install_virtual_package(self, package_ref: str) -> bool:
         """Auto-install a virtual package.
 
@@ -817,7 +890,14 @@ class ScriptRunner:
 
             if not dep_ref.is_virtual:
                 return False
+        except Exception as e:
+            from ..utils.console import _rich_echo
 
+            _rich_echo(f"  [x] Auto-install failed: {e}", color="red")
+            return False
+        # Judged like any install, before anything is downloaded or declared.
+        self._require_dependency_policy([], extra=[(dep_ref.get_unique_key(), dep_ref)])
+        try:
             # Ensure apm_modules exists
             apm_modules = Path("apm_modules")
             apm_modules.mkdir(parents=True, exist_ok=True)
@@ -849,7 +929,9 @@ class ScriptRunner:
             return True
 
         except Exception as e:
-            print(f"  [x] Auto-install failed: {e}")
+            from ..utils.console import _rich_echo
+
+            _rich_echo(f"  [x] Auto-install failed: {e}", color="red")
             return False
 
     def _add_dependency_to_config(self, package_ref: str) -> None:
@@ -858,7 +940,7 @@ class ScriptRunner:
         Args:
             package_ref: Virtual package reference to add
         """
-        config_path = Path("apm.yml")
+        config_path = manifest_file(Path("."))
 
         # Skip if apm.yml doesn't exist (e.g., in test environments)
         if not config_path.exists():
@@ -999,6 +1081,13 @@ class PromptCompiler:
 
         return str(output_path)
 
+    def resolve(self, prompt_file: str) -> Path:
+        """The file :meth:`compile` reads for *prompt_file*, or the token as a path if none."""
+        try:
+            return self._resolve_prompt_file(prompt_file)
+        except FileNotFoundError:
+            return Path(prompt_file)
+
     def _resolve_prompt_file(self, prompt_file: str) -> Path:
         """Resolve prompt file path, checking local directory first, then common directories, then dependencies.
 
@@ -1101,7 +1190,7 @@ class PromptCompiler:
             f"Prompt file '{prompt_file}' not found.\n"
             f"Searched in:\n"
             + "\n".join(searched_locations)
-            + f"\n\nTip: Run 'apm install' to ensure dependencies are installed."  # noqa: F541
+            + f"\n\nTip: {DEPENDENCIES_NOT_INSTALLED.sentence()}"
         )
 
     def _substitute_parameters(self, content: str, params: dict[str, str]) -> str:

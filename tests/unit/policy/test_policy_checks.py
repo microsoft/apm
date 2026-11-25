@@ -6,10 +6,8 @@ import textwrap  # noqa: F401
 from pathlib import Path
 
 import pytest
-import yaml
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
-from apm_cli.policy.inheritance import merge_policies
 from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.policy_checks import (
     _check_compilation_strategy,
@@ -29,38 +27,21 @@ from apm_cli.policy.policy_checks import (
     _check_scripts_policy,
     _check_source_attribution,
     _check_transitive_depth,
-    _check_unmanaged_files,
-    _load_raw_apm_yml,
-    run_policy_checks,
 )
 from apm_cli.policy.schema import (
-    ApmPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
     ExecutablesPolicy,
-    IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
-    SecurityPolicy,
-    UnmanagedFilesPolicy,
 )
 
+pytestmark = pytest.mark.unit
+
 # -- Helpers --------------------------------------------------------
-
-
-def _write_apm_yml(project: Path, data: dict) -> None:
-    """Write apm.yml from a dict."""
-    (project / "apm.yml").write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
-
-
-def _write_lockfile(project: Path, data: dict) -> None:
-    """Write apm.lock.yaml from a dict."""
-    (project / "apm.lock.yaml").write_text(
-        yaml.dump(data, default_flow_style=False), encoding="utf-8"
-    )
 
 
 def _make_dep_refs(dep_strings: list[str]):
@@ -225,22 +206,32 @@ class TestRequiredPackagesDeployed:
 
     def test_fail_absent_from_lockfile(self):
         """A required package in the manifest but absent from the lockfile is a
-        genuine presence failure and includes the --no-policy recovery hint."""
+        genuine presence failure; the hint is the plain install, never a bypass."""
         deps = _make_dep_refs(["org/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/pkg"])
         result = _check_required_packages_deployed(deps, lock, policy)
         assert not result.passed
         assert "org/pkg" in result.details[0]
-        assert "--no-policy" in result.message
+        assert "Run 'apm install' to record the required packages" in result.message
+        assert "--no-policy" not in result.message
 
-    def test_skip_if_not_in_manifest(self):
-        """Required package not in manifest -- check 3 handles that."""
+    def test_install_that_locks_the_required_package_is_not_blocked(self):
+        """The install gate must not refuse the install that satisfies the check."""
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
+        policy = DependencyPolicy(require=["org/pkg"])
+        result = _check_required_packages_deployed(deps, lock, policy, installing=True)
+        assert result.passed
+
+    def test_fail_if_not_in_manifest(self):
+        """An entry naming no declared package is not skipped (#3993)."""
         deps = _make_dep_refs(["other/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/missing"])
         result = _check_required_packages_deployed(deps, lock, policy)
-        assert result.passed
+        assert not result.passed
+        assert result.details == ["org/missing"]
 
 
 # -- Check 4b: required-executable-untrusted ------------------------
@@ -432,30 +423,43 @@ class TestMcpDenylist:
 
 
 class TestMcpTransport:
+    """Check 9 judges canonical effective transports supplied by the owner."""
+
     def test_pass_no_restrictions(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "sse"}])
-        policy = McpPolicy()
-        result = _check_mcp_transport(mcp, policy)
+        result = _check_mcp_transport({"srv": frozenset({"sse"})}, McpPolicy())
         assert result.passed
 
     def test_pass_allowed_transport(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "stdio"}])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio", "sse"]))
-        result = _check_mcp_transport(mcp, policy)
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio", "sse")))
+        result = _check_mcp_transport({"srv": frozenset({"stdio"})}, policy)
         assert result.passed
 
     def test_fail_disallowed_transport(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "http"}])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-        result = _check_mcp_transport(mcp, policy)
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
+        result = _check_mcp_transport({"srv": frozenset({"streamable-http"})}, policy)
         assert not result.passed
-        assert "http" in result.details[0]
+        assert result.details == ["srv: transport 'streamable-http' not in allowed [stdio]"]
 
-    def test_skip_no_transport_set(self):
-        mcp = _make_mcp_deps(["plain-server"])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-        result = _check_mcp_transport(mcp, policy)
-        assert result.passed
+    def test_package_and_remote_both_checked(self):
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio", "streamable-http")))
+        result = _check_mcp_transport({"srv": frozenset({"stdio", "sse"})}, policy)
+        assert not result.passed
+        assert result.details == ["srv: transport 'sse' not in allowed [stdio, streamable-http]"]
+
+    def test_unresolved_transport_fails_with_remedy(self):
+        from apm_cli.mcp_transport import UnresolvedTransport
+
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
+        result = _check_mcp_transport(
+            {"srv": UnresolvedTransport("MCP registry https://r.example is unreachable")},
+            policy,
+        )
+        assert not result.passed
+        detail = result.details[0]
+        assert detail.startswith("srv: effective transport unknown (MCP registry")
+        assert "unreachable" in detail
+        assert "make the MCP registry reachable, then retry" in detail
+        assert "A declared 'transport:' cannot stand in" in detail
 
 
 # -- Check 10: mcp-self-defined -------------------------------------
@@ -497,123 +501,167 @@ class TestMcpSelfDefined:
 # -- Check 11: compilation-target -----------------------------------
 
 
+def _decision_targets(value):
+    """Project a target selection the way every caller of the check must."""
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+
+    return EffectiveTargetDecision(value, "apm.yml").canonical_targets
+
+
+def _target_policy(*, allow=None, enforce=None) -> CompilationPolicy:
+    return CompilationPolicy(target=CompilationTargetPolicy(allow=allow, enforce=enforce))
+
+
 class TestCompilationTarget:
     def test_pass_no_restrictions(self):
-        result = _check_compilation_target({"target": "vscode"}, CompilationPolicy())
+        result = _check_compilation_target(_decision_targets("vscode"), CompilationPolicy())
         assert result.passed
 
     def test_pass_enforce_match(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        policy = _target_policy(enforce="vscode")
+        result = _check_compilation_target(_decision_targets("vscode"), policy)
         assert result.passed
 
     def test_fail_enforce_mismatch(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        policy = _target_policy(enforce="vscode")
+        result = _check_compilation_target(_decision_targets("claude"), policy)
         assert not result.passed
         assert "enforced" in result.details[0]
 
     def test_pass_in_allow_list(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode", "claude"]))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        policy = _target_policy(allow=["vscode", "claude"])
+        result = _check_compilation_target(_decision_targets("claude"), policy)
         assert result.passed
 
     def test_fail_not_in_allow_list(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode"]))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        policy = _target_policy(allow=["vscode"])
+        result = _check_compilation_target(_decision_targets("claude"), policy)
         assert not result.passed
 
     def test_pass_no_target_in_manifest(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({}, policy)
+        policy = _target_policy(enforce="vscode")
+        result = _check_compilation_target(None, policy)
         assert result.passed
 
     # -- Multi-target (list) tests ----------------------------------
 
     def test_target_list_enforce_present(self):
         """List target containing the enforced value passes."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
-        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
+        policy = _target_policy(enforce="claude")
+        result = _check_compilation_target(_decision_targets(["claude", "copilot"]), policy)
         assert result.passed
 
     def test_target_list_enforce_missing(self):
         """List target missing the enforced value fails."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
-        result = _check_compilation_target({"target": ["cursor", "copilot"]}, policy)
+        policy = _target_policy(enforce="claude")
+        result = _check_compilation_target(_decision_targets(["cursor", "copilot"]), policy)
         assert not result.passed
         assert "enforced" in result.details[0]
 
     def test_target_list_allow_all_in(self):
         """All items in list target within allow set passes."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(allow=["claude", "copilot", "cursor"])
-        )
-        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
+        policy = _target_policy(allow=["claude", "copilot", "cursor"])
+        result = _check_compilation_target(_decision_targets(["claude", "copilot"]), policy)
         assert result.passed
 
     def test_target_list_allow_some_disallowed(self):
         """List target with items outside allow set fails."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["claude"]))
-        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
+        policy = _target_policy(allow=["claude"])
+        result = _check_compilation_target(_decision_targets(["claude", "copilot"]), policy)
         assert not result.passed
         assert "copilot" in result.message
 
-    def test_target_string_still_works(self):
-        """Backward compat: single string target with enforce."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="copilot"))
-        result = _check_compilation_target({"target": "copilot"}, policy)
-        assert result.passed
-
     def test_target_list_single_item(self):
         """Single-element list target with matching enforce passes."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="copilot"))
-        result = _check_compilation_target({"target": ["copilot"]}, policy)
+        policy = _target_policy(enforce="copilot")
+        result = _check_compilation_target(_decision_targets(["copilot"]), policy)
         assert result.passed
+
+    # -- Canonical comparison (#3732) -------------------------------
+
+    @pytest.mark.parametrize("spelling", ["vscode", "agents", "copilot", ["vscode"]])
+    def test_alias_matches_canonical_allow(self, spelling):
+        """Aliases compare as the profile they deploy, on the manifest side."""
+        policy = _target_policy(allow=["claude", "copilot"])
+        assert _check_compilation_target(_decision_targets(spelling), policy).passed
+
+    def test_policy_alias_matches_canonical_target(self):
+        """Aliases also compare as profiles on the policy side."""
+        policy = _target_policy(allow=["vscode"], enforce=None)
+        assert _check_compilation_target(_decision_targets("copilot"), policy).passed
+        policy = _target_policy(enforce="vscode")
+        assert _check_compilation_target(_decision_targets(["claude", "copilot"]), policy).passed
+
+    def test_mcp_only_target_judged_as_its_profile(self):
+        """intellij configures Copilot, so policy judges it as copilot."""
+        policy = _target_policy(allow=["copilot"])
+        assert _check_compilation_target(_decision_targets("intellij"), policy).passed
+
+    def test_all_in_allow_is_unrestricted(self):
+        """``allow: [all]`` permits every target."""
+        policy = _target_policy(allow=["all"])
+        assert _check_compilation_target(_decision_targets(["claude", "cursor"]), policy).passed
+
+    def test_singular_all_judges_the_install_expansion(self):
+        """``target: all`` deploys everywhere, so a narrow allow list fails."""
+        policy = _target_policy(allow=["claude", "copilot"])
+        result = _check_compilation_target(_decision_targets("all"), policy)
+        assert not result.passed
+        assert "'all'" not in result.message
+        assert "cursor" in result.message
+
+    def test_enforce_all_requires_the_full_expansion(self):
+        policy = _target_policy(enforce="all")
+        assert _check_compilation_target(_decision_targets("all"), policy).passed
+        assert not _check_compilation_target(_decision_targets("claude"), policy).passed
+
+    def test_violation_names_the_selection_source(self):
+        policy = _target_policy(allow=["claude"])
+        result = _check_compilation_target(
+            _decision_targets(["claude", "cursor"]), policy, source="--target flag"
+        )
+        assert "--target flag" in result.details[0]
 
 
 # -- Check 12: compilation-strategy ---------------------------------
 
 
 class TestCompilationStrategy:
-    def test_pass_no_enforce(self):
-        result = _check_compilation_strategy(
-            {"compilation": {"strategy": "distributed"}}, CompilationPolicy()
+    @pytest.mark.parametrize(
+        ("manifest", "enforce", "passed"),
+        [
+            ({"compilation": {"strategy": "distributed"}}, None, True),
+            ({"compilation": {"strategy": "distributed"}}, "distributed", True),
+            ({"compilation": {"strategy": "distributed"}}, "single-file", False),
+            ({}, "distributed", True),
+        ],
+        ids=["pass-no-enforce", "pass-enforce-match", "fail-enforce-mismatch", "pass-no-strategy"],
+    )
+    def test_strategy_enforcement(self, manifest, enforce, passed):
+        policy = (
+            CompilationPolicy()
+            if enforce is None
+            else CompilationPolicy(strategy=CompilationStrategyPolicy(enforce=enforce))
         )
-        assert result.passed
-
-    def test_pass_enforce_match(self):
-        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="distributed"))
-        result = _check_compilation_strategy({"compilation": {"strategy": "distributed"}}, policy)
-        assert result.passed
-
-    def test_fail_enforce_mismatch(self):
-        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="single-file"))
-        result = _check_compilation_strategy({"compilation": {"strategy": "distributed"}}, policy)
-        assert not result.passed
-
-    def test_pass_no_strategy_in_manifest(self):
-        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="distributed"))
-        result = _check_compilation_strategy({}, policy)
-        assert result.passed
+        assert _check_compilation_strategy(manifest, policy).passed is passed
 
 
 # -- Check 13: source-attribution -----------------------------------
 
 
 class TestSourceAttribution:
-    def test_pass_not_required(self):
-        result = _check_source_attribution({}, CompilationPolicy())
-        assert result.passed
-
-    def test_pass_enabled(self):
-        policy = CompilationPolicy(source_attribution=True)
-        result = _check_source_attribution({"compilation": {"source_attribution": True}}, policy)
-        assert result.passed
-
-    def test_fail_not_enabled(self):
-        policy = CompilationPolicy(source_attribution=True)
-        result = _check_source_attribution({}, policy)
-        assert not result.passed
+    @pytest.mark.parametrize(
+        ("manifest", "required", "passed"),
+        [
+            ({}, False, True),
+            ({"compilation": {"source_attribution": True}}, True, True),
+            ({}, True, False),
+        ],
+        ids=["pass-not-required", "pass-enabled", "fail-not-enabled"],
+    )
+    def test_source_attribution_requirement(self, manifest, required, passed):
+        policy = CompilationPolicy(source_attribution=True) if required else CompilationPolicy()
+        assert _check_source_attribution(manifest, policy).passed is passed
 
 
 # -- Check 14: required-manifest-fields -----------------------------
@@ -664,293 +712,7 @@ class TestScriptsPolicy:
 # -- Check 16: unmanaged-files --------------------------------------
 
 
-class TestUnmanagedFiles:
-    def test_pass_ignore_action(self, tmp_path):
-        policy = UnmanagedFilesPolicy(action="ignore")
-        result = _check_unmanaged_files(tmp_path, None, policy)
-        assert result.passed
-
-    def test_pass_no_unmanaged(self, tmp_path):
-        # Create a governance file that IS in the lockfile
-        (tmp_path / ".github" / "prompts").mkdir(parents=True)
-        (tmp_path / ".github" / "prompts" / "x.md").write_text("hi", encoding="utf-8")
-        lock = _make_lockfile(
-            [
-                {
-                    "repo_url": "org/pkg",
-                    "deployed_files": [".github/prompts/x.md"],
-                }
-            ]
-        )
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/prompts"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert result.passed
-
-    def test_fail_deny_unmanaged(self, tmp_path):
-        # Create a governance file NOT in lockfile
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not result.passed
-        assert any(".github/agents/rogue.md" in d for d in result.details)
-
-    def test_warn_unmanaged(self, tmp_path):
-        (tmp_path / ".cursor" / "rules").mkdir(parents=True)
-        (tmp_path / ".cursor" / "rules" / "extra.md").write_text("extra", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="warn", directories=[".cursor/rules"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert result.passed
-        assert len(result.details) > 0
-
-    def test_pass_empty_directory(self, tmp_path):
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, None, policy)
-        assert result.passed
-
-    def test_pass_files_under_deployed_directory(self, tmp_path):
-        """Files under a deployed directory (trailing /) are treated as managed."""
-        skill_dir = tmp_path / ".github" / "skills" / "my-skill"
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("skill", encoding="utf-8")
-        (skill_dir / "prompt.md").write_text("prompt", encoding="utf-8")
-        lock = _make_lockfile(
-            [
-                {
-                    "repo_url": "org/pkg",
-                    "deployed_files": [".github/skills/my-skill/"],
-                }
-            ]
-        )
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/skills"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert result.passed
-
-    def test_rglob_cap_skips_check(self, tmp_path, monkeypatch):
-        """When file count exceeds the safety cap, check passes with a warning."""
-        from apm_cli.policy import policy_checks
-
-        monkeypatch.setattr(policy_checks, "_MAX_UNMANAGED_SCAN_FILES", 3)
-        gov = tmp_path / ".github" / "agents"
-        gov.mkdir(parents=True)
-        for i in range(5):
-            (gov / f"file{i}.md").write_text("x", encoding="utf-8")
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, None, policy)
-        assert result.passed
-        assert "capped" in result.message.lower()
-
-    # -- Regression tests for #1199 ------------------------------------
-
-    def test_handrolled_instruction_flagged_as_unmanaged(self, tmp_path: Path) -> None:
-        """Hand-rolled files in .github/instructions/ are flagged as unmanaged.
-
-        Regression guard for #1199: a file that exists in the governance
-        directory but is absent from every dependency's deployed_files must
-        be reported as unmanaged when action='deny'.
-        """
-        instructions_dir = tmp_path / ".github" / "instructions"
-        instructions_dir.mkdir(parents=True)
-        # A file managed by a dependency.
-        (instructions_dir / "managed.instructions.md").write_text("managed", encoding="utf-8")
-        # A hand-rolled file not tracked by any dependency.
-        (instructions_dir / "handrolled.instructions.md").write_text(
-            "hand-rolled", encoding="utf-8"
-        )
-        lock = _make_lockfile(
-            [
-                {
-                    "repo_url": "org/pkg",
-                    "deployed_files": [".github/instructions/managed.instructions.md"],
-                }
-            ]
-        )
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not result.passed
-        assert any(".github/instructions/handrolled.instructions.md" in d for d in result.details)
-
-    def test_handrolled_file_not_masked_by_deployed_deps(self, tmp_path: Path) -> None:
-        """A hand-rolled file is flagged even when sibling files are managed.
-
-        Regression guard for #1199: the presence of dependency-deployed files
-        in the same directory must not suppress the report for adjacent
-        hand-rolled files.
-        """
-        instructions_dir = tmp_path / ".github" / "instructions"
-        instructions_dir.mkdir(parents=True)
-        # Two managed files deployed by the dependency.
-        (instructions_dir / "a.instructions.md").write_text("a", encoding="utf-8")
-        (instructions_dir / "b.instructions.md").write_text("b", encoding="utf-8")
-        # One hand-rolled file alongside the managed ones.
-        (instructions_dir / "rogue.instructions.md").write_text("rogue", encoding="utf-8")
-        lock = _make_lockfile(
-            [
-                {
-                    "repo_url": "org/team-pkg",
-                    "deployed_files": [
-                        ".github/instructions/a.instructions.md",
-                        ".github/instructions/b.instructions.md",
-                    ],
-                }
-            ]
-        )
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not result.passed
-        assert any(".github/instructions/rogue.instructions.md" in d for d in result.details)
-        # Managed files must NOT appear in the unmanaged details list.
-        assert ".github/instructions/a.instructions.md" not in result.details
-        assert ".github/instructions/b.instructions.md" not in result.details
-
-    def test_handrolled_file_across_governance_dirs(self, tmp_path: Path) -> None:
-        """Hand-rolled files in instructions/, hooks/, and agents/ are all flagged.
-
-        Regression guard for #1199: the audit must behave consistently across
-        every governance directory, not just .github/agents/.
-        """
-        for subdir in ("instructions", "hooks", "agents"):
-            target = tmp_path / ".github" / subdir
-            target.mkdir(parents=True)
-            (target / f"handrolled.{subdir}.md").write_text("hand-rolled", encoding="utf-8")
-        # No dependency deploys any of these files.
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(
-            action="deny",
-            directories=[
-                ".github/instructions",
-                ".github/hooks",
-                ".github/agents",
-            ],
-        )
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not result.passed
-        assert any(".github/instructions/handrolled.instructions.md" in d for d in result.details)
-        assert any(".github/hooks/handrolled.hooks.md" in d for d in result.details)
-        assert any(".github/agents/handrolled.agents.md" in d for d in result.details)
-
-    def test_local_deployed_files_not_flagged(self, tmp_path: Path) -> None:
-        """Files in local_deployed_files are treated as managed and not flagged.
-
-        Regression guard for #1199: the virtual _SELF_KEY dependency that APM
-        synthesises from local_deployed_files must exempt those paths from the
-        unmanaged-files check.
-        """
-        from apm_cli.deps.lockfile import LockFile
-
-        instructions_dir = tmp_path / ".github" / "instructions"
-        instructions_dir.mkdir(parents=True)
-        managed_path = ".github/instructions/managed.instructions.md"
-        (tmp_path / managed_path).write_text("managed locally", encoding="utf-8")
-
-        # Build a LockFile with local_deployed_files then round-trip through
-        # YAML so the _SELF_KEY virtual entry is synthesised.
-        lock = LockFile()
-        lock.local_deployed_files = [managed_path]
-        lock_file = tmp_path / "apm.lock.yaml"
-        lock.write(lock_file)
-        lock = LockFile.read(lock_file)
-
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert result.passed
-        assert managed_path not in result.details
-
-    def test_dir_prefix_does_not_mask_instructions(self, tmp_path: Path) -> None:
-        """A trailing-slash directory entry only covers its own subtree.
-
-        Regression guard for #1199: a deployed directory prefix such as
-        '.github/skills/my-skill/' must not suppress unmanaged-file detection
-        in a different governance directory (.github/instructions/).
-        """
-        skills_dir = tmp_path / ".github" / "skills" / "my-skill"
-        skills_dir.mkdir(parents=True)
-        (skills_dir / "SKILL.md").write_text("skill content", encoding="utf-8")
-
-        instructions_dir = tmp_path / ".github" / "instructions"
-        instructions_dir.mkdir(parents=True)
-        (instructions_dir / "handrolled.instructions.md").write_text(
-            "hand-rolled", encoding="utf-8"
-        )
-
-        lock = _make_lockfile(
-            [
-                {
-                    "repo_url": "org/skills-pkg",
-                    # Trailing slash marks an entire directory as managed.
-                    "deployed_files": [".github/skills/my-skill/"],
-                }
-            ]
-        )
-        policy = UnmanagedFilesPolicy(
-            action="deny",
-            directories=[".github/skills", ".github/instructions"],
-        )
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not result.passed
-        # The hand-rolled instruction file must be flagged...
-        assert any(".github/instructions/handrolled.instructions.md" in d for d in result.details)
-        # ...while files under the managed skill directory must NOT be flagged.
-        assert ".github/skills/my-skill/SKILL.md" not in result.details
-
-    def test_action_none_resolves_to_ignore(self, tmp_path):
-        """action=None standalone: effective_action resolves to 'ignore', check passes."""
-        policy = UnmanagedFilesPolicy(action=None)
-        result = _check_unmanaged_files(tmp_path, None, policy)
-        assert result.passed
-
-    def test_action_none_inherits_parent_deny(self, tmp_path):
-        """action=None + parent deny: merge propagates deny to child."""
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
-        parent = ApmPolicy(
-            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        )
-        child = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action=None))
-        merged = merge_policies(parent, child)
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
-        assert not result.passed
-
-    def test_rogue_file_caught_parent_deny_child_omits_block(self, tmp_path):
-        """Rogue file is caught when parent says deny but child omits unmanaged_files block."""
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
-        parent = ApmPolicy(
-            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        )
-        child = ApmPolicy()  # child omits unmanaged_files entirely (defaults to action=None)
-        merged = merge_policies(parent, child)
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
-        assert not result.passed
-        assert any(".github/agents/rogue.md" in d for d in result.details)
-
-    def test_integration_chain_deny_propagates(self, tmp_path):
-        """Integration chain: parent deny + child omits block -> merge -> check catches rogue file."""
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
-        parent_policy = ApmPolicy(
-            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        )
-        child_policy = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action=None))
-        merged = merge_policies(parent_policy, child_policy)
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
-        assert not result.passed
-        assert any(".github/agents/rogue.md" in d for d in result.details)
-
-
 # -- Check 16b: enriched unmanaged-files (#1775) --------------------
-
-
-def _detail_for(result, path: str) -> str | None:
-    """Return the single enriched detail line that mentions *path*."""
-    matches = [d for d in result.details if path in d]
-    assert len(matches) == 1, f"{path} reported {len(matches)} time(s): {result.details}"
-    return matches[0]
 
 
 class TestUnmanagedClassification:
@@ -1000,447 +762,158 @@ class TestUnmanagedClassification:
         assert _classify_primitive_type(".github/random/notes.txt") is None
 
 
-class TestUnmanagedEnrichment:
-    """Each flagged file carries reason + type, surfaced in details."""
-
-    def test_reason_not_tracked_present(self, tmp_path):
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        detail = _detail_for(result, ".github/agents/rogue.agent.md")
-        assert "not tracked in apm.lock.yaml" in detail
-
-    def test_type_present_in_detail(self, tmp_path):
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        detail = _detail_for(result, ".github/agents/rogue.agent.md")
-        assert "[type: agent]" in detail
-
-    def test_next_action_hint_present(self, tmp_path):
-        # A non-empty report must carry exactly one actionable next-step hint
-        # (track vs suppress) so a flagged file is self-resolving.
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        hints = [d for d in result.details if "unmanaged_files.exclude" in d and "apm install" in d]
-        assert len(hints) == 1, f"expected one next-action hint, got: {result.details}"
-
-
-class TestUnmanagedDenyConflict:
-    """Unmanaged files matching apm-policy deny rules are surfaced as conflicts."""
-
-    def test_dependency_deny_conflict(self, tmp_path):
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(
-            tmp_path,
-            lock,
-            policy,
-            dependency_deny=("**/rogue*",),
-        )
-        detail = _detail_for(result, ".github/agents/rogue.agent.md")
-        assert "matches deny rule" in detail
-
-    def test_mcp_deny_conflict(self, tmp_path):
-        (tmp_path / ".vscode").mkdir(parents=True)
-        (tmp_path / ".vscode" / "mcp.json").write_text("{}", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".vscode"])
-        result = _check_unmanaged_files(
-            tmp_path,
-            lock,
-            policy,
-            mcp_deny=("*mcp.json",),
-        )
-        detail = _detail_for(result, ".vscode/mcp.json")
-        assert "matches deny rule" in detail
-
-    def test_no_deny_conflict_when_no_match(self, tmp_path):
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "clean.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(
-            tmp_path,
-            lock,
-            policy,
-            dependency_deny=("**/evil*",),
-        )
-        detail = _detail_for(result, ".github/agents/clean.agent.md")
-        assert "matches deny rule" not in detail
-
-
-class TestUnmanagedExcludeSuppression:
-    """Excluded paths are not reported."""
-
-    def test_excluded_path_not_reported(self, tmp_path):
-        agents = tmp_path / ".github" / "agents"
-        agents.mkdir(parents=True)
-        (agents / "harness.agent.md").write_text("x", encoding="utf-8")
-        (agents / "rogue.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(
-            action="deny",
-            directories=[".github/agents"],
-            exclude=[".github/agents/harness.agent.md"],
-        )
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not any(".github/agents/harness.agent.md" in d for d in result.details)
-        assert any(".github/agents/rogue.agent.md" in d for d in result.details)
-
-    def test_exclude_glob_suppresses_subtree(self, tmp_path):
-        target = tmp_path / ".github" / "agents" / "vendor"
-        target.mkdir(parents=True)
-        (target / "a.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(
-            action="deny",
-            directories=[".github/agents"],
-            exclude=[".github/agents/vendor/**"],
-        )
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert result.passed
-        assert not result.details
-
-
-class TestUnmanagedSymlinkGuard:
-    """Symlinks pointing outside the workspace are not followed."""
-
-    def test_symlink_outside_project_not_followed(self, tmp_path):
-        outside = tmp_path.parent / "outside_target.md"
-        outside.write_text("secret", encoding="utf-8")
-        agents = tmp_path / ".github" / "agents"
-        agents.mkdir(parents=True)
-        link = agents / "escape.agent.md"
-        try:
-            link.symlink_to(outside)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlinks not supported on this platform")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        # The traversal must not follow the symlink out of the workspace.
-        assert not any("escape.agent.md" in d for d in result.details)
-
-    def test_symlinked_directory_outside_not_recursed(self, tmp_path):
-        # A symlinked *directory* resolving outside the workspace must not be
-        # recursed into -- its contents must never surface. rglob() follows
-        # directory symlinks, so the scan must use a non-following walk.
-        outside = tmp_path.parent / "outside_tree"
-        outside.mkdir()
-        (outside / "secret.agent.md").write_text("secret", encoding="utf-8")
-        agents = tmp_path / ".github" / "agents"
-        agents.mkdir(parents=True)
-        link = agents / "linked"
-        try:
-            link.symlink_to(outside, target_is_directory=True)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlinks not supported on this platform")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(tmp_path, lock, policy)
-        assert not any("secret.agent.md" in d for d in result.details)
-        assert not any("linked" in d for d in result.details)
-
-
-class TestUnmanagedNonDuplication:
-    """A file is reported exactly once -- one unified unmanaged report."""
-
-    def test_file_reported_once_even_with_deny_conflict(self, tmp_path):
-        (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
-        result = _check_unmanaged_files(
-            tmp_path,
-            lock,
-            policy,
-            dependency_deny=("**/rogue*",),
-            mcp_deny=("**/rogue*",),
-        )
-        occurrences = [d for d in result.details if ".github/agents/rogue.agent.md" in d]
-        assert len(occurrences) == 1
-
-
-# -- Integration: run_policy_checks ---------------------------------
-class TestRunPolicyChecks:
-    def test_returns_all_21_checks(self, tmp_path):
-        """Full run should produce exactly 21 checks."""
-        _write_apm_yml(
-            tmp_path,
-            {
-                "name": "test",
-                "version": "1.0.0",
-                "dependencies": {"apm": ["owner/repo"]},
-            },
-        )
-        _write_lockfile(
-            tmp_path,
-            {
-                "lockfile_version": "1",
-                "generated_at": "2025-01-01T00:00:00Z",
-                "dependencies": [
-                    {"repo_url": "owner/repo", "deployed_files": [".github/prompts/x.md"]}
-                ],
-            },
-        )
-        (tmp_path / ".github" / "prompts").mkdir(parents=True)
-        (tmp_path / ".github" / "prompts" / "x.md").write_text("ok", encoding="utf-8")
-
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 21
-        # Default policy = all checks pass
-        assert result.passed
-
-    @pytest.mark.parametrize(
-        ("enabled", "source", "expected_pass"),
-        (
-            (False, None, True),
-            (True, "local", True),
-            (True, None, False),
-        ),
-        ids=("disabled", "local-exempt", "non-local-missing"),
-    )
-    def test_dependency_content_hash_policy_uses_integrity_owner(
-        self,
-        tmp_path: Path,
-        enabled: bool,
-        source: str | None,
-        expected_pass: bool,
-    ) -> None:
-        """Audit hash verdicts match the canonical install integrity rule."""
-        _write_apm_yml(
-            tmp_path,
-            {
-                "name": "test",
-                "version": "1.0.0",
-                "dependencies": {"apm": ["owner/repo#v1.0.0"]},
-            },
-        )
-        dependency = {
-            "repo_url": "owner/repo",
-            "resolved_ref": "v1.0.0",
-            "resolved_commit": "a" * 40,
-        }
-        if source is not None:
-            dependency["source"] = source
-        _write_lockfile(
-            tmp_path,
-            {
-                "lockfile_version": "1",
-                "generated_at": "2025-01-01T00:00:00Z",
-                "dependencies": [dependency],
-            },
-        )
-        policy = ApmPolicy(
-            security=SecurityPolicy(
-                integrity=IntegrityPolicy(require_hashes=enabled),
-            )
-        )
-
-        result = run_policy_checks(tmp_path, policy, fail_fast=False)
-        check = next(check for check in result.checks if check.name == "dependency-content-hashes")
-
-        assert check.passed is expected_pass
-        if not expected_pass:
-            assert "require_hashes" in check.details[0]
-
-    def test_mixed_pass_fail(self, tmp_path):
-        """Denied dep should fail while other checks pass."""
-        _write_apm_yml(
-            tmp_path,
-            {
-                "name": "test",
-                "version": "1.0.0",
-                "dependencies": {"apm": ["evil/malware"]},
-            },
-        )
-        _write_lockfile(
-            tmp_path,
-            {
-                "lockfile_version": "1",
-                "generated_at": "2025-01-01T00:00:00Z",
-                "dependencies": [{"repo_url": "evil/malware", "deployed_files": ["x.md"]}],
-            },
-        )
-
-        policy = ApmPolicy(dependencies=DependencyPolicy(deny=["evil/*"]))
-        result = run_policy_checks(tmp_path, policy)
-        assert not result.passed
-        failed_names = {c.name for c in result.checks if not c.passed}
-        assert "dependency-denylist" in failed_names
-
-    def test_no_apm_yml_returns_empty(self, tmp_path):
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 0
-        assert result.passed
-
-    def test_multiple_failures(self, tmp_path):
-        """Multiple policy violations accumulate."""
-        _write_apm_yml(
-            tmp_path,
-            {
-                "name": "test",
-                "version": "1.0.0",
-                "dependencies": {"apm": ["evil/pkg"]},
-                "scripts": {"build": "make"},
-            },
-        )
-        _write_lockfile(
-            tmp_path,
-            {
-                "lockfile_version": "1",
-                "generated_at": "2025-01-01T00:00:00Z",
-                "dependencies": [{"repo_url": "evil/pkg", "deployed_files": ["x.md"]}],
-            },
-        )
-
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(deny=["evil/*"]),
-            manifest=ManifestPolicy(scripts="deny", required_fields=["license"]),
-        )
-        result = run_policy_checks(tmp_path, policy, fail_fast=False)
-        failed_names = {c.name for c in result.checks if not c.passed}
-        assert "dependency-denylist" in failed_names
-        assert "scripts-policy" in failed_names
-        assert "required-manifest-fields" in failed_names
-
-
 # -- Group 1: _load_raw_apm_yml malformed-manifest tests -----------
-
-
-class TestLoadRawApmYml:
-    """Tests for _load_raw_apm_yml with malformed content (fix #936)."""
-
-    def test_malformed_yaml_returns_none_and_logs(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Malformed YAML returns None and logs a WARNING."""
-        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
-            result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-        assert "Malformed YAML" in caplog.text
-
-    def test_non_dict_yaml_returns_none_and_logs(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Non-mapping YAML (bare list) returns None and logs a WARNING."""
-        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
-            result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-        assert "not a YAML mapping" in caplog.text
-
-    def test_scalar_yaml_returns_none_and_logs(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Plain scalar YAML returns None and logs a WARNING."""
-        (tmp_path / "apm.yml").write_text("just a string\n", encoding="utf-8")
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
-            result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-        assert "not a YAML mapping" in caplog.text
-
-    def test_empty_file_returns_none_and_logs(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Empty apm.yml (yaml.safe_load returns None) is not a dict."""
-        (tmp_path / "apm.yml").write_text("", encoding="utf-8")
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
-            result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-        assert "not a YAML mapping" in caplog.text
-
-    def test_missing_file_returns_none_silently(self, tmp_path: Path) -> None:
-        """Missing apm.yml returns None without raising or logging."""
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
-    def test_valid_yaml_returns_dict(self, tmp_path: Path) -> None:
-        """Valid YAML mapping is returned as a dict unchanged."""
-        (tmp_path / "apm.yml").write_text("name: test\nversion: '1.0'\n", encoding="utf-8")
-        result = _load_raw_apm_yml(tmp_path)
-        assert result == {"name": "test", "version": "1.0"}
 
 
 # -- Group 2: run_policy_checks malformed-manifest tests -----------
 
 
-class TestRunPolicyChecksMalformedManifest:
-    """run_policy_checks must fail-closed on malformed apm.yml (fix #936)."""
+class TestContentTypes:
+    """manifest.content_types.allow names primitive kinds a package may ship."""
 
-    def test_malformed_yaml_produces_failing_check(self, tmp_path: Path) -> None:
-        """Malformed YAML appends manifest-parse check with passed=False."""
-        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
-        clear_apm_yml_cache()
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert not result.passed
-        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
-        assert len(parse_checks) == 1
-        assert not parse_checks[0].passed
-        assert "Cannot parse apm.yml" in parse_checks[0].message
+    @staticmethod
+    def _package(root, *files: str):
+        for relative in files:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n", encoding="utf-8")
+        return root
 
-    def test_non_dict_yaml_produces_failing_check(self, tmp_path: Path) -> None:
-        """Non-dict YAML (bare list) triggers a manifest-parse failing check."""
-        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
-        clear_apm_yml_cache()
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert not result.passed
-        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
-        assert len(parse_checks) == 1
-        assert not parse_checks[0].passed
+    def test_kinds_come_from_the_shipped_primitive_files(self, tmp_path):
+        from apm_cli.policy.content_types_check import package_content_kinds
 
-    def test_empty_file_produces_failing_check(self, tmp_path: Path) -> None:
-        """Empty apm.yml triggers ValueError from from_apm_yml."""
-        (tmp_path / "apm.yml").write_text("", encoding="utf-8")
-        clear_apm_yml_cache()
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert not result.passed
-        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
-        assert len(parse_checks) == 1
-        assert not parse_checks[0].passed
+        root = self._package(
+            tmp_path,
+            ".apm/instructions/a.instructions.md",
+            ".apm/prompts/p.md",
+            "skills/s/SKILL.md",
+            "hooks/h.json",
+            "apm_modules/dep/x.agent.md",
+        )
+        assert package_content_kinds(root) == {"instruction", "prompt", "skill", "hook"}
 
-    def test_missing_apm_yml_returns_empty_passing_result(self, tmp_path: Path) -> None:
-        """No apm.yml means nothing to check -- result is empty and passes."""
-        clear_apm_yml_cache()
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert result.passed
-        assert len(result.checks) == 0
+    def test_plugin_root_and_unnamed_apm_dirs_fail_closed(self, tmp_path):
+        from apm_cli.policy.content_types_check import check_content_types, package_content_kinds
 
-    # -- Group 5 regression guard --
+        root = self._package(
+            tmp_path, "SKILL.md", "agents/reviewer.md", "commands/c.md", ".apm/rules/r.md"
+        )
+        assert package_content_kinds(root) == {"skill", "agent", "command", "rules"}
+        policy = ManifestPolicy(content_types={"allow": ["skill", "agents", "commands"]})
+        (subject,) = check_content_types({"p": (root,)}, policy).violation_subjects()
+        assert "rules" in subject.reason
+        allowed = ManifestPolicy(content_types={"allow": ["skill", "agent", "command", "Rules"]})
+        assert check_content_types({"p": (root,)}, allowed).passed
 
-    def test_malformed_yaml_does_not_silently_pass(self, tmp_path: Path) -> None:
-        """Regression: malformed YAML must NOT produce an empty passing result.
+    def test_plugin_manifest_components_at_custom_paths_count(self, tmp_path):
+        from apm_cli.policy.content_types_check import package_content_kinds
 
-        Before fix #936, malformed apm.yml returned CIAuditResult() with
-        no checks, which trivially passed (all([]) is True).
-        """
-        (tmp_path / "apm.yml").write_text("{{invalid yaml}}\n", encoding="utf-8")
-        clear_apm_yml_cache()
-        policy = ApmPolicy()
-        result = run_policy_checks(tmp_path, policy)
-        assert not result.passed, "Malformed apm.yml must not silently pass policy checks"
+        root = self._package(tmp_path, "personas/reviewer.md", "SKILL.md")
+        (root / "plugin.json").write_text(
+            '{"name": "p", "agents": "./personas/reviewer.md"}', encoding="utf-8"
+        )
+        assert package_content_kinds(root) == {"skill", "agent"}
+
+    @pytest.mark.parametrize(
+        ("parent", "child", "allowed"),
+        [
+            ({}, None, True),
+            ({"allow": ["instruction", "skill"]}, {"allow": ["instructions", "skills"]}, True),
+            ({"allow": ["skill"]}, {"allow": ["instructions"]}, False),
+        ],
+        ids=["absent-allow-stays-unrestricted", "aliases-intersect-by-kind", "disjoint"],
+    )
+    def test_inherited_allow_lists_merge_by_kind(self, tmp_path, parent, child, allowed):
+        from apm_cli.policy.content_types_check import check_content_types
+        from apm_cli.policy.inheritance import merge_policies
+        from apm_cli.policy.schema import ApmPolicy
+
+        root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
+        merged = merge_policies(
+            ApmPolicy(manifest=ManifestPolicy(content_types=parent)),
+            ApmPolicy(manifest=ManifestPolicy(content_types=child)),
+        )
+        assert check_content_types({"p": (root,)}, merged.manifest).passed is allowed
+
+    @pytest.mark.parametrize(
+        ("allow", "passed"),
+        [
+            (None, True),
+            (["skill"], False),
+            (["skills", "Instructions"], True),
+            ([], False),
+        ],
+        ids=["unrestricted", "skill-only", "aliases", "empty-allows-nothing"],
+    )
+    def test_a_package_passes_only_when_every_kind_is_allowed(self, tmp_path, allow, passed):
+        from apm_cli.policy.content_types_check import check_content_types
+
+        root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
+        policy = ManifestPolicy(content_types=None if allow is None else {"allow": allow})
+        check = check_content_types({"acme/pkg": (root,)}, policy)
+        assert check.passed is passed
+        if not passed:
+            (subject,) = check.violation_subjects()
+            assert subject.ref == "acme/pkg"
+            assert "instruction" in subject.reason and "manifest.content_types" in subject.reason
+
+
+@pytest.mark.parametrize(
+    ("allow", "deny", "refused"),
+    [
+        (None, ("other",), True),
+        (("srv",), (), False),
+        (("srv",), ("srv",), False),
+        (("other",), (), True),
+    ],
+    ids=["no-allow", "listed", "listed-and-denied", "unlisted"],
+)
+def test_transitive_eligibility_reads_mcp_allow_alone_on_both_paths(
+    allow: tuple[str, ...] | None, deny: tuple[str, ...], refused: bool
+) -> None:
+    """Admission and the policy check agree; mcp.deny is left to the deny check (req-sc-016)."""
+    from dataclasses import replace
+
+    from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.policy.policy_checks import mcp_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+    from apm_cli.security.trust import McpAdmission
+
+    policy = ApmPolicy(
+        enforcement="block", mcp=McpPolicy(allow=allow, deny=deny, trust_transitive=False)
+    )
+    admission = McpAdmission(None, one_off=True, org_policy=lambda: policy)
+    server = MCPDependency.from_dict(
+        {"name": "srv", "registry": False, "transport": "stdio", "command": "x"}
+    )
+    transitive = replace(server, resolved_by="leaf", declared_depth=2)
+    verdicts = {check.name: check.passed for check in mcp_policy_checks([transitive], policy)}
+    assert admission.refuses_transitive("srv") is refused
+    assert verdicts["mcp-trust-transitive"] is not refused
+    assert verdicts["mcp-denylist"] is ("srv" not in deny)
+
+
+class _UnreadablePath(type(Path())):
+    """A claim the symlink probe cannot stat (for example ENAMETOOLONG)."""
+
+    def is_symlink(self):
+        raise OSError(36, "File name too long")
+
+
+def test_an_unreadable_recorded_path_makes_the_proof_fail_not_the_audit(tmp_path: Path) -> None:
+    """The symlink probe never aborts the audit: an unreadable claim proves nothing."""
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.policy.allowlist_remedy import _final_symlinks
+
+    deployed = ".github/instructions/evil.instructions.md"
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])
+    )
+    project = SimpleNamespace(
+        project_root=_UnreadablePath(tmp_path), lock=lock, modules_dir=tmp_path / "apm_modules"
+    )
+
+    assert _final_symlinks(set(lock.dependencies), [], project) is None

@@ -1,0 +1,26 @@
+name: heal-consumer
+version: 1.0.0
+dependencies:
+  apm: []
+  mcp:
+  - name: heal-sse
+    registry: false
+    transport: sse
+    url: https://sse.example.invalid/sse
+  - name: heal-http
+    registry: false
+    transport: http
+    url: https://http.example.invalid/mcp
+  - name: heal-streamable
+    registry: false
+    transport: streamable-http
+    url: https://streamable.example.invalid/mcp
+  - name: heal-stdio
+    registry: false
+    transport: stdio
+    command: node
+    args:
+    - server.js
+    cwd: /srv/heal-fixture
+  - name: io.github.apm-fixture/heal-registry
+    registry: __REGISTRY_URL__

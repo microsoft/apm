@@ -1,4 +1,4 @@
-# panel-mode walkthrough (auth-sized, docs-only, CLI help-only)
+# panel-mode walkthrough (auth-sized, docs-only, CLI help-only, test-only cut)
 
 Specification fixture. Not a live PR. Orchestrators use this to
 pick roster and context without spawning inactive stubs.
@@ -40,6 +40,21 @@ module, fewer than 3 production files.
 | full | devx-ux-expert, cli-logging-expert, python-architect, test-coverage-expert, apm-ceo | surface-gated, not the old 9-way stub roster |
 | lean | devx-ux-expert, test-coverage-expert, apm-ceo | architect optional (tiny diff, no owner split) |
 | delta | CEO + personas whose owned files changed | merge-worker iteration 2+ and terminal |
+
+## Test-only cut
+
+Touched: a test cut under `tests/` (file deleted, moved, or renamed;
+test function or assertions removed from a kept file; `--no-policy`
+added). Zero `src/**/*.py`.
+
+| Mode | Spawn | Notes |
+|------|-------|-------|
+| full | test-coverage-expert, python-architect, apm-ceo | test-coverage runs its cut/merge review |
+| lean | test-coverage-expert, apm-ceo | the test-file cut is the highest-signal surface |
+| delta | CEO + test-coverage-expert if tests changed in range | noop if head+watermark unchanged |
+
+A test-only PR that only adds tests or assertions is not a cut;
+activation for it is unchanged.
 
 ## Merge-worker composition
 

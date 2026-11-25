@@ -19,6 +19,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 _USER_FILES = {
@@ -58,11 +59,15 @@ def test_compile_retains_hand_authored_nested_context_files(
 
     first = scenario.run("compile", cwd=project)
     text = output(first)
-    for relative in _USER_FILES:
-        assert f"Protected {relative}: hand-authored file will not be overwritten" in text, text
+    assert "Protected docs/AGENTS.md: hand-authored file will not be overwritten" in text, text
+    # CLAUDE.md only imports an AGENTS.md APM writes (#3939); with docs/AGENTS.md
+    # retained there is no docs/CLAUDE.md to write, so the user's file is untouched.
+    assert "docs/CLAUDE.md" not in text, text
     _assert_user_files(project)
     generated = (project / "src/AGENTS.md").read_text(encoding="ascii")
     assert "Src rule." in generated and _MARKERS[0] in generated
+    src_claude = (project / "src/CLAUDE.md").read_text(encoding="ascii")
+    assert "@AGENTS.md" in src_claude.splitlines() and _MARKERS[1] in src_claude
     assert "Orphaned" not in text
     layout = tree_digest(project)
 
@@ -84,7 +89,9 @@ def test_compile_retains_hand_authored_nested_context_files(
 
     # The user hands the directory back to APM by removing the file.
     (project / "docs/AGENTS.md").unlink()
-    scenario.run("compile", cwd=project)
+    handed_back = output(scenario.run("compile", cwd=project))
+    assert "Protected docs/CLAUDE.md: hand-authored file will not be overwritten" in handed_back
+    assert "add '@AGENTS.md' to docs/CLAUDE.md" in handed_back
     regenerated = (project / "docs/AGENTS.md").read_text(encoding="ascii")
     assert "Docs rule." in regenerated and _MARKERS[0] in regenerated
     assert (project / "docs/CLAUDE.md").read_text(encoding="ascii") == _USER_FILES["docs/CLAUDE.md"]

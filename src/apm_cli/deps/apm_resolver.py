@@ -1,8 +1,10 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
+import contextlib
 import inspect
 import logging
 import os
+import re
 import threading
 from collections import deque
 from collections.abc import Callable, Iterable
@@ -11,13 +13,19 @@ from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.local_bundle import route_agent_plugin_package
+from ..core.errors import TargetResolutionError
 from ..models.apm_package import APMPackage, DependencyReference
-from ..models.dependency.materialization import nested_materialization_pairs
+from ..models.dependency.materialization import (
+    MaterializationSlots,
+    nested_materialization_pairs,
+)
 from ..models.dependency.replacement import build_replacement_index
+from ..models.dependency.subsets import EdgeSelection, merge_edge_selections
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
-from ..utils.paths import portable_relpath
 from ._shared import MarketplaceManifestMaterializationError, materialize_marketplace_manifest
 from .dependency_graph import (
     CircularRef,
@@ -31,6 +39,12 @@ from .immutable_requirements import (
     ImmutableRequirements,
     ReferenceResolver,
 )
+from .local_identity import (
+    portable_anchor_identity,
+    transitive_local_identity,
+    with_declaring_edge,
+)
+from .local_identity import root_local_dirs as collect_root_local_dirs
 
 if TYPE_CHECKING:
     from .lockfile import LockFile
@@ -61,6 +75,51 @@ def _select_dependency_winners(
     return ordered, winner_ids
 
 
+def _alias_divergence_warning(dep_ref: DependencyReference, selection) -> str:
+    """Describe divergent aliases for one dependency and the alias that applies."""
+    declared = "; ".join(
+        f"{edge.declared_by()}: {edge.alias or '(none)'}" for edge in selection.contributors
+    )
+    return (
+        f"Dependency '{dep_ref.get_identity()}' is declared with different aliases "
+        f"({declared}). Using '{selection.alias or '(none)'}' from the shallowest "
+        "declaration; declare the same alias everywhere to silence this warning."
+    )
+
+
+def _with_node_selection(dep_ref: DependencyReference, selection) -> DependencyReference:
+    """Return *dep_ref* carrying the merged selection; keep it when nothing changes."""
+    skills = None if selection.skill_subset is None else list(selection.skill_subset)
+    targets = None if selection.target_subset is None else list(selection.target_subset)
+    if (
+        len(selection.contributors) == 1
+        and sorted(dep_ref.skill_subset or ()) == (skills or [])
+        and sorted(dep_ref.target_subset or ()) == (targets or [])
+        and dep_ref.allow_insecure == selection.allow_insecure
+    ):
+        return dep_ref
+    merged = replace(
+        dep_ref,
+        skill_subset=skills,
+        target_subset=targets,
+        allow_insecure=selection.allow_insecure,
+        selection_contributors=selection.contributors,
+        subset_pairings=selection.subset_pairings,
+    )
+    binding = dep_ref.replacement
+    if binding is not None:
+        # The lockfile records a replaced node through its original request,
+        # so the original carries the node's merged selection too.
+        binding.original = replace(binding.original, skill_subset=skills, target_subset=targets)
+    # Download callbacks annotate the node reference with non-field state
+    # (for example ``resolved_reference``); keep it on the merged reference.
+    declared = {item.name for item in fields(dep_ref)}
+    for name, value in vars(dep_ref).items():
+        if name not in declared:
+            setattr(merged, name, value)
+    return merged
+
+
 # Type alias for the download callback.
 # Takes (dep_ref, apm_modules_dir, parent_chain, parent_pkg) and returns the
 # install path if successful. ``parent_chain`` is a human-readable breadcrumb
@@ -89,6 +148,9 @@ class ActivationCallback(Protocol):
     def __call__(self, candidate_path: Path) -> Path: ...
 
 
+_TRAILING_RETRY = re.compile(r",? then retry\.?$")
+
+
 class DownloadedPackageError(RuntimeError):
     """A downloaded candidate could not be validated or activated."""
 
@@ -111,6 +173,8 @@ class APMDependencyResolver:
         frozen: bool = False,
         update_keys: set[str] | None = None,
         read_only: bool = False,
+        create_config: bool | None = None,
+        preview: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -147,6 +211,10 @@ class APMDependencyResolver:
             read_only: Preview using local sources and unchanged installed packages.
                 Never fetch, activate, or materialize metadata; unknown subtrees
                 are reported as resolution errors rather than treated as leaves.
+            create_config: Whether manifest loads may create a missing user
+                config file; defaults to False for read-only and preview runs.
+            preview: ``--dry-run`` through the install pipeline: fetch like an
+                install, create no user config, and record unavailable subtrees.
         """
         if read_only and any(
             callback is not None
@@ -161,7 +229,12 @@ class APMDependencyResolver:
                 "Read-only resolution cannot use fetching or materialization callbacks"
             )
         self._read_only = read_only
+        self._create_config = not (read_only or preview) if create_config is None else create_config
+        self._preview = preview
         self.max_depth = max_depth
+        # Chains cut at ``max_depth``: an org-policy depth limit reports them
+        # as a policy refusal (#4826).
+        self.depth_limit_chains: list[str] = []
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
@@ -205,11 +278,22 @@ class APMDependencyResolver:
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
         self._marketplace_provenance: dict[str, dict[str, str]] = {}
+        self._selected_marketplace_keys: list[str] = []
+        # Every declaring edge per node identity (``get_unique_key``), recorded
+        # before any dedup so the selection merge sees all of them (#3735).
+        self._edge_selections: dict[str, list[EdgeSelection]] = {}
+        self._edge_parents: dict[str, list[DependencyNode]] = {}
+        self._edge_refs: dict[tuple[str, int], DependencyReference] = {}
 
     @property
     def marketplace_provenance(self) -> dict[str, dict[str, str]]:
         """Return marketplace provenance captured while resolving the graph."""
         return dict(self._marketplace_provenance)
+
+    @property
+    def selected_marketplace_keys(self) -> tuple[str, ...]:
+        """Return resolved keys of selected catalog declarations (scoped updates)."""
+        return tuple(self._selected_marketplace_keys)
 
     @staticmethod
     def _resolve_max_parallel(explicit: int | None) -> int:
@@ -282,7 +366,7 @@ class APMDependencyResolver:
             self._apm_modules_dir = project_root / "apm_modules"
 
         # Load the root package
-        apm_yml_path = project_root / "apm.yml"
+        apm_yml_path = manifest_file(project_root)
         if not apm_yml_path.exists() and root_package is None:
             # Create empty dependency graph for projects without apm.yml
             empty_package = APMPackage(name="unknown", version="0.0.0", package_path=project_root)
@@ -299,7 +383,7 @@ class APMDependencyResolver:
                 root_package = APMPackage.from_apm_yml(
                     apm_yml_path,
                     source_path=project_root.resolve(),
-                    create_config=not self._read_only,
+                    create_config=self._create_config,
                 )
             except (ValueError, FileNotFoundError) as e:
                 # Create error graph
@@ -338,6 +422,7 @@ class APMDependencyResolver:
 
         for error in dependency_tree.resolution_errors:
             graph.add_error(error)
+        graph.declaration_errors.extend(dependency_tree.declaration_errors)
 
         return graph
 
@@ -423,28 +508,8 @@ class APMDependencyResolver:
 
     @staticmethod
     def _portable_anchor_identity(anchored: Path, base: Path | None) -> str:
-        """Return a machine-independent identity string for a resolved local dep.
-
-        ``anchored`` is the absolute, resolved on-disk location of a local
-        package. The returned value is the package's stable identity only --
-        it feeds the ``local:`` cycle key, the lockfile
-        ``dependencies[].anchored_local_path`` field, and (via that same owner
-        identity) the deployment-ledger owner rows. It is never re-opened as a
-        filesystem path.
-
-        A lockfile is a committed, cross-machine artifact, so this identity
-        MUST NOT carry a developer's home directory or any absolute prefix.
-        Packages inside ``base`` (the project root) are recorded relative to
-        it in forward-slash POSIX form -- matching how directly-declared local
-        owners already serialize -- which keeps a regenerated lockfile
-        deterministic across machines and CI. Packages outside ``base`` (or
-        when ``base`` is unknown) fall back to the resolved absolute POSIX
-        path: such out-of-project local deps are inherently non-committable,
-        and the fallback preserves a unique identity without inventing one.
-        """
-        if base is None:
-            return anchored.resolve().as_posix()
-        return portable_relpath(anchored, base)
+        """Delegate to :func:`apm_cli.deps.local_identity.portable_anchor_identity`."""
+        return portable_anchor_identity(anchored, base)
 
     def _remote_source_paths_for_parent(
         self,
@@ -579,10 +644,17 @@ class APMDependencyResolver:
             self._reject_remote_parent_local_path(child_dep, parent_pkg, str(exc))
             return None
 
-    def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
+    def _resolve_marketplace_dep(
+        self, dep_ref: DependencyReference, *, required_by: str | None = None
+    ) -> DependencyReference:
         """Resolve a marketplace dependency to a concrete DependencyReference.
 
-        Uses :func:`resolve_marketplace_plugin` to look up the plugin in the
+        A declaration that still matches its lock row is replayed from the
+        lock before any catalog, alias or registration I/O
+        (:func:`~apm_cli.drift.locked_marketplace_replay`); ``--frozen``
+        refuses a declaration with no matching lock row instead of asking the
+        marketplace, and a local catalog that no longer selects its lock row. Otherwise uses
+        :func:`resolve_marketplace_plugin` to look up the plugin in the
         registered marketplace and returns a resolved git-backed reference.
         Prefers the structured ``dependency_reference`` from the resolution
         when available (GitLab-class hosts, in-marketplace subdirectory
@@ -590,6 +662,9 @@ class APMDependencyResolver:
 
         Args:
             dep_ref: An unresolved marketplace DependencyReference.
+            required_by: The declaring package for a transitive declaration,
+                which must name a marketplace the root ``marketplaces:`` map
+                declares (#2903).
 
         Returns:
             A concrete (non-marketplace) DependencyReference.
@@ -598,29 +673,89 @@ class APMDependencyResolver:
             MarketplaceNotFoundError: Marketplace is not registered.
             PluginNotFoundError: Plugin not found in the marketplace.
             MarketplaceFetchError: Network/auth error fetching marketplace data.
-            ValueError: Invalid marketplace or plugin configuration.
+            ValueError: Invalid marketplace or plugin configuration, or a
+                frozen or offline run without a matching lock row.
         """
+        from apm_cli.drift import (
+            MARKETPLACE_CATALOG_METADATA,
+            MARKETPLACE_LOCAL_CATALOG,
+            catalog_metadata_refusal,
+            frozen_marketplace_refusal,
+            local_catalog_refusal,
+            locked_marketplace_replay,
+        )
+
+        if required_by is not None:
+            from apm_cli.marketplace.project_marketplaces import (
+                require_root_declared_marketplace,
+            )
+
+            require_root_declared_marketplace(
+                dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, required_by=required_by
+            )
+        decision = locked_marketplace_replay(
+            dep_ref,
+            self._existing_lockfile,
+            update_refs=self._update_refs,
+            modules_dir=self._apm_modules_dir,
+        )
+        if decision.reference is not None:
+            _logger.debug("Replaying %s from apm.lock.yaml", dep_ref.get_display_name())
+            return decision.reference
+        refusal = frozen_marketplace_refusal(decision) if self._frozen else None
+        if refusal is not None:
+            raise refusal
         if self._read_only:
             raise ValueError("Marketplace lookup is not available in an offline dependency preview")
+        from apm_cli.marketplace.catalog_origin import require_locked_catalog_origin
+        from apm_cli.marketplace.dependency_confusion import admit_marketplace_resolution
         from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 
+        require_locked_catalog_origin(
+            dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, self._existing_lockfile
+        )
+        update_selected = self._update_keys is None or dep_ref.get_unique_key() in self._update_keys
         resolution = resolve_marketplace_plugin(
             dep_ref.marketplace_plugin_name,
             dep_ref.marketplace_name,
             version_spec=dep_ref.marketplace_version_spec,
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
+            # An update accepts a changed ref for the plugins it selects; an
+            # unselected plugin keeps its locked ref, and a catalog read for
+            # locked server metadata does not choose the download, so neither
+            # touches the pin.
+            enforce_ref_pins=not (self._update_refs and not update_selected)
+            and decision.reason != MARKETPLACE_CATALOG_METADATA,
+            accept_ref_change=bool(self._update_refs) and update_selected,
         )
+        admit_marketplace_resolution(resolution)
         resolved = (
             resolution.dependency_reference
             if resolution.dependency_reference is not None
             else DependencyReference.parse(resolution.canonical)
         )
+        # A cold server-owning row reads the catalog for server metadata only;
+        # the lock row still pins the download (#3989). A frozen local catalog
+        # must still select its lock row (#4639).
+        if decision.reason == MARKETPLACE_CATALOG_METADATA:
+            refusal = catalog_metadata_refusal(dep_ref, resolved, self._existing_lockfile)
+        elif decision.reason == MARKETPLACE_LOCAL_CATALOG and self._frozen:
+            refusal = local_catalog_refusal(dep_ref, resolved, self._existing_lockfile)
+        if refusal is not None:
+            raise refusal
         manifest = getattr(resolution.plugin, "manifest", None)
         if isinstance(manifest, dict) and manifest:
             resolved.marketplace_manifest = dict(manifest)
             resolved.marketplace_name = dep_ref.marketplace_name
             resolved.marketplace_plugin_name = dep_ref.marketplace_plugin_name
+        # A selected catalog declaration selects the Git coordinate it
+        # resolves to, so scoped updates re-check that package (#3279).
+        if self._update_keys is not None and dep_ref.get_unique_key() in self._update_keys:
+            resolved_key = resolved.get_unique_key()
+            if resolved_key not in self._update_keys:
+                self._update_keys.add(resolved_key)
+                self._selected_marketplace_keys.append(resolved_key)
         self._marketplace_provenance[resolved.get_unique_key()] = resolution.provenance(
             dep_ref.marketplace_name,
             dep_ref.marketplace_plugin_name,
@@ -632,6 +767,8 @@ class APMDependencyResolver:
         dep_ref: DependencyReference,
         tree: DependencyTree,
         context: str,
+        *,
+        required_by: str | None = None,
     ) -> DependencyReference | None:
         """Try to resolve a marketplace dep; record an error on the tree on failure.
 
@@ -644,22 +781,29 @@ class APMDependencyResolver:
             tree: The dependency tree to record errors on.
             context: Human-readable context for error messages
                      (e.g. ``"required by owner/repo"``).
+            required_by: Declaring package of a transitive declaration.
 
         Returns:
             Resolved DependencyReference on success, ``None`` on known failure.
         """
         from apm_cli.marketplace.errors import (
             BuildError,
+            DependencyConfusionError,
             MarketplaceFetchError,
             MarketplaceNotFoundError,
+            MarketplaceOriginConflictError,
             PluginNotFoundError,
+            UndeclaredMarketplaceError,
         )
 
         try:
-            return self._resolve_marketplace_dep(dep_ref)
+            return self._resolve_marketplace_dep(dep_ref, required_by=required_by)
         except (
+            DependencyConfusionError,
             MarketplaceNotFoundError,
+            MarketplaceOriginConflictError,
             PluginNotFoundError,
+            UndeclaredMarketplaceError,
             MarketplaceFetchError,
             BuildError,
             ValueError,
@@ -677,6 +821,16 @@ class APMDependencyResolver:
                 f"{f' ({context})' if context else ''}: {exc}"
             )
             return None
+
+    @staticmethod
+    def _depth_limit_chain(dep_ref: DependencyReference, parent_node: DependencyNode | None) -> str:
+        """Name the chain that reached ``max_depth`` (req-rs-006), root first."""
+        chain = [dep_ref.to_display_reference()]
+        ancestor = parent_node
+        while ancestor is not None:
+            chain.append(ancestor.dependency_ref.to_display_reference())
+            ancestor = ancestor.parent
+        return " -> ".join(reversed(chain))
 
     def build_dependency_tree(
         self,
@@ -707,7 +861,7 @@ class APMDependencyResolver:
                     source_path=self._project_root.resolve()
                     if self._project_root is not None
                     else root_apm_yml.parent.resolve(),
-                    create_config=not self._read_only,
+                    create_config=self._create_config,
                 )
             except (ValueError, FileNotFoundError) as e:
                 _logger.warning("Failed to parse root apm.yml: %s", e)
@@ -717,6 +871,9 @@ class APMDependencyResolver:
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
+        self._edge_selections = {}
+        self._edge_parents = {}
+        self._edge_refs = {}
         self.replacement_index = build_replacement_index(root_package.replace_rules or [])
         consumer_root = root_package.source_path or root_apm_yml.parent
         modules_dir = self._apm_modules_dir or root_apm_yml.parent / "apm_modules"
@@ -761,6 +918,7 @@ class APMDependencyResolver:
                 parent=None,
                 is_dev=False,
             )
+            self._record_edge_selection(dep_ref, None)
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_resolution_key())
 
@@ -786,23 +944,28 @@ class APMDependencyResolver:
                 parent=None,
                 is_dev=True,
             )
+            # Record before the prod-wins skip: a dev edge still selects skills.
+            self._record_edge_selection(dep_ref, None)
             key = dep_ref.get_resolution_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
-        nested = nested_materialization_pairs((item[0] for item in processing_queue), modules_dir)
-        for outer, inner in nested:
-            tree.resolution_errors.append(
-                f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
-                "cannot both be declared in apm.yml: the subdirectory package would be "
-                "installed inside the repository package. Keep only one of them."
-            )
-        if nested:
+        root_local_dirs = collect_root_local_dirs(
+            [item[0] for item in processing_queue], consumer_root
+        )
+        if self._reject_nested_root_declarations(
+            tree, [item[0] for item in processing_queue], modules_dir
+        ):
             # Structural manifest error: report it before fetching anything, even
             # if other root declarations would also fail during the walk.
             return tree
+        # #3696: distinct packages that share one host-blind directory are
+        # rejected before their directory is fetched or staged. Each level
+        # claims only selected nodes, so a discarded duplicate declaration's
+        # alias never claims a directory.
+        slots = MaterializationSlots(modules_dir)
 
         # Process dependencies breadth-first with level-batched parallelism.
         #
@@ -840,14 +1003,6 @@ class APMDependencyResolver:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
 
-                # Check maximum depth to prevent infinite recursion
-                if depth > self.max_depth:
-                    if self._read_only:
-                        tree.resolution_errors.append(
-                            f"Dependency preview depth limit reached: {dep_ref.to_display_reference()}"
-                        )
-                    continue
-
                 # Check if we already processed this dependency at this level or higher
                 existing_node = tree.nodes.get(dep_ref.get_resolution_key())
                 if existing_node and existing_node.depth <= depth:
@@ -866,8 +1021,28 @@ class APMDependencyResolver:
                         and dep_ref.get_unique_key() not in self._scoped_rechecked
                         and existing_node.get_id() not in scheduled_nodes
                     ):
-                        work_items.append((existing_node, dep_ref, parent_node, is_dev))
+                        # Recheck the node at its own anchor, not this edge's (#4731).
+                        work_items.append(
+                            (
+                                existing_node,
+                                existing_node.dependency_ref,
+                                existing_node.parent,
+                                is_dev,
+                            )
+                        )
                         scheduled_nodes.add(existing_node.get_id())
+                    continue
+
+                # Check maximum depth to prevent infinite recursion. Exceeding
+                # the cap fails resolution naming the chain (req-rs-006, #4277).
+                # An edge to a node already resolved no deeper reuses it above,
+                # so only a node that would be created past the cap is refused.
+                if depth > self.max_depth:
+                    chain = self._depth_limit_chain(dep_ref, parent_node)
+                    self.depth_limit_chains.append(chain)
+                    tree.resolution_errors.append(
+                        f"Dependency depth limit ({self.max_depth}) exceeded: {chain}"
+                    )
                     continue
 
                 # Create a new node for this dependency
@@ -908,6 +1083,8 @@ class APMDependencyResolver:
                 for item in work_items
                 if winner_ids[item[1].get_unique_key()] == item[0].get_id()
             ]
+            if self._reject_shared_slots(tree, slots, ((item[1], item[2]) for item in work_items)):
+                return tree
 
             # --- Phase B (workers): load packages ---
             if not work_items:
@@ -937,9 +1114,9 @@ class APMDependencyResolver:
             for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
                 if dep_ref.replacement is not None and loaded_package is None:
                     detail = str(exc) if exc is not None else "selected source could not be loaded"
-                    tree.resolution_errors.append(
-                        f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
-                    )
+                    message = f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
+                    tree.resolution_errors.append(message)
+                    tree.replacement_load_errors[dep_ref.get_unique_key()] = message
                     continue
                 if self._read_only and (exc is not None or loaded_package is None):
                     tree.resolution_errors.append(
@@ -947,6 +1124,11 @@ class APMDependencyResolver:
                         f"{exc or 'package metadata is not available locally'}"
                     )
                     continue
+                if self._preview and (exc is not None or loaded_package is None):
+                    tree.unavailable_subtrees.append(
+                        f"{dep_ref.to_display_reference()}: "
+                        f"{exc or 'package metadata is not available'}"
+                    )
                 if exc is not None:
                     if isinstance(exc, MarketplaceManifestMaterializationError):
                         message = f"Marketplace package materialization failed: {exc}"
@@ -1001,12 +1183,12 @@ class APMDependencyResolver:
                                 if local_path.is_absolute()
                                 else (node.package.source_path / local_path).resolve()
                             )
-                            sub_dep = replace(
+                            sub_dep = transitive_local_identity(
                                 sub_dep,
                                 declaring_parent=node.get_id(),
-                                anchored_local_path=self._portable_anchor_identity(
-                                    anchored, root_package.source_path
-                                ),
+                                anchored=anchored,
+                                root=root_package.source_path,
+                                root_local_dirs=root_local_dirs,
                             )
                             ancestor: DependencyNode | None = node
                             while ancestor is not None:
@@ -1023,7 +1205,10 @@ class APMDependencyResolver:
                                 continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
-                                sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
+                                sub_dep,
+                                tree,
+                                f"required by {node.dependency_ref.repo_url}",
+                                required_by=node.dependency_ref.repo_url,
                             )
                             if resolved is not None:
                                 sub_dep = resolved
@@ -1036,6 +1221,8 @@ class APMDependencyResolver:
                             parent=node.dependency_ref.get_unique_key(),
                             is_dev=is_dev,
                         )
+                        # Record before the queued_keys dedup drops this edge.
+                        self._record_edge_selection(sub_dep, node)
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if (
@@ -1048,7 +1235,131 @@ class APMDependencyResolver:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
                             queued_keys.add(queue_key)
 
+        self._propagate_production(tree)
+        self._apply_edge_selections(tree)
         return tree
+
+    def _propagate_production(self, tree: DependencyTree) -> None:
+        """Mark every node a production node declares production (prod wins over dev).
+
+        Follows materialized children and every recorded declaring edge, so a
+        node first loaded as dev (a root devDependency a production sibling also
+        declares) promotes its whole subtree, including children whose edges the
+        queue dedup dropped, independent of declaration order (#4731).
+        """
+        declared: dict[int, list[str]] = {}
+        for key, parents in self._edge_parents.items():
+            for parent in parents:
+                declared.setdefault(id(parent), []).append(key)
+        by_key: dict[str, list[DependencyNode]] = {}
+        for node in tree.nodes.values():
+            by_key.setdefault(node.dependency_ref.get_unique_key(), []).append(node)
+        pending = [node for node in tree.nodes.values() if not node.is_dev]
+        while pending:
+            node = pending.pop()
+            declared_children = (
+                c for key in declared.get(id(node), ()) for c in by_key.get(key, ())
+            )
+            for child in [*node.children, *declared_children]:
+                if child.is_dev:
+                    child.is_dev = False
+                    pending.append(child)
+
+    @staticmethod
+    def _reject_nested_root_declarations(
+        tree: DependencyTree,
+        root_refs: list[DependencyReference],
+        modules_dir: Path,
+    ) -> bool:
+        """Record root declarations whose package directories nest (#3699)."""
+        nested = nested_materialization_pairs(root_refs, modules_dir)
+        for outer, inner in nested:
+            tree.add_declaration_error(
+                f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
+                "cannot both be declared in apm.yml: the subdirectory package would be "
+                "installed inside the repository package. Keep only one of them."
+            )
+        return bool(nested)
+
+    @staticmethod
+    def _reject_shared_slots(
+        tree: DependencyTree,
+        slots: MaterializationSlots,
+        claims: Iterable[tuple[DependencyReference, DependencyNode | None]],
+    ) -> bool:
+        """Claim each package directory; record the first shared-directory collision."""
+        for dep_ref, parent_node in claims:
+            parent = parent_node.dependency_ref if parent_node is not None else None
+            collision = slots.claim(dep_ref, parent)
+            if collision is not None:
+                tree.add_declaration_error(collision)
+                return True
+        return False
+
+    def _record_edge_selection(
+        self, dep_ref: DependencyReference, parent_node: DependencyNode | None
+    ) -> None:
+        """Record one declaring edge's selection for the selection merge."""
+        chain: list[str] = []
+        ancestor = parent_node
+        while ancestor is not None:
+            chain.append(ancestor.get_display_name())
+            ancestor = ancestor.parent
+        key = dep_ref.get_unique_key()
+        self._edge_selections.setdefault(key, []).append(
+            EdgeSelection.from_dependency(dep_ref, reversed(chain))
+        )
+        if parent_node is not None:
+            self._edge_parents.setdefault(key, []).append(parent_node)
+            self._edge_refs.setdefault((key, id(parent_node)), dep_ref)
+
+    def _select_nearest_parent(
+        self, node: DependencyNode, declaring_parents: Iterable[DependencyNode]
+    ) -> None:
+        """Make the recorded parent the nearest declaring parent, ties by lowest key.
+
+        Equal-depth parents otherwise win by manifest order, which would make
+        ``resolved_by`` (and so the lockfile bytes) depend on declaration order.
+        A local node takes that parent's own declaration too (#5386).
+        """
+        if node.parent is None:
+            return
+        nearest = [parent for parent in declaring_parents if parent.depth == node.depth - 1]
+        if not nearest:
+            return
+        chosen = min(
+            nearest,
+            key=lambda parent: (parent.dependency_ref.get_unique_key(), parent.get_id()),
+        )
+        edge = self._edge_refs.get((node.dependency_ref.get_unique_key(), id(chosen)))
+        if edge is not None:
+            node.dependency_ref = with_declaring_edge(node.dependency_ref, edge)
+        if chosen is node.parent:
+            return
+        node.parent = chosen
+        if all(child is not node for child in chosen.children):
+            chosen.children.append(node)
+
+    def _apply_edge_selections(self, tree: DependencyTree) -> None:
+        """Give every node the merged selection of all edges that declared it.
+
+        Identity, ref, transport hints and the materialized alias stay as the
+        first (shallowest, then declared) edge set them; only the per-edge
+        selection fields change.
+        """
+        warned: set[str] = set()
+        for node in tree.nodes.values():
+            dep_ref = node.dependency_ref
+            key = dep_ref.get_unique_key()
+            edges = self._edge_selections.get(key)
+            if not edges:
+                continue
+            selection = merge_edge_selections(edges)
+            node.dependency_ref = _with_node_selection(dep_ref, selection)
+            self._select_nearest_parent(node, self._edge_parents.get(key, ()))
+            if selection.divergent_aliases and key not in warned:
+                warned.add(key)
+                tree.resolution_warnings.append(_alias_divergence_warning(dep_ref, selection))
 
     def detect_circular_dependencies(self, tree: DependencyTree) -> list[CircularRef]:
         """
@@ -1405,6 +1716,7 @@ class APMDependencyResolver:
                 source_path=dep_source_path,
                 agent_plugin_detection=native_detection,
                 read_only=self._read_only,
+                create_config=self._create_config,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1438,6 +1750,7 @@ class APMDependencyResolver:
                 install_path,
                 source_path=dep_source_path,
                 read_only=self._read_only,
+                create_config=self._create_config,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1462,7 +1775,7 @@ class APMDependencyResolver:
             )
 
         # Look for apm.yml in the install path
-        apm_yml_path = install_path / "apm.yml"
+        apm_yml_path = manifest_file(install_path)
         if not apm_yml_path.exists():
             # Package exists but has no apm.yml (e.g., Claude Skill)
             # Check for SKILL.md and create minimal package
@@ -1497,7 +1810,7 @@ class APMDependencyResolver:
             package = APMPackage.from_apm_yml(
                 apm_yml_path,
                 source_path=dep_source_path,
-                create_config=not self._read_only,
+                create_config=self._create_config,
             )
         except FileNotFoundError:
             self._raise_downloaded_package_error(
@@ -1511,6 +1824,17 @@ class APMDependencyResolver:
                 downloaded_candidate,
                 dep_ref,
                 str(exc),
+                had_existing_install,
+            )
+        except TargetResolutionError as exc:
+            # The rendered "Fix with one of" commands are for the consumer's own
+            # manifest; for a dependency keep only what is wrong with it.
+            summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
+            parts = [line.strip().rstrip(".") for line in summary.splitlines() if line.strip()]
+            self._raise_downloaded_package_error(
+                downloaded_candidate,
+                dep_ref,
+                f"{apm_yml_path}: " + ". ".join(parts),
                 had_existing_install,
             )
         # Ensure source is set for tracking. TODO(#940): the cache key
@@ -1532,6 +1856,12 @@ class APMDependencyResolver:
         had_existing_install: bool,
     ) -> APMPackage:
         """Publish one validated candidate and remap its package paths."""
+        if package.marketplaces is not None:
+            # Only the root project's map counts; a package can never add a
+            # marketplace (#3006, #2903). Refused before activation.
+            from apm_cli.marketplace.user_manifest import dependency_marketplaces_error
+
+            raise DownloadedPackageError(dependency_marketplaces_error(package.name))
         if downloaded_candidate is None or self._activation_callback is None:
             return package
         try:
@@ -1585,13 +1915,37 @@ class APMDependencyResolver:
         detail: str,
         had_existing_install: bool,
     ) -> NoReturn:
-        """Raise a specific fail-closed error for newly downloaded candidates."""
+        """Raise a specific fail-closed error for newly downloaded candidates.
+
+        Paths inside the staged candidate are shown relative to the package,
+        so the error names the dependency and its in-package path rather than
+        APM's private staging directory.
+        """
         if downloaded_candidate is None:
             raise ValueError(detail)
+        detail = APMDependencyResolver._package_relative_detail(detail, downloaded_candidate)
+        # The hint below carries the one "retry"; drop the manifest owner's own.
+        detail = _TRAILING_RETRY.sub("", detail.rstrip()).rstrip(".")
+        label = f"'{dep_ref.get_display_name()}'"
+        if dep_ref.replacement is not None:
+            label += f" (replacement for '{dep_ref.replacement.original.get_display_name()}')"
         raise DownloadedPackageError(
-            f"Downloaded dependency '{dep_ref.get_display_name()}' is invalid: "
-            f"{detail}. {APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
+            f"Downloaded dependency {label} is invalid: "
+            f"{detail}. "
+            f"{APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
         )
+
+    @staticmethod
+    def _package_relative_detail(detail: str, candidate: Path) -> str:
+        """Rewrite paths under the staged *candidate* as package-relative paths."""
+        roots = {str(candidate)}
+        with contextlib.suppress(OSError):
+            roots.add(str(candidate.resolve()))
+        for root in sorted(roots, key=len, reverse=True):
+            for separator in {os.sep, "/"}:
+                detail = detail.replace(root + separator, "")
+            detail = detail.replace(root, "the package root")
+        return detail
 
     @staticmethod
     def _replacement_failure_hint(had_existing_install: bool) -> str:
@@ -1660,14 +2014,16 @@ class APMDependencyResolver:
         the materialized package location; repository-relative expansion derives
         separate source-coordinate anchors.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         if dep_ref.replacement is not None and dep_ref.is_local:
             return dep_ref.replacement.local_source_path()
         if dep_ref.is_local and dep_ref.local_path:
             local = Path(dep_ref.local_path).expanduser()
             if not local.is_absolute() and parent_pkg is not None and parent_pkg.source_path:
-                return (parent_pkg.source_path / local).resolve()
-            return local.resolve()
-        return install_path.resolve()
+                return resolve_path(parent_pkg.source_path / local)
+            return resolve_path(local)
+        return resolve_path(install_path)
 
     @staticmethod
     def _download_dedup_key(dep_ref: DependencyReference, parent_pkg: APMPackage | None) -> str:

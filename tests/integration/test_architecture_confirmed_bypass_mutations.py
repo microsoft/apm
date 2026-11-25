@@ -34,8 +34,22 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         name="local-bundle-copies-markdown-into-codex-toml",
         rule_id="install-deployment-bundle-native-layout",
         path="src/apm_cli/install/local_bundle_paths.py",
-        old='frozenset({"gemini_command", "codex_agent"})',
-        new='frozenset({"gemini_command"})',
+        old='_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})',
+        new="_RENDERED_PLUGIN_FORMAT_IDS = frozenset()",
+    ),
+    BypassMutation(
+        name="local-bundle-loop-skips-codex-agent-render",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/services.py",
+        old="if _bundle_render_format(",
+        new="if False and _bundle_render_format(",
+    ),
+    BypassMutation(
+        name="local-bundle-codex-agent-writes-outside-integrator",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/local_bundle_agents.py",
+        old="        if dry_run:\n",
+        new="        dest.write_text(rendered)\n        if dry_run:\n",
     ),
     BypassMutation(
         name="target-context-exemption",
@@ -122,6 +136,13 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
             'else STATUS_SYMBOLS["error"]'
         ),
         new="        return check.symbol",
+    ),
+    BypassMutation(
+        name="policy-discovery-stdlib-warning",
+        rule_id="registry_delegation.output_diagnostics",
+        path="src/apm_cli/policy/discovery.py",
+        old="masked_private_hint = _masked_private_policy_hint(org, candidate_repo)",
+        new='logger.warning("%s", _masked_private_policy_hint(org, candidate_repo))',
     ),
     BypassMutation(
         name="agent-plugin-duplicate-exemption",

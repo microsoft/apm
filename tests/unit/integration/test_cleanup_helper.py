@@ -5,11 +5,13 @@ local-package stale-file deletion. These tests pin its invariants:
 
 * path validation rejects unmanaged prefixes
 * directory entries are refused (defeats poisoned-lockfile rmtree)
-* recorded-hash mismatch skips deletion (treats as user-edited)
-* a claim without a recorded hash is kept (#3663)
+* bytes differing from the deployment receipt skip deletion (user-edited)
+* a claim without deployment evidence is kept (#3663, #3701), even when
+  the lockfile records a matching hash
 * unlink failures are retained for retry on next install
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,7 @@ from apm_cli.integration.cleanup import (
 )
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 
 @pytest.fixture
@@ -57,6 +60,7 @@ def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
         recorded_hashes=_recorded(project_root, ".github/prompts/old.prompt.md"),
     )
     assert result.deleted == [".github/prompts/old.prompt.md"]
@@ -73,6 +77,7 @@ def test_path_traversal_rejected(project_root, diagnostics, logger):
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
     )
     assert result.deleted == []
     assert result.skipped_unmanaged == ["../escape.md"]
@@ -88,6 +93,7 @@ def test_unmanaged_prefix_rejected(project_root, diagnostics, logger):
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
     )
     assert result.deleted == []
     assert rel in result.skipped_unmanaged
@@ -114,6 +120,7 @@ def test_directory_entry_refused(project_root, diagnostics, logger):
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
     )
     assert result.deleted == []
     assert ".github/instructions" in result.skipped_unmanaged
@@ -131,6 +138,7 @@ def test_missing_file_treated_as_already_clean(project_root, diagnostics, logger
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
     )
     assert result.deleted == []
     assert result.failed == []
@@ -139,17 +147,19 @@ def test_missing_file_treated_as_already_clean(project_root, diagnostics, logger
 
 def test_hash_mismatch_skips_user_edited_file(project_root, diagnostics, logger):
     rel = ".github/prompts/edited.prompt.md"
-    _make_managed_file(project_root, rel, "user has edited this\n")
-    # Pretend APM recorded a different hash at deploy time (i.e. user
-    # has since edited the file).
-    fake_recorded = {rel: "sha256:" + "0" * 64}
+    target = _make_managed_file(project_root, rel, "as deployed\n")
+    recorded = _recorded(project_root, rel)
+    evidence = receipted_evidence(project_root)
+    # The user edits the file after APM deployed it.
+    target.write_text("user has edited this\n", encoding="utf-8")
     result = remove_stale_deployed_files(
         [rel],
         project_root,
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
-        recorded_hashes=fake_recorded,
+        evidence=evidence,
+        recorded_hashes=recorded,
     )
     assert result.deleted == []
     assert result.skipped_user_edit == [rel]
@@ -168,6 +178,7 @@ def test_hash_match_deletes_file(project_root, diagnostics, logger):
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
         recorded_hashes=recorded,
     )
     assert result.deleted == [rel]
@@ -184,6 +195,7 @@ def test_claim_without_recorded_hash_is_kept(project_root, diagnostics, logger):
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
         recorded_hashes=None,
     )
     assert result.deleted == []
@@ -191,7 +203,25 @@ def test_claim_without_recorded_hash_is_kept(project_root, diagnostics, logger):
     assert rel in result.retained
     assert target.exists()
     msgs = [d.message for d in diagnostics._diagnostics]
-    assert any(f"Kept {rel}" in m and "no content hash" in m for m in msgs)
+    assert any(f"Kept {rel}" in m and "no local deployment receipt" in m for m in msgs)
+
+
+def test_matching_lockfile_hash_without_evidence_is_kept(project_root, diagnostics, logger):
+    """A matching lockfile hash proves content, not deployment (#3701)."""
+    rel = ".github/prompts/cloned.prompt.md"
+    target = _make_managed_file(project_root, rel)
+    result = remove_stale_deployed_files(
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
+        recorded_hashes=_recorded(project_root, rel),
+    )
+    assert result.deleted == []
+    assert result.skipped_unmanaged == [rel]
+    assert target.exists()
 
 
 def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monkeypatch):
@@ -207,6 +237,7 @@ def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monke
     rel = ".github/prompts/unreadable.prompt.md"
     target = _make_managed_file(project_root, rel, "could be edited, can't tell\n")
     recorded = {rel: "sha256:" + "1" * 64}
+    evidence = receipted_evidence(project_root)
 
     def _boom(_path):
         raise PermissionError("simulated EACCES")
@@ -220,6 +251,7 @@ def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monke
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=evidence,
         recorded_hashes=recorded,
     )
     assert result.deleted == []
@@ -234,6 +266,7 @@ def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monke
 def test_unlink_failure_is_retained_for_retry(project_root, diagnostics, logger, monkeypatch):
     rel = ".github/prompts/cant-delete.prompt.md"
     _make_managed_file(project_root, rel)
+    evidence = receipted_evidence(project_root)
 
     def _raise(*_a, **_kw):
         raise PermissionError("simulated")
@@ -245,6 +278,7 @@ def test_unlink_failure_is_retained_for_retry(project_root, diagnostics, logger,
         dep_key="pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=evidence,
         recorded_hashes=_recorded(project_root, rel),
     )
     assert result.deleted == []
@@ -266,6 +300,7 @@ def test_orphan_failure_message_does_not_promise_retry(
     """
     rel = ".github/prompts/orphan-cant-delete.prompt.md"
     _make_managed_file(project_root, rel)
+    evidence = receipted_evidence(project_root)
     monkeypatch.setattr(
         Path, "unlink", lambda *_a, **_kw: (_ for _ in ()).throw(PermissionError("nope"))
     )
@@ -275,6 +310,7 @@ def test_orphan_failure_message_does_not_promise_retry(
         dep_key="some/orphan-pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=evidence,
         recorded_hashes=_recorded(project_root, rel),
         failed_path_retained=False,
     )
@@ -292,15 +328,18 @@ def test_orphan_path_honours_hash_gate(project_root, diagnostics, logger):
     silently deleted a file the user edited after APM deployed it.
     """
     rel = ".github/prompts/edited-orphan.prompt.md"
-    target = _make_managed_file(project_root, rel, "user has edited this\n")
-    fake_recorded = {rel: "sha256:" + "0" * 64}
+    target = _make_managed_file(project_root, rel, "as deployed\n")
+    recorded = _recorded(project_root, rel)
+    evidence = receipted_evidence(project_root)
+    target.write_text("user has edited this\n", encoding="utf-8")
     result = remove_stale_deployed_files(
         [rel],
         project_root,
         dep_key="orphan-pkg",
         targets=None,
         diagnostics=diagnostics,
-        recorded_hashes=fake_recorded,
+        evidence=evidence,
+        recorded_hashes=recorded,
         failed_path_retained=False,
     )
     assert result.deleted == []
@@ -333,18 +372,13 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
 
     from apm_cli.install.phases import cleanup as cleanup_mod
 
-    src = inspect.getsource(cleanup_mod)
-    orphan_marker = "# Orphan cleanup: remove deployed files for packages that were"
-    assert orphan_marker in src, "Orphan cleanup block not found -- update marker."
-    block_start = src.index(orphan_marker)
-    block_end = src.index("# Stale-file cleanup:", block_start)
-    orphan_block = src[block_start:block_end]
-    # Strip comments so the banned-phrase check doesn't trip on the
-    # cautionary comment that explains the bug we're guarding against.
-    code_only_lines = [ln for ln in orphan_block.splitlines() if not ln.lstrip().startswith("#")]
-    code_only = "\n".join(code_only_lines)
+    # The orphan block asks the owner with the intent _run_cleanup builds.
+    owner_call = inspect.getsource(cleanup_mod._orphan_decision)
+    assert "intended=desired_owners" in owner_call
+    src = inspect.getsource(cleanup_mod._run_cleanup)
+    code_only = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
     # Must consult manifest intent.
-    assert "intended_dep_keys" in code_only, (
+    assert "frozenset(intended_dep_keys" in code_only, (
         "Orphan loop must use intended_dep_keys (manifest intent). "
         "Using package_deployed_files.keys() (integration outcome) re-introduces "
         "silent deletion of files for still-declared packages on transient errors."
@@ -423,6 +457,7 @@ def test_cowork_stale_entry_deletes_real_file(tmp_path, diagnostics):
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(cowork_root, deploy_root=project_root),
         )
 
     assert not skill_md.exists(), "File should have been deleted"
@@ -449,6 +484,7 @@ def test_cowork_stale_entry_resolver_returns_none(tmp_path, diagnostics):
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
         )
 
     assert result.deleted == []
@@ -481,6 +517,7 @@ def test_cowork_stale_entry_file_already_gone(tmp_path, diagnostics):
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
         )
 
     # Not in deleted (nothing was on disk), not in failed (no error),
@@ -523,12 +560,60 @@ def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(tmp_path, diag
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
         )
 
     assert result.deleted == []
     assert stale in result.failed
     msgs = [d.message for d in diagnostics._diagnostics]
     assert any("failed path resolution" in m for m in msgs)
+
+
+def _cowork_link(tmp_path, name: str, target: Path, *, linked_ancestor: bool = False):
+    """A cowork:// claim whose file is a link to *target*; optionally under a linked dir."""
+    cowork = tmp_path / "cowork-skills"
+    skill = cowork / "alpha"
+    if linked_ancestor:
+        real = tmp_path / "cowork-skills" / "real-alpha"
+        real.mkdir(parents=True)
+        try:
+            skill.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+    else:
+        skill.mkdir(parents=True)
+    try:
+        (skill / name).symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    return cowork, f"cowork://skills/alpha/{name}"
+
+
+@pytest.mark.parametrize("linked_ancestor", [False, True], ids=["dangling", "linked-ancestor"])
+def test_cowork_outward_final_link_stays_retained_as_a_failure(
+    tmp_path, diagnostics, monkeypatch, linked_ancestor
+):
+    """Only the ancestor-checked gate allows an outward final link (#5022); cleanup's own
+    decode keeps full containment, so the entry and its lock row are retained."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    outside = tmp_path / "outside.md"
+    if linked_ancestor:
+        outside.write_text("outside\n", encoding="utf-8")
+    cowork, stale = _cowork_link(tmp_path, "notes.md", outside, linked_ancestor=linked_ancestor)
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+
+    result = remove_stale_deployed_files(
+        [stale],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
+    )
+
+    assert stale in result.failed and result.deleted == [], result
+    assert (cowork / "alpha" / "notes.md").is_symlink()
 
 
 def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, diagnostics):
@@ -548,6 +633,7 @@ def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, 
         dep_key="acme/pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
         recorded_hashes=recorded,
         live_paths=[".github/instructions/guide.instructions.md"],
     )
@@ -586,9 +672,231 @@ def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkey
         dep_key="acme/pkg",
         targets=None,
         diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
         recorded_hashes=recorded,
         live_paths=live,
     )
 
     assert sorted(result.deleted) == sorted(stale)
     assert calls["key"] <= len(stale) + len(live)
+
+
+@pytest.mark.parametrize("user_scope", [False, True])
+def test_synced_removal_retires_receipts_in_the_evidence_scope(
+    project_root, monkeypatch, user_scope
+):
+    """User-scope syncs retire receipts in the user store, not the project one (#3701)."""
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.integration.cleanup import DeploymentEvidence, remove_synced_files
+
+    rel = ".github/prompts/old.prompt.md"
+    target = _make_managed_file(project_root, rel, "deployed\n")
+    retired: list[bool] = []
+    monkeypatch.setattr(
+        DeploymentMaterializationSession,
+        "retire_removed",
+        classmethod(lambda cls, root, deleted, *, user_scope: retired.append(user_scope)),
+    )
+    evidence = DeploymentEvidence(
+        deploy_root=project_root,
+        receipts={target.resolve().as_posix(): compute_file_hash(target)},
+        render=None,
+        user_scope=user_scope,
+        kept=(),
+    )
+
+    result = remove_synced_files(
+        {rel},
+        project_root,
+        prefixes=(".github/prompts/",),
+        dep_key="pkg",
+        targets=None,
+        evidence=evidence,
+    )
+
+    assert result.deleted == [rel]
+    assert retired == [user_scope]
+
+
+@pytest.mark.parametrize("stale", ["member", "directory"])
+def test_member_this_install_kept_is_retained_despite_evidence(
+    project_root, diagnostics, stale: str
+) -> None:
+    """#4230: a declared member the integrator left unwritten is never cleaned as stale."""
+    from apm_cli.integration.cleanup import DeploymentEvidence
+
+    member = ".agents/skills/x/references/a.md"
+    target = _make_managed_file(project_root, member, "reference a\n")
+    _make_managed_file(project_root, ".agents/skills/x/SKILL.md", "x\n")
+    receipts = {target.resolve().as_posix(): compute_file_hash(target)}
+    paths = [member] if stale == "member" else [".agents/skills/x/", member]
+
+    def evidence(kept: tuple[str, ...]) -> DeploymentEvidence:
+        return DeploymentEvidence(
+            deploy_root=project_root, receipts=receipts, render=None, kept=kept
+        )
+
+    result = remove_stale_deployed_files(
+        paths,
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence((member,)),
+    )
+    assert result.deleted == []
+    assert sorted(result.retained) == sorted(paths)
+    assert target.read_text(encoding="utf-8") == "reference a\n"
+
+    control = remove_stale_deployed_files(
+        [member],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence(()),
+    )
+    assert control.deleted == [member]
+
+
+def test_refusals_name_a_symlinked_member_of_a_claimed_directory(project_root):
+    """Cleanup keeps a directory holding a symlink, so uninstall refuses first (#4451).
+
+    A managed final symlink outside any claimed directory keeps its own
+    unlink rule and is not refused.
+    """
+    from apm_cli.integration.cleanup import SYMLINKED
+
+    skill = project_root / ".agents" / "skills" / "kit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").symlink_to(project_root / "apm.yml")
+    final = project_root / ".github" / "agents" / "linked.agent.md"
+    final.parent.mkdir(parents=True)
+    final.symlink_to(project_root / "apm.yml")
+    (project_root / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    evidence = receipted_evidence(project_root)
+
+    refused = evidence.refusals(
+        [
+            ".agents/skills/kit",
+            ".agents/skills/kit/SKILL.md",
+            ".github/agents/linked.agent.md",
+        ]
+    )
+
+    assert refused == [(".agents/skills/kit/SKILL.md", SYMLINKED)]
+    assert (skill / "SKILL.md").is_symlink() and final.is_symlink()
+
+
+@pytest.mark.parametrize(
+    ("recorded", "receipts_readable", "consentable"),
+    [
+        ("match", True, True),
+        ("conflict", True, False),
+        ("none", True, False),
+        ("match", False, False),
+    ],
+)
+def test_trust_lockfile_consent_needs_one_matching_recorded_hash(
+    tmp_path: Path, recorded: str, receipts_readable: bool, consentable: bool
+) -> None:
+    """#4295: consent fills missing evidence only from a single matching lock hash."""
+    from apm_cli.integration.cleanup import AUTHORIZED, UNPROVEN, DeploymentEvidence
+
+    rel = ".github/instructions/a.instructions.md"
+    target = _make_managed_file(tmp_path, rel)
+    hashes = {
+        "match": frozenset({compute_file_hash(target)}),
+        "conflict": frozenset({compute_file_hash(target), "sha256:" + "0" * 64}),
+        "none": frozenset(),
+    }[recorded]
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=lambda _owner: None,
+        owners={rel: ("pkg",)},
+        kept=(),
+        recorded_hashes={rel: hashes},
+        receipts_readable=receipts_readable,
+    )
+
+    assert evidence.verdict(rel, target) == UNPROVEN
+    evidence.consent_to_lockfile_hashes()
+
+    assert (evidence.verdict(rel, target) == AUTHORIZED) is consentable
+    target.write_text("edited after the decision\n", encoding="utf-8")
+    assert evidence.verdict(rel, target) == UNPROVEN
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_safety_rejection_of_a_consent_kept_file_is_always_a_failure(
+    tmp_path: Path, diagnostics
+) -> None:
+    """#4815: consent kept it earlier, but a current path-safety rejection still fails."""
+    from apm_cli.integration.cleanup import DeploymentEvidence, consent_outcome
+
+    rel = ".github/hooks/kept.json"
+    target = _make_managed_file(tmp_path, rel)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=lambda _owner: None,
+        owners={rel: ("pkg",)},
+        kept=(),
+        recorded_hashes={rel: frozenset({"sha256:" + "0" * 64})},
+    )
+    evidence.consent_to_lockfile_hashes()
+    assert evidence.refusals([rel]) and evidence.kept_under_consent() == frozenset({rel})
+    outside = tmp_path / "outside-hooks"
+    target.parent.rename(outside)
+    target.parent.symlink_to(outside, target_is_directory=True)
+
+    result = remove_stale_deployed_files(
+        [rel], tmp_path, dep_key="pkg", targets=None, diagnostics=diagnostics, evidence=evidence
+    )
+    failures, unsafe = consent_outcome(result, evidence)
+
+    assert rel in result.rejected and rel in failures and rel in unsafe
+    assert (outside / "kept.json").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+@pytest.mark.parametrize("consent", [True, False], ids=["trust-lockfile", "plain"])
+def test_hook_sync_unlinks_agrees_with_the_hook_sync_under_consent(
+    tmp_path: Path, consent: bool
+) -> None:
+    """#5139: the read-only hook link decision keeps what the consented hook sync keeps."""
+    from apm_cli.integration.cleanup import (
+        DeploymentEvidence,
+        hook_sync_unlinks,
+        managed_hook_prefixes,
+        remove_synced_files,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    rel = ".github/hooks/pkg-hooks.json"
+    real = _make_managed_file(tmp_path, "elsewhere/hooks.json")
+    link = tmp_path / rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path, receipts={}, render=lambda _owner: None, kept=()
+    )
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+
+    predicted = hook_sync_unlinks(rel, tmp_path, recorded_hash=None, lockfile_consent=consent)
+    result = remove_synced_files(
+        {rel},
+        tmp_path,
+        prefixes=managed_hook_prefixes(),
+        dep_key="<uninstall hooks>",
+        targets=list(KNOWN_TARGETS.values()),
+        evidence=evidence,
+        recorded_hashes={},
+        allow_final_symlink=True,
+    )
+
+    assert predicted is (rel in result.deleted)
+    assert predicted is not consent
+    assert link.is_symlink() is consent

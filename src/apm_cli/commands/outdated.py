@@ -6,13 +6,16 @@ For marketplace-sourced deps, checks available versions in the marketplace.
 """
 
 import logging
-import os
 import re
 import sys
 from collections.abc import Iterable
 from dataclasses import replace
 
 import click
+
+from apm_cli.core.remediation import (
+    OUTSIDE_CONSTRAINT_RELEASE,
+)
 
 from ..deps.lockfile import LockedDependency
 from ..deps.outdated_row import OutdatedRow
@@ -147,6 +150,10 @@ def _find_remote_tip(ref_name, remote_refs):
     return None
 
 
+def _short_ref(ref: str) -> str:
+    return ref[:12] if len(ref) > 12 else ref
+
+
 def _check_marketplace_ref(dep, verbose):
     """Check a marketplace-sourced dep against its marketplace entry.
 
@@ -160,13 +167,32 @@ def _check_marketplace_ref(dep, verbose):
         return None
 
     try:
+        from ..marketplace.catalog_origin import require_locked_row_origin
         from ..marketplace.client import fetch_or_cache
-        from ..marketplace.errors import MarketplaceError
+        from ..marketplace.errors import (
+            MarketplaceAuthError,
+            MarketplaceError,
+            MarketplaceOriginConflictError,
+        )
         from ..marketplace.registry import get_marketplace_by_name
     except ImportError:
         return None
 
     source_label = f"marketplace: {dep.discovered_via}"
+    # #3959: never compare against a catalog the alias was rebound to.
+    try:
+        require_locked_row_origin(dep)
+    except MarketplaceOriginConflictError as conflict:
+        return OutdatedRow(
+            package=f"{dep.marketplace_plugin_name}@{dep.discovered_via}",
+            current=_short_ref(dep.resolved_ref or dep.resolved_commit or "(none)"),
+            latest="-",
+            status="origin-conflict",
+            source=source_label,
+            error=str(conflict),
+        )
+    except MarketplaceError:
+        pass  # Unregistered alias: handled below with the git fallback.
 
     try:
         source_obj = get_marketplace_by_name(dep.discovered_via)
@@ -180,6 +206,16 @@ def _check_marketplace_ref(dep, verbose):
 
     try:
         manifest = fetch_or_cache(source_obj)
+    except MarketplaceAuthError as denied:
+        # Denied catalog access is never replaced by a Git-derived answer.
+        return OutdatedRow(
+            package=f"{dep.marketplace_plugin_name}@{dep.discovered_via}",
+            current=_short_ref(dep.resolved_ref or dep.resolved_commit or "(none)"),
+            latest="-",
+            status="access-denied",
+            source=source_label,
+            error=str(denied),
+        )
     except MarketplaceError:
         logger.warning(
             "Failed to fetch marketplace '%s'; falling back to git check for '%s'",
@@ -490,20 +526,13 @@ def outdated(global_, verbose, parallel_checks):
     # which is exactly the duplicate-resolution workload the L0 cache +
     # coalesce lock are designed to collapse.
     try:
-        from ..cache.git_cache import GitCache
-        from ..cache.paths import get_cache_root
+        from ..cache.git_cache import attach_persistent_git_cache
         from ..deps.tiered_ref_resolver import (
             RefFreshnessPolicy,
             build_tiered_ref_resolver,
         )
 
-        _git_cache = None
-        if not os.environ.get("APM_NO_CACHE"):
-            try:
-                _git_cache = GitCache(get_cache_root(), refresh=False)
-                downloader.persistent_git_cache = _git_cache
-            except (OSError, ValueError):
-                pass
+        _git_cache = attach_persistent_git_cache(downloader)
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,
@@ -550,10 +579,23 @@ def outdated(global_, verbose, parallel_checks):
 
     downloader = OutdatedRefCache(downloader)
 
-    # Check deps with progress feedback and optional parallelism
-    rows = _check_deps_with_progress(
-        checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+    from ..marketplace.project_marketplaces import (
+        bind_project_marketplaces,
+        read_project_marketplaces,
     )
+
+    # Marketplace rows compare against the root ``marketplaces:`` map (#2903).
+    try:
+        declared_marketplaces = read_project_marketplaces(project_root)
+    except ValueError as exc:
+        logger.error(f"Failed to parse apm.yml: {exc}")
+        sys.exit(1)
+
+    # Check deps with progress feedback and optional parallelism
+    with bind_project_marketplaces(declared_marketplaces, user_scope=global_):
+        rows = _check_deps_with_progress(
+            checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+        )
 
     if not rows:
         logger.success("No remote dependencies to check")
@@ -561,7 +603,7 @@ def outdated(global_, verbose, parallel_checks):
 
     # Check if everything is up-to-date
     has_outdated = any(row.status == "outdated" for row in rows)
-    has_unknown = any(row.status == "unknown" for row in rows)
+    has_unknown = any(row.status in {"unknown", "origin-conflict", "access-denied"} for row in rows)
     has_outside_constraint = any(row.outside_constraint for row in rows)
 
     has_replacements = any(dep.replacement is not None for dep in checkable)
@@ -582,8 +624,7 @@ def outdated(global_, verbose, parallel_checks):
     ]
     # Render the table
     try:
-        from rich.box import ASCII
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         from ._helpers import _get_console
 
@@ -591,26 +632,31 @@ def outdated(global_, verbose, parallel_checks):
         if console is None:
             raise ImportError("Rich console not available")
 
-        table = Table(
+        table = new_table(
             title="Dependency Status",
             show_header=True,
             header_style="bold cyan",
-            box=ASCII,
         )
-        table.add_column(
-            "Package",
-            style="white",
-            min_width=20,
-            overflow="fold" if has_replacements else "ellipsis",
-        )
-        table.add_column("Current", style="white", min_width=1 if has_replacements else 10)
+        # Minimum widths that overflow the terminal make Rich crop whole rows
+        # (the Source column lost "marketplace: <name>" at 80 columns), so
+        # they apply only when they fit; every column folds instead (#3994).
+        version_min = 1 if has_replacements else 10
+        mins = [20, version_min, *([version_min] if show_wanted else []), version_min]
+        mins += [14 if has_replacements else 12, 20]
+        fits = sum(mins) + 3 * len(mins) + 1 <= console.width
+        widths = iter(mins if fits else [1] * len(mins))
+        # Fold, never clip: the name is what users copy into apm update.
+        table.add_column("Package", style="white", min_width=next(widths), overflow="fold")
+        table.add_column("Current", style="white", min_width=next(widths), overflow="fold")
         if show_wanted:
-            table.add_column("Wanted", style="white", min_width=1 if has_replacements else 10)
-        table.add_column("Latest", style="white", min_width=1 if has_replacements else 10)
-        table.add_column("Status", min_width=14 if has_replacements else 12)
-        table.add_column("Source", style="dim", min_width=20, overflow="fold")
+            table.add_column("Wanted", style="white", min_width=next(widths), overflow="fold")
+        table.add_column("Latest", style="white", min_width=next(widths), overflow="fold")
+        table.add_column("Status", min_width=next(widths), overflow="fold")
+        table.add_column("Source", style="dim", min_width=next(widths), overflow="fold")
 
         status_styles = {
+            "origin-conflict": "red",
+            "access-denied": "red",
             "up-to-date": "green",
             "outdated": "yellow",
             "unknown": "dim",
@@ -663,23 +709,27 @@ def outdated(global_, verbose, parallel_checks):
     elif has_unknown:
         logger.progress("Some dependencies could not be checked")
     if has_unknown:
-        from ..deps.registry_proxy import is_enforce_only
+        from ..deps.egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
+            # State the enterprise policy only; never advise lifting it (RA-014).
             logger.info(
-                "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
-                "newer versions because the registry proxy exposes no version listing. "
-                "Exact pins still install through the proxy; unset PROXY_REGISTRY_ONLY "
-                "to check against the source host."
+                "Source-host checks are disabled because PROXY_REGISTRY_ONLY is set "
+                "(enterprise proxy policy)."
             )
     if any(row.status == "not-comparable" for row in rows):
         logger.progress("Local replacement sources are not remotely comparable")
     if has_outside_constraint:
         logger.progress(
             "Registry Latest is published; Wanted respects the manifest constraint. "
-            "'apm update' stays within that constraint. Select a newer version explicitly "
-            "in apm.yml, then run 'apm install' to take an outside-constraint release."
+            "'apm update' stays within that constraint. "
+            f"{OUTSIDE_CONSTRAINT_RELEASE.sentence()}"
         )
+    conflicts = [row for row in rows if row.status in {"origin-conflict", "access-denied"}]
+    for row in conflicts:
+        logger.error(row.error or f"{row.package}: marketplace origin changed")
+    if conflicts:
+        sys.exit(1)
 
 
 def _check_deps_with_progress(
@@ -690,7 +740,6 @@ def _check_deps_with_progress(
     total = len(checkable)
 
     try:
-        from rich.console import Console
         from rich.progress import (
             BarColumn,
             Progress,
@@ -698,6 +747,8 @@ def _check_deps_with_progress(
             TaskProgressColumn,
             TextColumn,
         )
+
+        from apm_cli.utils.console import new_console
 
         # Own the Console instead of borrowing Rich's process-global singleton:
         # a caller (or a leaked test double) that poisons ``rich._console`` must
@@ -708,7 +759,7 @@ def _check_deps_with_progress(
             BarColumn(),
             TaskProgressColumn(),
             transient=True,
-            console=Console(),
+            console=new_console(),
         ) as progress:
             if parallel_checks > 0 and total > 1:
                 rows = _check_parallel(

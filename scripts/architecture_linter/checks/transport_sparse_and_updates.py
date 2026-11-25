@@ -74,9 +74,10 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             (
                 ("sub", "materialize_tracked_symlinks(", 1, "eq"),
                 # Defined once and listed once in the pins every shard
-                # persists and every cache hit requires (#3270).
+                # persists and every cache hit requires (#3270); the in-process
+                # fetch writes the same pins into the shards it lands.
                 ("sub", "_LINK_MATERIALIZATION_PIN", 2, "eq"),
-                ("sub", "_checkout_materialization_pins()", 3, "eq"),
+                ("sub", "_checkout_materialization_pins()", 4, "eq"),
             ),
             "git_cache checkouts must materialize links through the canonical owner",
         )
@@ -99,9 +100,19 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             _GH_DOWNLOADER,
             (
                 ("sub", "materialize_tracked_symlinks(", 3, "eq"),
-                ("sub", "validate_materialized_symlinks(", 2, "eq"),
+                ("sub", "validate_cached_links(", 2, "eq"),
             ),
             "github_downloader must materialize and validate links through the owner",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_SPARSE,
+            "src/apm_cli/cache/cached_repo.py",
+            (("sub", "validate_materialized_symlinks(", 1, "eq"),),
+            "Cached-checkout link validation must delegate to the owner",
         )
     )
     findings.extend(

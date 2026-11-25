@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
+import os
+import sys
 import tempfile
+import threading
 import time
 import unittest
 from dataclasses import fields, is_dataclass
@@ -27,6 +29,7 @@ import pytest
 
 from apm_cli.install.errors import PolicyViolationError
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.policy._cache_verify import MAX_CACHE_FILE_BYTES, MAX_FRESH_TTL
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
@@ -37,9 +40,7 @@ from apm_cli.policy.discovery import (
     _fetch_from_repo,
     _fetch_from_url,  # noqa: F401
     _get_cache_dir,
-    _is_policy_empty,
     _policy_fingerprint,
-    _policy_to_dict,
     _read_cache,
     _read_cache_entry,
     _serialize_policy,
@@ -56,21 +57,19 @@ from apm_cli.policy.schema import (
     BinDeployPolicy,
     DependencyPolicy,
     IntegrityPolicy,
-    McpPolicy,
+    MarketplacePolicy,
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
+from tests.utils.simulated_ado_chain import StaticPolicyResolver
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
 POLICY_FIXTURES = Path(__file__).parents[2] / "fixtures" / "policy_url_chain"
-
-
-def _make_policy(**kwargs) -> ApmPolicy:
-    return ApmPolicy(**kwargs)
 
 
 def _setup_cache(
@@ -188,7 +187,7 @@ class TestURLChainCache:
         }
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: responses[url],
         ) as transport:
             cold = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
@@ -225,7 +224,7 @@ class TestURLChainCache:
         }
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: responses[url],
         ) as transport:
             first = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
@@ -411,6 +410,26 @@ class TestBackdatedMetaOutcomes(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual(result.outcome, "empty")
 
+    def test_marketplace_allow_only_policy_survives_cache_round_trip(self):
+        """#2903: a policy whose only rule is marketplace.allow is cached, not dropped."""
+        for allow in (("github.com/contoso/*",), ()):
+            with self.subTest(allow=allow):
+                policy = ApmPolicy(marketplace=MarketplacePolicy(allow=allow))
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    _write_cache("mkt/.github", policy, root)
+                    cache_dir = _get_cache_dir(root)
+                    cached = "".join(
+                        path.read_text(encoding="utf-8")
+                        for path in cache_dir.rglob("*")
+                        if path.is_file()
+                    )
+                    result = _read_cache("mkt/.github", root)
+                self.assertIn("marketplace", cached)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.outcome, "found")
+                self.assertEqual(result.policy.marketplace.allow, allow)
+
     def test_no_cache_fallback_outcome(self):
         """No cache + fetch error -> cache_miss_fetch_fail."""
         result = _stale_fallback_or_error(
@@ -529,166 +548,6 @@ class TestGarbageResponse(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestIsPolicyEmpty(unittest.TestCase):
-    """_is_policy_empty correctly identifies empty/non-empty policies."""
-
-    def test_default_policy_is_empty(self):
-        self.assertTrue(_is_policy_empty(ApmPolicy()))
-
-    def test_named_default_is_empty(self):
-        """A policy with only name/version but no rules is still empty."""
-        self.assertTrue(_is_policy_empty(ApmPolicy(name="my-org", version="1.0")))
-
-    def test_deny_list_not_empty(self):
-        p = ApmPolicy(dependencies=DependencyPolicy(deny=("evil/pkg",)))
-        self.assertFalse(_is_policy_empty(p))
-
-    def test_allow_list_not_empty(self):
-        p = ApmPolicy(dependencies=DependencyPolicy(allow=("good/*",)))
-        self.assertFalse(_is_policy_empty(p))
-
-    def test_require_list_not_empty(self):
-        p = ApmPolicy(dependencies=DependencyPolicy(require=("needed/lib",)))
-        self.assertFalse(_is_policy_empty(p))
-
-    def test_mcp_deny_not_empty(self):
-        p = ApmPolicy(mcp=McpPolicy(deny=("bad-mcp",)))
-        self.assertFalse(_is_policy_empty(p))
-
-    def test_unmanaged_files_warn_not_empty(self):
-        p = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="warn"))
-        self.assertFalse(_is_policy_empty(p))
-
-    def test_enforcement_block_still_empty_if_no_rules(self):
-        """enforcement='block' alone doesn't make a policy non-empty."""
-        p = ApmPolicy(enforcement="block")
-        self.assertTrue(_is_policy_empty(p))
-
-
-ACTIONABLE_POLICY_CASES = {
-    ("fetch_failure",): "fetch_failure: block\n",
-    ("dependencies", "allow"): "dependencies:\n  allow: [acme/*]\n",
-    ("dependencies", "deny"): "dependencies:\n  deny: [evil/*]\n",
-    ("dependencies", "require"): "dependencies:\n  require: [corp/base]\n",
-    (
-        "dependencies",
-        "require_resolution",
-    ): "dependencies:\n  require_resolution: block\n",
-    ("dependencies", "max_depth"): "dependencies:\n  max_depth: 1\n",
-    (
-        "dependencies",
-        "require_pinned_constraint",
-    ): "dependencies:\n  require_pinned_constraint: true\n",
-    ("mcp", "allow"): "mcp:\n  allow: [corp-mcp]\n",
-    ("mcp", "deny"): "mcp:\n  deny: [bad-mcp]\n",
-    ("mcp", "transport", "allow"): "mcp:\n  transport:\n    allow: [stdio]\n",
-    ("mcp", "self_defined"): "mcp:\n  self_defined: deny\n",
-    ("mcp", "trust_transitive"): "mcp:\n  trust_transitive: true\n",
-    (
-        "compilation",
-        "target",
-        "allow",
-    ): "compilation:\n  target:\n    allow: [vscode]\n",
-    (
-        "compilation",
-        "target",
-        "enforce",
-    ): "compilation:\n  target:\n    enforce: vscode\n",
-    (
-        "compilation",
-        "strategy",
-        "enforce",
-    ): "compilation:\n  strategy:\n    enforce: distributed\n",
-    (
-        "compilation",
-        "source_attribution",
-    ): "compilation:\n  source_attribution: true\n",
-    ("manifest", "required_fields"): "manifest:\n  required_fields: [version]\n",
-    ("manifest", "scripts"): "manifest:\n  scripts: deny\n",
-    (
-        "manifest",
-        "content_types",
-    ): "manifest:\n  content_types:\n    allow: [skill]\n",
-    (
-        "manifest",
-        "require_explicit_includes",
-    ): "manifest:\n  require_explicit_includes: true\n",
-    ("unmanaged_files", "action"): "unmanaged_files:\n  action: deny\n",
-    (
-        "unmanaged_files",
-        "directories",
-    ): "unmanaged_files:\n  directories: [.github]\n",
-    (
-        "unmanaged_files",
-        "exclude",
-    ): "unmanaged_files:\n  exclude: [.github/generated/**]\n",
-    ("registry_source", "require"): "registry_source:\n  require: [corp]\n",
-    (
-        "registry_source",
-        "allow_non_registry",
-    ): "registry_source:\n  allow_non_registry: false\n",
-    (
-        "security",
-        "audit",
-        "on_install",
-    ): "security:\n  audit:\n    on_install: block\n",
-    (
-        "security",
-        "audit",
-        "external",
-    ): "security:\n  audit:\n    external: [skillspector]\n",
-    (
-        "security",
-        "audit",
-        "scanners",
-    ): "security:\n  audit:\n    scanners:\n      skillspector:\n        allow_args: false\n",
-    (
-        "security",
-        "audit",
-        "fail_on_drift",
-    ): "security:\n  audit:\n    fail_on_drift: true\n",
-    (
-        "security",
-        "integrity",
-        "require_hashes",
-    ): "security:\n  integrity:\n    require_hashes: true\n",
-    ("bin_deploy", "deny_all"): "bin_deploy:\n  deny_all: true\n",
-    ("bin_deploy", "deny"): "bin_deploy:\n  deny: [legacy/tool]\n",
-    ("executables", "deny_all"): "executables:\n  deny_all: true\n",
-    ("executables", "deny"): "executables:\n  deny: [blocked/tool]\n",
-    ("executables", "require"): "executables:\n  require: [required/tool]\n",
-    ("executables", "recommend"): "executables:\n  recommend: [approved/tool]\n",
-    ("executables", "enforce"): "executables:\n  enforce: [mandated/tool]\n",
-}
-
-NON_ACTIONABLE_POLICY_LEAVES = {
-    ("name",),
-    ("version",),
-    ("extends",),
-    ("enforcement",),
-    ("cache", "ttl"),
-}
-
-
-def test_policy_empty_cases_cover_every_actionable_dataclass_leaf() -> None:
-    declared = _dataclass_leaf_paths(ApmPolicy())
-    assert set(ACTIONABLE_POLICY_CASES) == declared - NON_ACTIONABLE_POLICY_LEAVES
-
-
-@pytest.mark.parametrize(
-    ("field_path", "policy_yaml"),
-    [
-        pytest.param(field_path, policy_yaml, id=".".join(field_path))
-        for field_path, policy_yaml in ACTIONABLE_POLICY_CASES.items()
-    ],
-)
-def test_every_actionable_policy_leaf_is_not_empty(
-    field_path: tuple[str, ...], policy_yaml: str
-) -> None:
-    policy, _warnings = load_policy("name: actionable-leaf\n" + policy_yaml)
-    assert not _is_policy_empty(policy)
-
-
 # ---------------------------------------------------------------------------
 # _policy_to_dict round-trip
 # ---------------------------------------------------------------------------
@@ -735,6 +594,8 @@ unmanaged_files:
 registry_source:
   require: [corp-main]
   allow_non_registry: false
+marketplace:
+  allow: [github.com/contoso/*]
 security:
   audit:
     on_install: block
@@ -767,60 +628,6 @@ def _assert_policy_fields_equal(expected: object, actual: object, path: str = "p
             _assert_policy_fields_equal(expected_value, actual_value, field_path)
         else:
             assert actual_value == expected_value, f"{field_path} changed across cache round trip"
-
-
-def _dataclass_leaf_paths(value: object, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
-    paths: set[tuple[str, ...]] = set()
-    for field_info in fields(value):
-        field_path = (*prefix, field_info.name)
-        child = getattr(value, field_info.name)
-        if is_dataclass(child):
-            paths.update(_dataclass_leaf_paths(child, field_path))
-        else:
-            paths.add(field_path)
-    return paths
-
-
-def _mapping_leaf_paths(value: object, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
-    if not isinstance(value, dict) or not value:
-        return {prefix}
-    paths: set[tuple[str, ...]] = set()
-    for key, child in value.items():
-        child_path = (*prefix, key)
-        if isinstance(child, dict) and child:
-            paths.update(_mapping_leaf_paths(child, child_path))
-        else:
-            paths.add(child_path)
-    return paths
-
-
-def test_policy_serializer_covers_every_dataclass_leaf() -> None:
-    policy = ApmPolicy(
-        bin_deploy=BinDeployPolicy(
-            deny_all=True,
-            deny=("legacy/tool",),
-        )
-    )
-    declared = _dataclass_leaf_paths(policy)
-    serialized = _mapping_leaf_paths(_policy_to_dict(policy))
-    assert serialized == declared, (
-        f"cached policy shape differs from ApmPolicy: "
-        f"missing={sorted(declared - serialized)}, "
-        f"extra={sorted(serialized - declared)}"
-    )
-
-
-@pytest.mark.parametrize(
-    ("bin_deploy", "expected"),
-    [
-        (BinDeployPolicy(deny_all=True), {"deny_all": True, "deny": []}),
-        (BinDeployPolicy(deny=("legacy/tool",)), {"deny_all": False, "deny": ["legacy/tool"]}),
-    ],
-)
-def test_policy_serializer_preserves_sparse_bin_deploy_shapes(
-    bin_deploy: BinDeployPolicy, expected: dict[str, object]
-) -> None:
-    assert _policy_to_dict(ApmPolicy(bin_deploy=bin_deploy))["bin_deploy"] == expected
 
 
 class TestPolicyRoundTrip(unittest.TestCase):
@@ -1110,8 +917,11 @@ dependencies:
         return response
 
     with (
-        patch("apm_cli.policy.discovery._get_token_for_host", return_value=None),
-        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+        patch(
+            "apm_cli.policy.discovery._policy_auth_resolver",
+            return_value=StaticPolicyResolver(None),
+        ),
+        patch("apm_cli.policy.discovery.policy_get", side_effect=get) as transport,
     ):
         cold = discover_policy_with_chain(
             tmp_path,
@@ -1139,92 +949,6 @@ dependencies:
     assert cache_entry.chain_refs == [
         "ghes.contoso.com/platform/.github",
         "ghes.contoso.com/team/.github",
-    ]
-
-
-def test_ghes_org_sentinel_uses_project_remote_host_and_warm_cache(
-    tmp_path: Path,
-) -> None:
-    leaf_ref = "ghes.contoso.com/team/policy"
-    leaf_yaml = """
-name: team-policy
-extends: org
-dependencies:
-  deny: [team/blocked]
-"""
-    parent_yaml = """
-name: platform-policy
-enforcement: block
-dependencies:
-  require_pinned_constraint: true
-"""
-    subprocess.run(
-        ["git", "init", "--quiet"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        [
-            "git",
-            "remote",
-            "add",
-            "origin",
-            "https://ghes.contoso.com/platform/application.git",
-        ],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    observed_urls: list[str] = []
-    expected_paths = [
-        "/api/v3/repos/team/policy/contents/apm-policy.yml",
-        "/api/v3/repos/platform/.github-private/contents/apm-policy.yml",
-        "/api/v3/repos/platform/.github/contents/apm-policy.yml",
-    ]
-
-    def get(url: str, **_kwargs) -> MagicMock:
-        parsed = urlparse(url)
-        assert parsed.hostname == "ghes.contoso.com"
-        assert parsed.path == expected_paths[len(observed_urls)]
-        observed_urls.append(url)
-        response = MagicMock()
-        response.headers = {}
-        if parsed.path == expected_paths[1]:
-            response.status_code = 404
-        else:
-            response.status_code = 200
-            response.json.return_value = {
-                "content": leaf_yaml if parsed.path == expected_paths[0] else parent_yaml
-            }
-        return response
-
-    with (
-        patch("apm_cli.policy.discovery._get_token_for_host", return_value=None),
-        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
-    ):
-        cold = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
-        assert cold.policy is not None
-        assert cold.policy.enforcement == "block"
-        assert cold.policy.dependencies.deny == ("team/blocked",)
-        assert cold.policy.dependencies.require_pinned_constraint is True
-        assert transport.call_count == 3
-
-        transport.side_effect = AssertionError("network fetch attempted on warm cache hit")
-        warm = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
-
-    assert [(urlparse(url).hostname, urlparse(url).path) for url in observed_urls] == [
-        ("ghes.contoso.com", path) for path in expected_paths
-    ]
-    assert warm.cached is True
-    assert warm.policy == cold.policy
-    cache_entry = _read_cache_entry(leaf_ref, tmp_path)
-    assert cache_entry is not None
-    assert cache_entry.chain_refs == [
-        "ghes.contoso.com/platform/.github",
-        leaf_ref,
     ]
 
 
@@ -1410,7 +1134,7 @@ dependencies:
         assert repo_ref == farthest_ref
         return None, "503: farthest parent refresh unavailable"
 
-    with patch("apm_cli.policy.discovery.time.time", return_value=fixed_time):
+    with patch("time.time", return_value=fixed_time):
         _setup_cache(
             nearest_ref,
             tmp_path,
@@ -1460,7 +1184,7 @@ def test_farther_failure_overrides_nearest_stale_ancestor(
         assert repo_ref == farthest_ref
         return None, "503: root unavailable"
 
-    with patch("apm_cli.policy.discovery.time.time", return_value=fixed_time):
+    with patch("time.time", return_value=fixed_time):
         _setup_cache(
             nearest_ref,
             tmp_path,
@@ -1522,5 +1246,269 @@ def test_extends_only_leaf_resolves_strict_parent(tmp_path: Path) -> None:
     assert transport.call_count == 2
 
 
+def test_altered_cached_policy_document_is_ignored(tmp_path: Path) -> None:
+    """#4218: a cached document that no longer matches its record is never applied."""
+    repo_ref = "contoso/.github"
+    _write_cache(repo_ref, ApmPolicy(name="org"), tmp_path)
+    assert _read_cache_entry(repo_ref, tmp_path) is not None
+
+    document = _get_cache_dir(tmp_path) / f"{_cache_key(repo_ref)}.yml"
+    altered = document.read_text(encoding="utf-8") + "dependencies:\n  deny: [contoso/pkg-a]\n"
+    document.write_text(altered, encoding="utf-8")
+
+    assert _read_cache_entry(repo_ref, tmp_path) is None
+    assert document.read_text(encoding="utf-8") == altered
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Pinned entries are read from their fetched bytes; freshness is bounded
+# ---------------------------------------------------------------------------
+
+_LEAF = "name: org\nversion: '1.0'\ndependencies:\n  deny:\n    - acme/blocked\n"
+_REF = "contoso/.github"
+
+
+def _pin(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _pinned_entry(root: Path) -> tuple[Path, Path]:
+    policy, _warnings = load_policy(_LEAF)
+    _write_cache(_REF, policy, root, raw_bytes_hash=_pin(_LEAF), raw_content=_LEAF)
+    cache_dir = _get_cache_dir(root)
+    key = _cache_key(_REF)
+    return cache_dir / f"{key}.yml", cache_dir / f"{key}.meta.json"
+
+
+def test_a_pinned_entry_is_parsed_from_its_fetched_bytes(tmp_path: Path) -> None:
+    policy_file, meta_file = _pinned_entry(tmp_path)
+    # The stored document is replaced, with metadata recorded to match it.
+    replaced = _serialize_policy(ApmPolicy())
+    policy_file.write_text(replaced, encoding="utf-8")
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    meta["fingerprint"] = _policy_fingerprint(replaced)
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+
+    entry = _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
+
+    assert entry is not None
+    assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert policy_file.read_text(encoding="utf-8") == replaced
+
+
+@pytest.mark.parametrize("change", ["modified", "missing"])
+def test_pinned_bytes_that_do_not_hash_to_the_pin_are_fetched_again(
+    tmp_path: Path, change: str
+) -> None:
+    policy_file, _meta_file = _pinned_entry(tmp_path)
+    raw_file = policy_file.with_suffix(".raw")
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+    if change == "modified":
+        raw_file.write_text(_LEAF.replace("acme/blocked", "acme/other"), encoding="utf-8")
+    else:
+        raw_file.unlink()
+
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
+    assert policy_file.exists()
+
+
+def test_a_composed_write_drops_leaf_bytes(tmp_path: Path) -> None:
+    policy_file, _meta_file = _pinned_entry(tmp_path)
+    merged, _warnings = load_policy(_LEAF)
+    _write_cache(_REF, merged, tmp_path, chain_refs=["parent/.github", _REF])
+
+    assert not policy_file.with_suffix(".raw").exists()
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
+
+
+def test_a_pinned_entry_composed_from_a_chain_is_fetched_again(tmp_path: Path) -> None:
+    policy_file, meta_file = _pinned_entry(tmp_path)
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    meta["chain_refs"] = ["parent/.github", _REF]
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+    assert meta["raw_bytes_hash"] == _pin(_LEAF)
+    assert policy_file.with_suffix(".raw").read_text(encoding="utf-8") == _LEAF
+
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
+
+
+def test_a_cached_policy_cannot_keep_itself_fresh_past_the_cap(tmp_path: Path) -> None:
+    policy, _warnings = load_policy(_LEAF + f"cache:\n  ttl: {MAX_FRESH_TTL * 6}\n")
+    _setup_cache(_REF, tmp_path, policy, cached_at=time.time() - MAX_FRESH_TTL - 60)
+
+    entry = _read_cache_entry(_REF, tmp_path)
+
+    assert entry is not None and entry.stale
+    assert entry.policy.cache.ttl == MAX_FRESH_TTL * 6
+    assert (_get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.yml").exists()
+
+
+def test_a_pinned_leaf_never_takes_its_parents_from_the_cache(tmp_path: Path) -> None:
+    leaf_url = "https://policy.example.com/leaf.yml"
+    parent_url = "https://policy.example.com/parent.yml"
+    leaf_yaml = (POLICY_FIXTURES / "leaf.yml").read_text(encoding="utf-8")
+    parent_yaml = (POLICY_FIXTURES / "parent.yml").read_text(encoding="utf-8")
+    # A cache entry for the parent that says less than the parent does.
+    _write_cache(parent_url, ApmPolicy(name="url-parent"), tmp_path)
+    assert _read_cache_entry(parent_url, tmp_path) is not None
+    responses = {
+        leaf_url: TestURLChainCache._response(leaf_yaml),
+        parent_url: TestURLChainCache._response(parent_yaml),
+    }
+
+    with patch(
+        "apm_cli.policy.discovery.policy_get",
+        side_effect=lambda url, **_kwargs: responses[url],
+    ):
+        result = discover_policy_with_chain(
+            tmp_path, policy_override=leaf_url, expected_hash=_pin(leaf_yaml)
+        )
+
+    assert result.policy is not None
+    assert "parent/blocked-one" in result.policy.dependencies.deny
+    assert (_get_cache_dir(tmp_path) / f"{_cache_key(parent_url)}.yml").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX pipes and links")
+@pytest.mark.parametrize("kind", ["fifo", "symlink", "oversize", "truncated"])
+@pytest.mark.parametrize("target", ["raw", "meta.json"])
+def test_cache_files_that_are_not_bounded_regular_files_are_fetched_again(
+    tmp_path: Path, kind: str, target: str
+) -> None:
+    policy_file, _meta_file = _pinned_entry(tmp_path)
+    path = policy_file.with_suffix(f".{target}")
+    if kind == "oversize":
+        path.write_bytes(path.read_bytes() + b" " * (MAX_CACHE_FILE_BYTES + 1))
+    elif kind == "truncated":
+        path.write_bytes(path.read_bytes()[: path.stat().st_size // 2])
+    else:
+        saved = tmp_path / f"saved.{target}"
+        saved.write_bytes(path.read_bytes())
+        path.unlink()
+        if kind == "fifo":
+            os.mkfifo(path)
+        else:
+            path.symlink_to(saved)
+    outcome: list[object] = []
+
+    def read() -> None:
+        outcome.append(_read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)))
+
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+
+    assert not worker.is_alive(), f"the cache read blocked on a {kind} {target}"
+    assert outcome == [None]
+    assert path.exists() or path.is_symlink()
+
+
+def test_a_pinned_leaf_that_extends_another_is_fetched_again(tmp_path: Path) -> None:
+    leaf = "name: org\nversion: '1.0'\nextends: parent/.github\n"
+    policy, _warnings = load_policy(leaf)
+    _write_cache(_REF, policy, tmp_path, raw_bytes_hash=_pin(leaf), raw_content=leaf)
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw"
+    assert raw_file.read_text(encoding="utf-8") == leaf
+
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(leaf)) is None
+
+
+def test_a_gitlab_leaf_keeps_its_fetched_bytes_for_pinned_reads(tmp_path: Path) -> None:
+    from apm_cli.policy._gitlab import _cache_gitlab_leaf_policy
+
+    policy, warnings = load_policy(_LEAF)
+    _cache_gitlab_leaf_policy(_REF, policy, tmp_path, _pin(_LEAF), warnings, _LEAF)
+
+    entry = _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw"
+    assert entry is not None
+    assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+
+_GITLAB_REF = "gitlab.com/acme/apm-policy"
+
+
+def _pinned_gitlab_install(root: Path, served: str, fetched: list[str]):
+    """One pinned discovery of a flat GitLab policy project; only HTTP is replaced."""
+    from apm_cli.policy._gitlab import _fetch_from_gitlab_repo
+
+    def fake_get(url: str, headers=None, **_kwargs):
+        fetched.append(url)
+        return MagicMock(status_code=200, text=served)
+
+    resolver = MagicMock()
+    resolver.return_value.try_with_fallback.side_effect = lambda _host, op, **_kw: op(None, {})
+    with (
+        patch("apm_cli.core.auth.AuthResolver", resolver),
+        patch("apm_cli.policy._gitlab.policy_get", side_effect=fake_get),
+    ):
+        return _fetch_from_gitlab_repo(
+            org="acme",
+            repo="apm-policy",
+            host="gitlab.com",
+            project_root=root,
+            expected_hash=_pin(_LEAF),
+        )
+
+
+def test_a_second_pinned_gitlab_install_is_served_from_the_cache(tmp_path: Path) -> None:
+    fetched: list[str] = []
+    first = _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+    second = _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+
+    assert (first.outcome, first.cached) == ("found", False)
+    assert (second.outcome, second.cached) == ("found", True)
+    assert second.policy.dependencies.deny == ("acme/blocked",)
+    assert len(fetched) == 1
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_GITLAB_REF)}.raw"
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+
+@pytest.mark.parametrize("change", ["modified", "missing"])
+def test_pinned_gitlab_bytes_that_no_longer_hash_to_the_pin_are_fetched_again(
+    tmp_path: Path, change: str
+) -> None:
+    fetched: list[str] = []
+    _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_GITLAB_REF)}.raw"
+    if change == "modified":
+        raw_file.write_text(_LEAF.replace("acme/blocked", "acme/other"), encoding="utf-8")
+    else:
+        raw_file.unlink()
+
+    second = _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+
+    assert (second.outcome, second.cached) == ("found", False)
+    assert second.policy.dependencies.deny == ("acme/blocked",)
+    assert len(fetched) == 2
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+
+def test_a_pinned_namespace_ancestry_entry_is_fetched_again(tmp_path: Path) -> None:
+    ancestry_ref = "gitlab.com/acme/team/apm-policy#ancestry"
+    policy, _warnings = load_policy(_LEAF)
+    # The authentic leaf bytes and a single-entry chain, under a composed key.
+    _write_cache(ancestry_ref, policy, tmp_path, raw_bytes_hash=_pin(_LEAF), raw_content=_LEAF)
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(ancestry_ref)}.raw"
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+    assert _read_cache_entry(ancestry_ref, tmp_path, expected_hash=_pin(_LEAF)) is None
+
+
+def test_an_unpinned_entry_reads_back_with_platform_line_endings(tmp_path: Path) -> None:
+    policy, _warnings = load_policy(_LEAF)
+    _write_cache(_REF, policy, tmp_path)
+    document = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.yml"
+    lf_text = document.read_bytes().replace(b"\r\n", b"\n")  # Windows wrote CRLF already
+    document.write_bytes(lf_text.replace(b"\n", b"\r\n"))
+
+    entry = _read_cache_entry(_REF, tmp_path)
+
+    assert entry is not None
+    assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert b"\r\n" in document.read_bytes()

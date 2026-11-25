@@ -7,12 +7,21 @@ import pytest
 
 from apm_cli.runtime.llm_runtime import LLMRuntime
 
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _llm_installed():
+    """Resolve the llm helper to its bare name so argv assertions stay exact."""
+    with patch("apm_cli.runtime.llm_runtime.require_runtime_binary", side_effect=lambda name: name):
+        yield
+
 
 class TestLLMRuntime:
     """Test LLM runtime adapter."""
 
     @patch("apm_cli.runtime.llm_runtime.build_child_tls_env", return_value={"PATH": "clean"})
-    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    @patch("subprocess.run")
     def test_init_success(self, mock_run, mock_child_env):
         """Test successful initialization."""
         # Mock the --version check
@@ -31,7 +40,7 @@ class TestLLMRuntime:
         )
         mock_child_env.assert_called_once_with(os.environ)
 
-    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    @patch("subprocess.run")
     def test_init_fallback(self, mock_run):
         """Test fallback when llm CLI not available."""
         mock_run.side_effect = FileNotFoundError("llm command not found")
@@ -39,8 +48,8 @@ class TestLLMRuntime:
         with pytest.raises(RuntimeError, match="llm CLI not found"):
             LLMRuntime("invalid-model")
 
-    @patch("apm_cli.runtime.llm_runtime.subprocess.Popen")
-    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    @patch("subprocess.Popen")
+    @patch("subprocess.run")
     def test_execute_prompt_success(self, mock_run, mock_popen):
         """Test successful prompt execution."""
         # Mock version check
@@ -59,8 +68,8 @@ class TestLLMRuntime:
         assert result == "Test response"
         mock_popen.assert_called_once()
 
-    @patch("apm_cli.runtime.llm_runtime.subprocess.Popen")
-    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    @patch("subprocess.Popen")
+    @patch("subprocess.run")
     def test_execute_prompt_failure(self, mock_run, mock_popen):
         """Test prompt execution failure."""
         # Mock version check
@@ -81,7 +90,7 @@ class TestLLMRuntime:
         """Test default model getter."""
         assert LLMRuntime.get_default_model() is None
 
-    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    @patch("subprocess.run")
     def test_str_representation(self, mock_run):
         """Test string representation."""
         mock_run.return_value = Mock(returncode=0, stdout="llm 0.17.0")
@@ -91,7 +100,7 @@ class TestLLMRuntime:
         assert str(runtime) == "LLMRuntime(model=claude-3-sonnet)"
 
     @patch("apm_cli.runtime.llm_runtime.build_child_tls_env", return_value={"PATH": "clean"})
-    @patch("apm_cli.runtime.llm_runtime.subprocess.run")
+    @patch("subprocess.run")
     def test_is_available_uses_child_tls_env(self, mock_run, mock_child_env):
         mock_run.return_value = Mock(returncode=0)
 

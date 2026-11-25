@@ -10,6 +10,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.utils.cached_repo_trust import trust_cached_repos
+from tests.utils.checkout_trust import trust_checkout_contents
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -122,17 +125,17 @@ class TestLsRemoteResolve:
             result = cache._ls_remote_resolve("https://example.com/r.git", "v1.0")
         assert result == sha
 
-    def test_falls_back_to_first_sha_in_output(self, cache):
+    def test_unmatched_ref_refuses_instead_of_taking_the_first_sha(self, cache):
         sha = "a1b2c3d4e5" + "0" * 30
-        # ref doesn't match but a SHA is present -- fall back
+        # The ref names no origin branch or tag: no first-SHA fallback.
         proc = self._make_proc(stdout=f"{sha}\trefs/heads/other\n")
         with (
             patch("subprocess.run", return_value=proc),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git", create=True),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}, create=True),
+            pytest.raises(RuntimeError, match="not a branch or tag of the origin"),
         ):
-            result = cache._ls_remote_resolve("https://example.com/r.git", "nonexistent-ref")
-        assert result == sha.lower()
+            cache._ls_remote_resolve("https://example.com/r.git", "nonexistent-ref")
 
     def test_no_sha_raises_runtime_error(self, cache):
         proc = self._make_proc(stdout="")
@@ -170,6 +173,7 @@ class TestLsRemoteResolve:
 # ---------------------------------------------------------------------------
 
 
+@trust_cached_repos()
 class TestBareHasSha:
     def test_returns_true_when_commit_present(self, cache, tmp_path):
         bare_dir = tmp_path / "bare.git"
@@ -266,6 +270,7 @@ class TestFetchIntoBare:
 # ---------------------------------------------------------------------------
 
 
+@trust_cached_repos()
 class TestFetchIntoBareLoced:
     def test_fetches_by_sha(self, cache, tmp_path):
         bare_dir = tmp_path / "bare.git"
@@ -370,8 +375,8 @@ class TestCleanAll:
     def test_removes_lock_files(self, cache, tmp_path):
         lock_file = cache._db_root / "foo.lock"
         lock_file.touch()
-        # Should not raise; suppress is used
         cache.clean_all()
+        assert not lock_file.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -450,31 +455,31 @@ class TestPrune:
 
 
 # ---------------------------------------------------------------------------
-# _dir_size
+# dir_size
 # ---------------------------------------------------------------------------
 
 
 class TestDirSize:
     def test_empty_dir_is_zero(self, tmp_path):
-        from apm_cli.cache.git_cache import _dir_size
+        from apm_cli.cache.git_cache import dir_size
 
         d = tmp_path / "empty"
         d.mkdir()
-        assert _dir_size(d) == 0
+        assert dir_size(d) == 0
 
     def test_counts_file_sizes(self, tmp_path):
-        from apm_cli.cache.git_cache import _dir_size
+        from apm_cli.cache.git_cache import dir_size
 
         d = tmp_path / "data"
         d.mkdir()
         (d / "file.txt").write_bytes(b"hello")
-        result = _dir_size(d)
+        result = dir_size(d)
         assert result == 5
 
     def test_nonexistent_dir_returns_zero(self, tmp_path):
-        from apm_cli.cache.git_cache import _dir_size
+        from apm_cli.cache.git_cache import dir_size
 
-        result = _dir_size(tmp_path / "nonexistent")
+        result = dir_size(tmp_path / "nonexistent")
         assert result == 0
 
 
@@ -511,6 +516,8 @@ class TestSanitizeUrl:
 # ---------------------------------------------------------------------------
 
 
+@trust_cached_repos()
+@trust_checkout_contents()
 class TestGetCheckoutIntegrityFailure:
     def test_evicts_on_integrity_failure(self, tmp_path):
         """When checkout exists but integrity check fails, evict and refetch."""

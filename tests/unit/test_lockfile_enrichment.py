@@ -6,6 +6,8 @@ import yaml
 from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
+pytestmark = pytest.mark.unit
+
 
 def _make_lockfile() -> LockFile:
     """Create a simple lockfile with one dependency."""
@@ -56,6 +58,88 @@ class TestLockfileEnrichment:
         assert parsed["lockfile_version"] == "1"
         assert parsed["pack"]["format"] == expected_format
 
+    def test_author_install_state_never_reaches_the_packed_lock(self):
+        """Packing after ``apm install`` yields the same lock as before it (RA-031)."""
+        installed = LockFile.from_yaml(
+            """\
+lockfile_version: '1'
+apm_version: 0.37.0
+manifest_targets: [codex, copilot]
+dependencies: []
+deployments:
+- {kind: project-relative, target: codex, value: .agents/skills/s1/SKILL.md,
+   runtime: null, scope: project, owners: [.], active_owner: .,
+   content_hash: 'sha256:aa'}
+- {kind: uri, target: mcp, value: remote-srv, runtime: codex, scope: project,
+   owners: [.], active_owner: ., content_hash: 'sha256:bb'}
+mcp_servers: [remote-srv]
+mcp_configs:
+  remote-srv: {name: remote-srv, transport: http, registry: false,
+               url: 'https://example.com/mcp'}
+mcp_target_servers: {codex: [remote-srv], copilot: [remote-srv]}
+local_deployed_files: [.agents/skills/s1/SKILL.md]
+local_deployed_file_hashes: {.agents/skills/s1/SKILL.md: 'sha256:aa'}
+"""
+        )
+        files = {"skills/s1/SKILL.md": "aa", ".mcp.json": "cc"}
+
+        def pack(lock: LockFile) -> str:
+            return enrich_lockfile_for_pack(
+                lock, "plugin", "all", bundle_files=files, packed_at="2026-01-01T00:00:00Z"
+            )
+
+        packed = pack(installed)
+
+        assert packed == pack(LockFile(apm_version="0.37.0"))
+        parsed = yaml.safe_load(packed)
+        for key in ("deployments", "mcp_configs", "mcp_target_servers", "manifest_targets"):
+            assert key not in parsed
+
+    def test_packed_lock_keeps_shipped_dependency_files_beside_author_state(self):
+        """J11 round trip: stripping author state keeps every dependency's files.
+
+        The dependency files live in the deployment ledger, which to_yaml
+        projects; the bundle must still describe them, or unpack installs
+        nothing ("0 dep(s), 0 file(s)").
+        """
+        installed = LockFile.from_yaml(
+            """\
+lockfile_version: '4'
+apm_version: 0.37.0
+dependencies:
+- repo_url: lifecycle/p-skill
+  host: git.example.invalid
+  resolved_commit: '{commit}'
+  deployed_files: [.agents/skills/p-skill, .agents/skills/p-skill/SKILL.md]
+  deployed_file_hashes: {{.agents/skills/p-skill/SKILL.md: 'sha256:aa'}}
+  content_hash: 'sha256:cc'
+deployments:
+- {{kind: project-relative, target: copilot, value: .agents/skills/p-skill, runtime: null,
+   scope: project, owners: [git.example.invalid/lifecycle/p-skill],
+   active_owner: git.example.invalid/lifecycle/p-skill, content_hash: null}}
+- {{kind: project-relative, target: copilot, value: .agents/skills/p-skill/SKILL.md,
+   runtime: null, scope: project, owners: [git.example.invalid/lifecycle/p-skill],
+   active_owner: git.example.invalid/lifecycle/p-skill, content_hash: 'sha256:aa'}}
+- {{kind: project-relative, target: copilot, value: .agents/skills/review/SKILL.md,
+   runtime: null, scope: project, owners: [.], active_owner: ., content_hash: 'sha256:bb'}}
+local_deployed_files: [.agents/skills/review/SKILL.md]
+local_deployed_file_hashes: {{.agents/skills/review/SKILL.md: 'sha256:bb'}}
+""".format(commit="a" * 40)
+        )
+
+        packed = yaml.safe_load(enrich_lockfile_for_pack(installed, "apm", "copilot"))
+
+        (dep,) = packed["dependencies"]
+        assert dep["repo_url"] == "lifecycle/p-skill"
+        assert dep["deployed_files"] == [
+            ".agents/skills/p-skill",
+            ".agents/skills/p-skill/SKILL.md",
+        ]
+        assert "local_deployed_files" not in packed
+        shipped = [d for d in installed.get_all_dependencies() if d.repo_url == "lifecycle/p-skill"]
+        assert shipped[0].deployed_files == dep["deployed_files"]
+        assert installed.local_deployed_files == [".agents/skills/review/SKILL.md"]
+
     def test_does_not_mutate_original(self):
         lf = _make_lockfile()
         original_yaml = lf.to_yaml()
@@ -63,6 +147,37 @@ class TestLockfileEnrichment:
         enrich_lockfile_for_pack(lf, fmt="apm", target="all")
 
         assert lf.to_yaml() == original_yaml
+
+    @pytest.mark.parametrize(
+        ("deployed", "target", "packed"),
+        [
+            # A plugin deployed whole: the bundle carries none of its root (#5253).
+            ([], "all", []),
+            # A mixed row: its loose files pack, its native root still does not.
+            ([".claude/skills/demo/SKILL.md"], "claude", [".claude/skills/demo/SKILL.md"]),
+            # Loose files the target filter drops (commands never cross-map) pack nothing.
+            ([".github/commands/demo.md"], "claude", []),
+        ],
+    )
+    def test_a_bundle_lock_carries_no_native_plugin_record(self, deployed, target, packed):
+        from apm_cli.native_plugins.record import NativePluginRecord
+
+        record = NativePluginRecord("demo", "sha256:" + "0" * 64, "apm-p-0", "./.agents/plugins")
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/demo",
+                deployed_files=deployed,
+                native_plugin=record,
+                native_declared=["claude"],
+            )
+        )
+
+        (row,) = yaml.safe_load(enrich_lockfile_for_pack(lockfile, "apm", target))["dependencies"]
+
+        assert "native_plugin" not in row, row
+        assert "native_declared" not in row, row
+        assert row.get("deployed_files", []) == packed, row
 
     def test_filters_deployed_files_by_target(self):
         """Pack with --target copilot should exclude .claude/ files from lockfile."""

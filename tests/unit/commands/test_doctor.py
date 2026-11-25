@@ -9,6 +9,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 # Token env vars that AuthResolver inspects.  Cleared so the doctor's auth
 # check is deterministic regardless of the host environment.
 _TOKEN_ENV_VARS = ("GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN")
@@ -23,7 +25,7 @@ def _clear_token_env(monkeypatch):
 @pytest.fixture
 def mock_subprocess_success():
     """Stub git/gh subprocess calls to deterministic success."""
-    with patch("apm_cli.commands.marketplace.doctor.subprocess.run") as run:
+    with patch("subprocess.run") as run:
         run.return_value.returncode = 0
         run.return_value.stdout = "git version 2.42.0"
         run.return_value.stderr = ""
@@ -55,6 +57,8 @@ def test_common_workflows_footer_present():
     assert "Common workflows" in result.output
     assert "apm install --frozen" in result.output
     assert "apm doctor" in result.output
+    # Experimental 'apm run' is not a common workflow (#3994).
+    assert "apm run <script>" not in result.output
 
 
 def test_marketplace_doctor_not_available():

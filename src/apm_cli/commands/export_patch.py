@@ -44,6 +44,13 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING,
+    LOCKFILE_UNREADABLE,
+    PROJECT_MANIFEST_MISSING,
+)
+from apm_cli.core.scope import manifest_file
+
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
@@ -414,7 +421,7 @@ def build_patch_export(
     patches: dict[str, str] = {}
 
     dir_prefixes = _dir_prefix_table(lockfile)
-    modified = [f for f in findings if f.kind == "modified"]
+    modified = [f for f in findings if f.kind == "modified" and not f.owned_entries_only]
     by_package: dict[str, list[DriftFinding]] = {}
     for finding in modified:
         key = _resolve_package_key(finding.path, finding.package, dir_prefixes)
@@ -573,17 +580,24 @@ def _export_one(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
+def _resolve_diff_targets(
+    project_root: Path, lockfile: LockFile | None = None
+) -> list[TargetProfile]:
     """Resolve targets for the diff phase, honoring apm.yml ``target:``.
 
     Must match how the replay resolves targets (drift.py, #1924):
     auto-detection alone would skip declared targets whose root
-    directory does not exist, silently hiding their findings.
+    directory does not exist, silently hiding their findings. Skills
+    keep the layout recorded in *lockfile*, as in the replay (#3773).
     """
     from ..core.target_detection import read_manifest_target
-    from ..integration.targets import resolve_targets
+    from ..integration.skill_layout import recorded_deployed_paths, resolve_reintegration_targets
 
-    return resolve_targets(project_root, explicit_target=read_manifest_target(project_root))
+    return resolve_reintegration_targets(
+        project_root,
+        explicit_target=read_manifest_target(project_root),
+        recorded_paths=recorded_deployed_paths(lockfile),
+    )
 
 
 @click.command(
@@ -648,25 +662,26 @@ def export_patch(out_dir, dry_run, verbose):
 def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbose: bool) -> None:
     project_root = Path.cwd()
 
-    if not (project_root / APM_YML_FILENAME).exists():
-        logger.error(f"No {APM_YML_FILENAME} found. Run 'apm init' first.")
+    if not manifest_file(project_root).exists():
+        logger.error(f"No {APM_YML_FILENAME} found. {PROJECT_MANIFEST_MISSING.sentence()}")
         sys.exit(1)
 
     lockfile_path = get_lockfile_path(project_root)
     if not lockfile_path.exists():
-        logger.error("No lockfile found. Run 'apm install' first.")
+        logger.error(f"No lockfile found. {LOCKFILE_MISSING.sentence()}")
         sys.exit(1)
     try:
         lockfile = LockFile.read(lockfile_path)
     except LockfileFormatError as exc:
         logger.error(
             f"Lockfile at {lockfile_path} could not be parsed ({exc}); "
-            "fix it or re-run 'apm install'."
+            f"{LOCKFILE_UNREADABLE.bind(lockfile=lockfile_path.name).clause()}."
         )
         sys.exit(1)
     if lockfile is None:
         logger.error(
-            f"Lockfile at {lockfile_path} could not be parsed; fix it or re-run 'apm install'."
+            f"Lockfile at {lockfile_path} could not be parsed; "
+            f"{LOCKFILE_UNREADABLE.bind(lockfile=lockfile_path.name).clause()}."
         )
         sys.exit(1)
 
@@ -697,6 +712,7 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
         diff_scratch_against_project,
         run_replay,
     )
+    from ..install.errors import PolicyViolationError
 
     config = ReplayConfig(project_root=project_root, lockfile_path=lockfile_path)
     check_logger = CheckLogger(verbose=verbose)
@@ -705,11 +721,11 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
     except CacheMissError as exc:
         logger.error(f"Cannot replay the locked install: {exc}")
         sys.exit(1)
-    except (LocalResolutionError, NotImplementedError) as exc:
+    except (LocalResolutionError, NotImplementedError, PolicyViolationError) as exc:
         logger.error(f"Drift replay failed: {exc}")
         sys.exit(1)
 
-    targets = _resolve_diff_targets(project_root)
+    targets = _resolve_diff_targets(project_root, lockfile)
     findings = diff_scratch_against_project(scratch, project_root, lockfile, targets)
 
     export = build_patch_export(project_root, scratch, lockfile, findings)

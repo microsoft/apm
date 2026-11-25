@@ -8,8 +8,8 @@ Covers:
   from either the gate phase or the preflight helper (smoke).
 - #5: dry-run path falls back to ``check.name`` when ``CheckResult.details``
   is empty, so a failed check is never silently omitted.
-- #6: ``_extract_dep_ref`` honours the ``"{ref}: {reason}"`` contract
-  with a defensive fallback to ``check.name`` for malformed details.
+- #6: ``CheckResult.violation_subjects`` returns structured subjects and
+  falls back to one ``check.name`` entry for subject-less checks.
 - #7: the policy cache path is asserted to live inside ``apm_modules``;
   a symlinked ``apm_modules`` pointing outside the project is rejected.
 - #8: ``discover_policy_with_chain`` no longer accepts ``no_policy``.
@@ -28,17 +28,17 @@ from apm_cli.core.command_logger import InstallLogger
 from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import (
     PolicyFetchResult,
-    _get_cache_dir,
     discover_policy_with_chain,
 )
 from apm_cli.policy.install_preflight import (
     PolicyBlockError,
-    _extract_dep_ref,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CheckResult, CIAuditResult
+from apm_cli.policy.models import CheckResult, CIAuditResult, PolicySubject
 from apm_cli.policy.outcome_routing import route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
+
+pytestmark = pytest.mark.unit
 
 # ──────────────────────────────────────────────────────────────────────
 # #2: PolicyBlockError is an alias of PolicyViolationError
@@ -138,6 +138,20 @@ class TestOutcomeRoutingTable:
         )
         assert result is None
 
+    def test_dry_run_previews_the_fetch_failure_default_block(self):
+        logger = MagicMock()
+        fetch = PolicyFetchResult(policy=None, source="org:acme/.github", outcome="malformed")
+        result = route_discovery_outcome(
+            fetch,
+            logger=logger,
+            fetch_failure_default="block",
+            raise_blocking_errors=False,
+        )
+        assert result is None
+        (message,) = [call.args[0] for call in logger.warning.call_args_list]
+        assert message.startswith("Would be blocked by policy: ")
+        assert "policy.fetch_failure_default=block" in message
+
     def test_fetch_failure_default_block_raises(self):
         logger = InstallLogger()
         fetch = PolicyFetchResult(
@@ -148,6 +162,18 @@ class TestOutcomeRoutingTable:
         )
         with pytest.raises(PolicyViolationError, match="fetch_failure_default=block"):
             route_discovery_outcome(fetch, logger=logger, fetch_failure_default="block")
+
+    def test_fetch_failure_block_remedy_comes_from_the_catalog(self):
+        from apm_cli.core.remediation import catalog
+        from apm_cli.policy.outcome_routing import classify_discovery_outcome
+
+        fetch = PolicyFetchResult(
+            policy=None, source="org:acme/.github", outcome="cache_miss_fetch_fail"
+        )
+        route = classify_discovery_outcome(fetch, fetch_failure_default="block")
+        remedy = catalog()["policy-fetch-failure-blocked"].bind(source=" (org:acme/.github)")
+        assert route.block_reason.endswith(f". {remedy.sentence()}")
+        assert "--no-policy" not in route.block_reason
 
     def test_fetch_failure_default_warn_does_not_raise(self):
         logger = InstallLogger()
@@ -230,66 +256,29 @@ class TestDryRunEmptyDetailsFallback:
 # ──────────────────────────────────────────────────────────────────────
 
 
-class TestExtractDepRefContract:
-    def test_standard_ref_colon_reason(self):
-        # Standard policy_checks output: "{ref}: {reason}"
-        assert (
-            _extract_dep_ref("acme/server: not in allow list", "dependency-allowlist")
-            == "acme/server"
+class TestViolationSubjectsContract:
+    def test_structured_subjects_are_returned_verbatim(self):
+        subject = PolicySubject("acme/server", "not in allow list")
+        check = CheckResult(
+            name="dependency-allowlist",
+            passed=False,
+            message="1 dependency(ies) not in allow list",
+            details=["acme/server: not in allow list"],
+            subjects=(subject,),
         )
+        assert check.violation_subjects() == (subject,)
 
-    def test_empty_detail_falls_back_to_check_name(self):
-        assert _extract_dep_ref("", "dependency-denylist") == "dependency-denylist"
-
-    def test_no_colon_returns_stripped_detail(self):
-        assert _extract_dep_ref("  some weird detail  ", "rule-x") == "some weird detail"
-
-    def test_colon_only_falls_back_to_check_name(self):
-        # Pathological: ":foo" -> head is empty -> fallback
-        assert _extract_dep_ref(":foo", "rule-x") == "rule-x"
+    def test_subject_less_check_falls_back_to_check_name(self):
+        check = CheckResult(name="rule-x", passed=False, message="boom", details=["a", "b"])
+        (subject,) = check.violation_subjects()
+        assert subject.ref == "rule-x"
+        assert subject.reason == "boom: a, b"
+        assert subject.remedy is None
 
 
 # ──────────────────────────────────────────────────────────────────────
 # #7: cache path containment
 # ──────────────────────────────────────────────────────────────────────
-
-
-class TestCachePathContainment:
-    def test_normal_layout_returns_user_owned_cache_path(self, tmp_path):
-        cache_dir = _get_cache_dir(tmp_path)
-        assert cache_dir.parent.name == "policy_v1"
-        assert not cache_dir.is_relative_to(tmp_path)
-
-    def test_symlinked_apm_modules_does_not_affect_policy_cache(self, tmp_path):
-        project = tmp_path / "project"
-        evil = tmp_path / "elsewhere"
-        project.mkdir()
-        evil.mkdir()
-        symlink = project / "apm_modules"
-        try:
-            os.symlink(evil, symlink)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlink creation not supported on this platform")
-
-        cache_dir = _get_cache_dir(project)
-        assert cache_dir.parent.name == "policy_v1"
-        assert not cache_dir.is_relative_to(evil)
-
-    def test_unresolved_project_root_does_not_raise(self, tmp_path):
-        # Regression for #886: on Windows, tempfile.mkdtemp() may return
-        # an 8.3 short-name path (e.g. RUNNER~1). _get_cache_dir must
-        # resolve project_root before building the candidate path so
-        # both sides of ensure_path_within use consistent long names.
-        real = tmp_path / "real-project"
-        real.mkdir()
-        try:
-            link = tmp_path / "indirect"
-            os.symlink(real, link)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlink creation not supported on this platform")
-
-        cache_dir = _get_cache_dir(link)
-        assert cache_dir == _get_cache_dir(real)
 
 
 # ──────────────────────────────────────────────────────────────────────

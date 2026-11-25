@@ -82,7 +82,7 @@ List available scripts (no script defined and no `start`):
 ```bash
 $ apm run
 [x] No script specified and no 'start' script defined in apm.yml
-[>] Available scripts:
+[i] Available scripts:
    claude   claude -p hello-world.prompt.md
    codex    codex exec --skip-git-repo-check hello-world.prompt.md
    llm      llm < hello-world.prompt.md

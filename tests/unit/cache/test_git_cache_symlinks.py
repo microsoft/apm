@@ -216,3 +216,4 @@ def test_bare_materialization_resolves_links_over_caller_env(tmp_path: Path) -> 
     installed = _install(consumer, tmp_path)
     assert tree_bytes(installed) == EXPECTED_PKG
     assert compute_package_hash(installed) == GOLDEN_PKG_HASH
+    assert (consumer / "pkg").is_dir()

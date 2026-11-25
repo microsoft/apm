@@ -1,0 +1,15 @@
+{
+  "issue": 2950,
+  "fixed_in": "Unreleased",
+  "summary": "Hook bundle deploy keeps a package.json nested below the hook source root, so a nested ES module hook keeps its module metadata instead of running under the CommonJS sidecar written at the hook root; only the root package.json is replaced by the sidecar. An enclosing hook root that already copies a nested package.json writes no sidecar over it, so reinstall keeps its imports map.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_hook_js_sidecar_lifecycle_contract.py::test_required_claude_hook_keeps_nested_module_metadata",
+    "tests/unit/integration/test_hook_integrator_defect_regression.py::test_overlapping_hook_roots_keep_nested_module_metadata_on_reinstall"
+  ]
+}

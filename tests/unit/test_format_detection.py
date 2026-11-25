@@ -21,7 +21,6 @@ from apm_cli.models.format_detection import (
     ClaudePluginDetector,
     ClaudePluginFormatEvidence,
     DetectionReport,
-    FormatDetector,
     HookJsonDetector,
     HookJsonFormatEvidence,
     NormalizationPlanner,
@@ -30,6 +29,8 @@ from apm_cli.models.format_detection import (
     SkillMdFormatEvidence,
 )
 from apm_cli.models.validation import PackageType
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # ApmYmlDetector
@@ -258,17 +259,6 @@ class TestClaudePluginDetector:
 # ---------------------------------------------------------------------------
 # FormatDetector protocol conformance
 # ---------------------------------------------------------------------------
-
-
-class TestFormatDetectorProtocol:
-    """Verify all detectors satisfy the FormatDetector protocol."""
-
-    @pytest.mark.parametrize(
-        "detector",
-        [ApmYmlDetector(), SkillMdDetector(), HookJsonDetector(), ClaudePluginDetector()],
-    )
-    def test_conforms_to_protocol(self, detector: object) -> None:
-        assert isinstance(detector, FormatDetector)
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@
       "selectors": [
         "src/apm_cli/deps/transport_selection.py",
         "src/apm_cli/deps/git_reference_resolver.py",
+        "src/apm_cli/deps/anonymous_ref_listing.py",
         "src/apm_cli/deps/download_strategies.py",
         "src/apm_cli/install/validation.py",
         "src/apm_cli/marketplace/resolver.py",
@@ -30,6 +31,18 @@
       "guards": ["transport-platform-unix-install-ownership"]
     },
     {
+      "id": "rmtree-link-safety",
+      "decision": "Removing a tree never changes a mode through a link: a link root or failing link is removed itself",
+      "owner": "utils/file_ops.py (robust_rmtree, _on_readonly_retry)",
+      "selectors": ["src/apm_cli/utils/file_ops.py"],
+      "guards": [
+        "transport-platform-rmtree-callback-fallback-attempt",
+        "transport-platform-rmtree-callback-fallback-follow",
+        "transport-platform-rmtree-callback-fallback-nested",
+        "transport-platform-rmtree-callback-no-follow-chmod"
+      ]
+    },
+    {
       "id": "cache-cleanup-outcome",
       "decision": "Explicit cache-clean removal and residual outcome",
       "owner": "cache/cleanup.py (clean_cache_buckets)",
@@ -38,19 +51,27 @@
     },
     {
       "id": "host-credential-resolution",
-      "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds, including registry-proxy route equivalence of lock rows",
-      "owner": "core/auth.py (AuthResolver), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py and tiered_ref_resolver.py",
+      "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds, including registry-proxy route equivalence of lock rows; authenticated host access: escalation chain entry point and auth-outcome classification; helper credential outcome reporting (git credential approve after acceptance, reject after a verified rejection)",
+      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback, AuthResolver.github_rest_headers, AuthResolver.bearer_headers, AuthResolver.gitlab_rest_headers), core/auth_outcome.py (classify_auth_outcome), install/repository_access.py (inaccessible and not-found install diagnostics), core/auth_chain.py (run_ado_chain, report_helper_outcome), core/token_manager.py (GitHubTokenManager.report_git_helper_credential), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, deps/outdated_ref_cache.py (ls-remote cache key), and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
       "selectors": [
         "src/apm_cli/core/auth.py",
+        "src/apm_cli/core/auth_chain.py",
+        "src/apm_cli/core/auth_outcome.py",
         "src/apm_cli/core/host_providers.py",
+        "src/apm_cli/core/token_manager.py",
         "src/apm_cli/deps/artifactory_orchestrator.py",
-        "src/apm_cli/drift.py"
+        "src/apm_cli/drift.py",
+        "src/apm_cli/install/repository_access.py"
       ],
       "guards": [
         "transport-platform-ado-validation-bearer-fallback",
         "transport-platform-ado-validation-caller-config",
         "transport-platform-ado-validation-clone-bearer-fallback",
         "transport-platform-ado-validation-helper-suppression",
+        "transport-platform-auth-outcome-owner",
+        "transport-platform-authenticated-egress",
+        "transport-platform-credential-report-owner",
+        "transport-platform-github-credential-class",
         "transport-platform-host-credential-resolution"
       ]
     },
@@ -63,9 +84,9 @@
     },
     {
       "id": "url-path-containment-decoding",
-      "decision": "Symlink-component containment and strict percent-encoded URL-path decoding",
-      "owner": "utils/path_security.py (has_symlink_component, decode_url_path_segments)",
-      "selectors": ["src/apm_cli/utils/path_security.py"],
+      "decision": "Symlink-component containment, filesystem-aware (case-insensitive) path containment and strict percent-encoded URL-path decoding",
+      "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments); the uninstall in-use hook cwd check (install/local_bundle_hook_cwd.py, consumed by install/local_bundle_hook_trust.py) decides containment through ensure_path_within (#5310)",
+      "selectors": ["src/apm_cli/utils/path_security.py", "src/apm_cli/utils/realpath.py"],
       "guards": ["transport-platform-url-path-security"]
     },
     {
@@ -76,18 +97,40 @@
       "guards": ["transport-platform-windows-stable-path"]
     },
     {
+      "id": "deploy-store",
+      "decision": "Content-addressed store of deployed file bytes: hex-digest keys, verify on every read, no symlink following, atomic owner-only writes",
+      "owner": "cache/deploy_store.py (DeployStore); install/phases/lockfile_deploy_records.py stages the lockfile phase's deployed bytes and package records through it",
+      "selectors": ["src/apm_cli/cache/deploy_store.py", "src/apm_cli/install/phases/lockfile_deploy_records.py"],
+      "guards": ["transport-platform-deploy-store-verified-reads"]
+    },
+    {
+      "id": "cached-repository-git",
+      "decision": "Git runs in persisted repositories: their config is allow-listed before any run, and every run is inert",
+      "owner": "cache/cached_repo.py (require_trusted_cached_repo / inert_git_args / cached_repo_env)",
+      "selectors": ["src/apm_cli/cache/cached_repo.py"],
+      "guards": ["transport-platform-cached-repo-git"]
+    },
+    {
+      "id": "checkout-commit-verification",
+      "decision": "Package checkouts are verified against their commit: objects re-hashed, working-tree bytes matched, nothing untracked",
+      "owner": "cache/checkout_verify.py (verify_checkout / require_verified_checkout); utils/git_object_id.py (object_format / git_object_id: git's object ids, not a security hash)",
+      "selectors": ["src/apm_cli/cache/checkout_verify.py", "src/apm_cli/utils/git_object_id.py", "src/apm_cli/cache/inprocess_fetch.py", "src/apm_cli/cache/pack_objects.py"],
+      "guards": ["transport-platform-checkout-verified"]
+    },
+    {
       "id": "git-cache-key-normalization",
       "decision": "Git repository cache-key normalization",
       "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",
-      "selectors": ["src/apm_cli/cache/url_normalize.py"],
+      "selectors": ["src/apm_cli/cache/url_normalize.py", "src/apm_cli/cache/git_cache.py"],
       "guards": ["transport-platform-git-cache-identity"]
     },
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks and line-ending pins)",
-      "selectors": ["src/apm_cli/utils/git_env.py"],
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation and its per-invocation effective-config probe memo in utils/git_config_memo.py, the strict GIT_CONFIG_PARAMETERS parser in utils/git_config_parameters.py, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
+      "selectors": ["src/apm_cli/utils/git_env.py", "src/apm_cli/utils/git_config_memo.py", "src/apm_cli/utils/git_config_parameters.py", "src/apm_cli/utils/git_config_once.py"],
       "guards": [
+        "transport-platform-external-executable-owner",
         "transport-platform-git-child-environment",
         "transport-platform-git-clone-hooks-disabled",
         "transport-platform-git-clone-templates-disabled",
@@ -163,9 +206,9 @@
     },
     {
       "id": "ls-remote-tag-commits",
-      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike",
-      "owner": "deps/git_remote_ops.py (tag_commit_shas); consumers: parse_ls_remote_output and marketplace/ref_resolver.py",
-      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py"],
+      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike; a dependency ref resolves only to an exact origin branch or tag, and a pinned commit only when an origin branch or tag reaches it",
+      "owner": "deps/git_remote_ops.py (tag_commit_shas, exact_branch_or_tag_sha, refuse_non_branch_ref); cache/commit_reachability.py (require_reachable_commit, once per origin and commit); consumers: parse_ls_remote_output, cache/git_cache.py (_ls_remote_resolve, get_checkout) and marketplace/ref_resolver.py",
+      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py", "src/apm_cli/cache/commit_reachability.py"],
       "guards": ["transport-platform-ls-remote-tag-commits"]
     },
     {
@@ -201,13 +244,59 @@
     },
     {
       "id": "credential-origin-scope",
-      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts",
-      "owner": "utils/http_credentials.py (strip_cross_origin_credential_headers, CredentialScopedSession); deps/registry_proxy.py (RegistryConfig.headers_for); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, marketplace/client.py, adapters/client/copilot.py",
+      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, and over http:// only to a loopback or RFC 1918 host or with PROXY_REGISTRY_ALLOW_HTTP=1 (#4314), credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops); HTTP sessions are CredentialScopedSession unless frozen-exempt, and no URL builder takes a credential",
+      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for, http_token_allowed); utils/net.py (is_local_network_host); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
       "selectors": [
         "src/apm_cli/utils/http_credentials.py",
         "src/apm_cli/deps/registry_proxy.py"
       ],
-      "guards": ["transport-platform-credential-origin-scope"]
+      "guards": [
+        "transport-platform-authenticated-egress-credential-headers",
+        "transport-platform-credential-origin-scope",
+        "transport-platform-http-session-construction",
+        "transport-platform-origin-bounded-redirect",
+        "transport-platform-proxy-http-token",
+        "transport-platform-url-builder-credential-free"
+      ]
+    },
+    {
+      "id": "egress-route-policy",
+      "decision": "Route of every outbound request (direct, proxy-only or refused) and registry-only (PROXY_REGISTRY_ONLY) enforcement, with the org policy fetch kept direct as the documented governance-channel exception",
+      "owner": "deps/egress_route.py (EgressSurface, EgressRoute, route_for, is_refused, is_proxy_only); deps/registry_proxy.py parses the flag (is_enforce_only) for the owner only; consumers: install/pipeline.py, install/validation.py, install/phases/integrate.py, install/helpers/ref_reuse.py, deps/git_reference_resolver.py, deps/git_semver_resolver.py, deps/artifactory_orchestrator.py, models/dependency/reference.py, commands/view.py, commands/outdated.py, registry/client.py, marketplace/client.py, policy/_policy_http.py",
+      "selectors": ["src/apm_cli/deps/egress_route.py"],
+      "guards": ["transport-platform-egress-route-policy"]
+    },
+    {
+      "id": "credential-value-rendering",
+      "decision": "How credential values render in command output: stored secrets show a fixed mask with presence reported, other config values drop URL userinfo, mask URL query values and redact labelled secrets and credential flag values, every apm config output call renders values through the owner, and free-text diagnostics, debug logs, script logs and SBOM export redact through one pattern and one URL userinfo stripper",
+      "owner": "utils/credential_rendering.py (render_credential_value, render_config_value, is_credential_key, redact_secrets, SECRET_RE, redact_url_userinfo, mask_known_values); consumers: commands/config.py (_echo_setting, _add_table_row, every output call), core/auth.py (SecretRedactionFilter), core/auth_outcome.py (sanitize_diagnostic_detail), core/script_executors.py, export/purl.py (scrub_url), install/mcp/warnings.py, deps/registry_proxy.py, deps/registry/client.py, deps/registry/auth.py, deps/registry/resolver.py, models/apm_package.py",
+      "selectors": [
+        "src/apm_cli/utils/credential_rendering.py",
+        "src/apm_cli/commands/config.py"
+      ],
+      "guards": ["transport-platform-credential-value-rendering"]
+    },
+    {
+      "id": "archive-extraction-limits",
+      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths, duplicate entries and names a filesystem would rewrite (#4235)",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member, _stream_member and portable_name_problem, which bundle/unpacker.py also applies to lockfile paths); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "selectors": [
+        "src/apm_cli/utils/archive.py",
+        "src/apm_cli/deps/registry/extractor.py"
+      ],
+      "guards": [
+        "transport-platform-archive-extraction-limits"
+      ]
+    },
+    {
+      "id": "marketplace-catalog-credentials",
+      "decision": "Hosted HTTPS marketplace catalog credentials: APM_MARKETPLACE_TOKEN_/USER_/PASS_<NAME> are read only for a name the user bound with 'apm marketplace add URL --name NAME', through a marketplace-only AuthResolver entry point with no Git, host, registry or netrc fallback; ambiguous normalized names are rejected; the credential is sent only within the bound scheme, host, effective port, directory and query on every redirect hop; 401/403 or a sign-in redirect is denied access, never a cached read; package and Git requests never carry it",
+      "owner": "core/catalog_credentials.py (credential_env_suffix, resolve_catalog_credential, CatalogCredential, catalog_scope_url); core/auth.py (AuthResolver.resolve_marketplace_catalog_credential); marketplace/catalog_binding.py (catalog_credential, require_binding_available, access_denied_error); consumers: marketplace/client.py (_fetch_url_direct, fetch_marketplace), commands/marketplace add, deps/registry/auth.py (name normalization only)",
+      "selectors": [
+        "src/apm_cli/core/catalog_credentials.py",
+        "src/apm_cli/marketplace/catalog_binding.py"
+      ],
+      "guards": ["transport-platform-marketplace-catalog-credentials"]
     }
   ]
 }

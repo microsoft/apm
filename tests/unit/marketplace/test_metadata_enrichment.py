@@ -33,6 +33,9 @@ from apm_cli.marketplace.builder import (
 )
 from apm_cli.marketplace.drift_check import check_marketplace_drift
 from apm_cli.marketplace.migration import load_marketplace_config
+from tests.utils.metadata_transport import BUILDER_HTTP_SEAM, urlopen_adapter
+
+pytestmark = pytest.mark.component
 
 
 def _write_config(project_root: Path) -> None:
@@ -42,6 +45,7 @@ def _write_config(project_root: Path) -> None:
 name: metadata-outcome
 description: Metadata outcome regression fixture
 version: 1.0.0
+license: MIT
 marketplace:
   owner:
     name: APM Tests
@@ -152,25 +156,6 @@ def test_metadata_outcomes_preserve_success_empty_failed_offline_and_local(
     assert result.certifiable
     assert result.warnings == ()
     assert [outcome.status for outcome in result.outcomes] == ["empty", "local"]
-
-
-def test_metadata_outcome_mapping_uses_the_precomputed_package_index() -> None:
-    """Mapper lookups do not rescan every preserved metadata outcome."""
-    result = MetadataEnrichmentResult(
-        (
-            MetadataEnrichmentOutcome("first", "fetched", (("version", "1.0.0"),)),
-            MetadataEnrichmentOutcome("second", "empty"),
-        )
-    )
-
-    assert dict(result) == {"first": {"version": "1.0.0"}}
-    assert result["first"] == {"version": "1.0.0"}
-
-
-def test_metadata_outcomes_reject_unknown_statuses() -> None:
-    """Unknown future states cannot silently become certifiable."""
-    with pytest.raises(ValueError, match="unknown metadata enrichment status"):
-        MetadataEnrichmentOutcome("remote-tool", "future")  # type: ignore[arg-type]
 
 
 def test_explicit_metadata_certifies_non_github_package(
@@ -305,7 +290,10 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     assert payload["metadata_enrichment"]["outcomes"] == [
         {"package": "remote-tool", "status": "failed", "cause": "transport closed"}
     ]
-    assert len(payload["warnings"]) == 1
+    assert payload["warnings"] == [
+        "Package 'remote-tool': metadata enrichment failed (transport closed). "
+        "Restore repository, network, or credential access and retry."
+    ], payload["warnings"]
     artifact = tmp_path / ".claude-plugin" / "marketplace.json"
     assert artifact.is_file()
 
@@ -367,7 +355,7 @@ def test_pack_check_clean_certifies_manifestless_skill_with_version_range(
 
     monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -464,7 +452,7 @@ def test_pack_check_clean_rejects_invalid_manifestless_skill_metadata(
 
     monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
 
     checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
@@ -521,7 +509,7 @@ def test_pack_check_clean_rejects_missing_manifestless_skill_path(
 
     monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -572,7 +560,7 @@ def test_pack_check_clean_rejects_metadata_access_failures(
         raise metadata_error
 
     monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
-    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(BUILDER_HTTP_SEAM, urlopen_adapter(fake_urlopen))
     monkeypatch.chdir(tmp_path)
 
     checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])

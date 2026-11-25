@@ -49,6 +49,7 @@ from apm_cli.marketplace.errors import (
     NoMatchingVersionError,
     RefNotFoundError,
 )
+from tests.utils.metadata_transport import patch_metadata_urlopen
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -878,7 +879,7 @@ class TestFetchRemoteMetadata:
         builder._github_token = None
 
         pkg = _make_resolved_pkg()
-        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("network error")):
+        with patch_metadata_urlopen(side_effect=urllib.error.URLError("network error")):
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
@@ -897,7 +898,7 @@ class TestFetchRemoteMetadata:
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch_metadata_urlopen(return_value=mock_resp):
             result = builder._fetch_remote_metadata(pkg)
 
         assert result is not None
@@ -922,7 +923,7 @@ class TestFetchRemoteMetadata:
             mock_resp.__exit__ = MagicMock(return_value=False)
             return mock_resp
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        with patch_metadata_urlopen(side_effect=_mock_urlopen):
             builder._fetch_remote_metadata(pkg)
 
         assert "Authorization" in captured_req["headers"]

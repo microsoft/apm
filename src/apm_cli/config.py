@@ -38,35 +38,50 @@ def ensure_config_exists():
         try:
             fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"default_client": "vscode"}, f)
+                json.dump({"default_client": "copilot"}, f)
         except FileExistsError:
             pass
         with contextlib.suppress(NotImplementedError, OSError):
             os.chmod(CONFIG_FILE, 0o600)
 
 
-def get_config(*, create: bool = True):
-    """Get the current configuration.
+_CONFIG_CREATION_SUPPRESSED = False
 
-    Results are cached for the lifetime of the process.
 
-    Args:
-        create: When false, missing user config returns defaults without
-            creating ``~/.apm/config.json``.
+@contextlib.contextmanager
+def config_creation_suppressed():
+    """Never create ``config.json`` or other user state in this block (``install --dry-run``).
+
+    Process-wide rather than per-thread: dependency resolution reads manifests
+    on worker threads.
+    """
+    global _CONFIG_CREATION_SUPPRESSED
+    previous = _CONFIG_CREATION_SUPPRESSED
+    _CONFIG_CREATION_SUPPRESSED = True
+    try:
+        yield
+    finally:
+        _CONFIG_CREATION_SUPPRESSED = previous
+
+
+def user_state_writes_suppressed() -> bool:
+    """Return True inside :func:`config_creation_suppressed` (a preview)."""
+    return _CONFIG_CREATION_SUPPRESSED
+
+
+def get_config(*, create: bool | None = None):
+    """Get the current configuration. A pure read: it never writes.
+
+    Results are cached for the lifetime of the process. A missing
+    ``~/.apm/config.json`` reads as ``{}``; only :func:`update_config` (and so
+    ``apm config set`` and ``apm experimental enable|disable|reset``) creates
+    it. ``create`` is accepted for call compatibility and has no effect.
 
     Returns:
         dict: Current configuration.
     """
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
-    if create:
-        ensure_config_exists()
-    elif not os.path.exists(CONFIG_FILE):
-        return {}
-    with open(CONFIG_FILE, encoding="utf-8") as f:
-        _config_cache = json.load(f)
-    return _config_cache
+    del create
+    return get_config_if_exists()
 
 
 def get_config_if_exists() -> dict:
@@ -107,6 +122,7 @@ def update_config(updates):
         updates (dict): Dictionary of configuration values to update.
     """
     _invalidate_config_cache()
+    ensure_config_exists()
     config = get_config()
     config.update(updates)
 
@@ -121,7 +137,10 @@ def get_default_client():
     Returns:
         str: Default MCP client type.
     """
-    return get_config().get("default_client", "vscode")
+    from apm_cli.core.target_catalog import canonical_target_token
+
+    # ``vscode`` is a deprecated alias of ``copilot`` (#3866).
+    return canonical_target_token(get_config().get("default_client", "copilot"))
 
 
 def set_default_client(client_type):
@@ -134,7 +153,10 @@ def set_default_client(client_type):
 
 
 def get_auto_integrate() -> bool:
-    """Get the auto-integrate setting.
+    """Get the deprecated auto-integrate setting.
+
+    Deprecated: no command reads this value. Kept only so
+    ``apm config get auto-integrate`` keeps working (#3839).
 
     Returns:
         bool: Whether auto-integration is enabled (default: True).
@@ -143,7 +165,7 @@ def get_auto_integrate() -> bool:
 
 
 def set_auto_integrate(enabled: bool) -> None:
-    """Set the auto-integrate setting.
+    """Set the deprecated auto-integrate setting (stored, but has no effect).
 
     Args:
         enabled: Whether to enable auto-integration.
@@ -633,10 +655,28 @@ def get_registry_config(name: str) -> "dict | None":
     return entry if isinstance(entry, dict) else None
 
 
+def list_registry_configs() -> dict[str, dict]:
+    """Return every config.json registry entry keyed by name."""
+    return {
+        name: dict(body)
+        for name, body in _get_registries_section().items()
+        if isinstance(name, str) and isinstance(body, dict)
+    }
+
+
 def set_registry_url(name: str, url: str) -> None:
-    """Write registry.<name>.url to config.json."""
+    """Write registry.<name>.url to config.json.
+
+    Raises:
+        ValueError: If the registry URL scheme owner does not accept *url*.
+    """
+    from apm_cli.deps.registry.url_scheme import registry_url_error
+
     regs = dict(_get_registries_section())
     entry = dict(regs.get(name) or {})
+    error = registry_url_error(name, url, insecure=entry.get("insecure"))
+    if error is not None:
+        raise ValueError(error)
     entry["url"] = url
     regs[name] = entry
     update_config({"registries": regs})

@@ -11,7 +11,12 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from apm_cli.core.remediation import (
+    DEPENDENCIES_NOT_INSTALLED,
+)
+from apm_cli.core.scope import manifest_file
+
+from ..constants import APM_MODULES_DIR, SKILL_MD_FILENAME
 from ..core.auth import AuthResolver
 from ..core.command_logger import CommandLogger
 from ..deps.github_downloader import GitHubPackageDownloader
@@ -63,7 +68,7 @@ def resolve_package_path(
         logger.error(str(exc))
         return None
     if direct_match.is_dir() and (
-        (direct_match / APM_YML_FILENAME).exists() or (direct_match / SKILL_MD_FILENAME).exists()
+        manifest_file(direct_match).exists() or (direct_match / SKILL_MD_FILENAME).exists()
     ):
         return direct_match
 
@@ -138,10 +143,11 @@ def display_package_info(
             locked_ref, locked_commit, locked_source = _lookup_lockfile_ref(package, project_root)
 
         try:
-            from rich.console import Console
             from rich.panel import Panel
 
-            console = Console()
+            from apm_cli.utils.console import new_console
+
+            console = new_console()
 
             content_lines = []
             content_lines.append(f"[bold]Name:[/bold] {package_info['name']}")
@@ -247,8 +253,13 @@ def _display_marketplace_plugin(
         logger.error(str(exc))
         sys.exit(1)
 
+    from ..marketplace.errors import MarketplaceAuthError
+
     try:
         manifest = fetch_or_cache(source)
+    except MarketplaceAuthError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
     except MarketplaceFetchError as exc:
         logger.error(str(exc))
         logger.progress("Check your network connection and try again.")
@@ -266,15 +277,22 @@ def _display_marketplace_plugin(
 
     # Resolve canonical reference for display
     resolved_display = None
+    # The hint names what install would do: an entry install refuses (#1326)
+    # is shown as refused, never as installable (A6, #3967).
+    install_hint = f"Install: apm install {plugin.name}@{marketplace_name}"
     try:
+        from ..marketplace.dependency_confusion import admit_marketplace_resolution
+        from ..marketplace.errors import DependencyConfusionError
         from ..marketplace.resolver import resolve_marketplace_plugin
 
-        canonical_str, _resolved = resolve_marketplace_plugin(
-            plugin_name,
-            marketplace_name,
-            plugin,
+        resolution = resolve_marketplace_plugin(
+            plugin_name, marketplace_name, enforce_ref_pins=False
         )
-        resolved_display = canonical_str
+        resolved_display = resolution.canonical
+        try:
+            admit_marketplace_resolution(resolution)
+        except DependencyConfusionError as refusal:
+            install_hint = f"Install: refused -- {refusal}"
     except Exception:
         pass
 
@@ -292,10 +310,11 @@ def _display_marketplace_plugin(
         source_display = plugin.source
 
     try:
-        from rich.console import Console
         from rich.panel import Panel
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         lines = []
         lines.append(f"[bold]Name:[/bold]        {plugin.name}")
         if plugin.version:
@@ -316,7 +335,7 @@ def _display_marketplace_plugin(
             )
         )
         click.echo("")
-        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+        click.echo(f"  {install_hint}")
 
     except ImportError:
         # Plain-text fallback
@@ -333,7 +352,7 @@ def _display_marketplace_plugin(
         if plugin.tags:
             click.echo(f"  Tags:        {', '.join(plugin.tags)}")
         click.echo("")
-        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+        click.echo(f"  {install_hint}")
 
 
 def _display_registry_versions(
@@ -367,7 +386,7 @@ def _display_registry_versions(
     try:
         from ..models.apm_package import APMPackage
 
-        apm_yml = Path(".") / "apm.yml"
+        apm_yml = manifest_file(Path("."))
         if apm_yml.is_file():
             pkg = APMPackage.from_apm_yml(apm_yml)
             project_registries = pkg.registries
@@ -435,11 +454,10 @@ def _display_registry_versions(
         return
 
     try:
-        from rich.console import Console
-        from rich.table import Table
+        from apm_cli.utils.console import new_console, new_table
 
-        console = Console()
-        table = Table(
+        console = new_console()
+        table = new_table(
             title=f"Available versions: {package}",
             show_header=True,
             header_style="bold cyan",
@@ -507,7 +525,7 @@ def _effective_default_registry(project_root: Path) -> str | None:
     project_registries = None
     project_default = None
     try:
-        apm_yml = project_root / "apm.yml"
+        apm_yml = manifest_file(project_root)
         if apm_yml.is_file():
             from ..models.apm_package import APMPackage
 
@@ -578,7 +596,7 @@ def display_versions(
     # this prevents mis-routing when the user is outside an APM project or
     # running with --global (project_root=None).
     _pr = project_root if project_root is not None else Path(".")
-    if (_pr / "apm.yml").is_file():
+    if manifest_file(_pr).is_file():
         _, _, _locked_source = _lookup_lockfile_ref(package, _pr)
         if _locked_source == "registry":
             _display_registry_versions(package, dep_ref, logger)
@@ -597,14 +615,14 @@ def display_versions(
             _display_registry_versions(package, dep_ref, logger, registry_name=_default_reg)
             return
 
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_ENUMERATION):
+        # State the enterprise policy only; never advise lifting it (RA-014).
         logger.error(
             f"Cannot list versions for '{package}' in registry-only mode: "
-            "the registry proxy exposes no version listing and "
-            "PROXY_REGISTRY_ONLY blocks version enumeration against the source "
-            "host. To list versions, unset PROXY_REGISTRY_ONLY; to install, pin "
+            "version listing from the source host is disabled because "
+            "PROXY_REGISTRY_ONLY is set (enterprise proxy policy). To install, pin "
             "an exact version tag in apm.yml."
         )
         sys.exit(1)
@@ -622,11 +640,10 @@ def display_versions(
 
     # -- render with Rich table (fallback to plain text) ---------------
     try:
-        from rich.console import Console
-        from rich.table import Table
+        from apm_cli.utils.console import new_console, new_table
 
-        console = Console()
-        table = Table(
+        console = new_console()
+        table = new_table(
             title=f"Available versions: {package}",
             show_header=True,
             header_style="bold cyan",
@@ -777,7 +794,7 @@ def view(
 
     if not apm_modules_path.exists():
         logger.error("No apm_modules/ directory found")
-        logger.progress("Run 'apm install' to install dependencies first")
+        logger.progress(DEPENDENCIES_NOT_INSTALLED.sentence())
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)

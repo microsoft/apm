@@ -31,7 +31,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.policy.models import CIAuditResult
+    from apm_cli.security.trust import McpAdmission
 
 
 class DirectDependencyError(RuntimeError):
@@ -44,8 +46,32 @@ class DirectDependencyError(RuntimeError):
     """
 
 
+class PreviewIncomplete(Exception):
+    """``--dry-run`` stops where install would refuse; errors are on the context."""
+
+
 class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
+
+
+class DependencyResolutionError(RuntimeError):
+    """Dependency resolution failed; *unprinted* lists the errors not yet shown (#5272).
+
+    The resolve phase prints each error with its remedy as it raises, so the
+    install summary repeats only the ones it did not print.
+    """
+
+    def __init__(self, errors: list[str], *, unprinted: list[str]) -> None:
+        super().__init__(f"Dependency resolution failed: {'; '.join(errors)}")
+        self.unprinted = tuple(unprinted)
+        self.printed = len(errors) - len(self.unprinted)
+
+    def summary(self) -> str:
+        """Name the failure without repeating an error already printed above."""
+        if self.unprinted:
+            return f"Dependency resolution failed: {'; '.join(self.unprinted)}"
+        noun = "error" if self.printed == 1 else "errors"
+        return f"Dependency resolution failed (see the {noun} above)."
 
 
 class MCPNativeConflictError(InstallFailureAlreadyRendered):
@@ -54,6 +80,30 @@ class MCPNativeConflictError(InstallFailureAlreadyRendered):
     def __init__(self, message: str, *, wrote_connections: bool) -> None:
         super().__init__(message)
         self.wrote_connections = wrote_connections
+
+
+class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
+    """Same-name LSP entries APM did not write were preserved (#4628), or
+    managed entries a user edited were kept with no collector to count them (#4626).
+
+    *preserved* maps each runtime to the server names left as the user wrote
+    them; every other server in the install was still configured, and
+    *wrote_servers* says whether any of them changed a config.
+    """
+
+    def __init__(
+        self, message: str, *, preserved: dict[str, set[str]], wrote_servers: bool = True
+    ) -> None:
+        super().__init__(message)
+        self.preserved = preserved
+        self.wrote_servers = wrote_servers
+
+
+class LSPUserEntryRefusal(LSPUserEntryConflictError):
+    """An LSP user-entry conflict that wrote no server: the install commits nothing (#4697)."""
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
 
 class RequiredIntegrationError(RuntimeError):
@@ -117,13 +167,31 @@ class FrozenInstallError(RuntimeError):
         self.tip = tip
 
 
-def install_failure_message(error: Exception) -> str:
-    """Keep canonical conflict guidance intact and frame other install failures."""
-    from apm_cli.deps.lockfile import LockfileConflictError
+def symlinked_deploy_cause(error: BaseException) -> Exception | None:
+    """The symlinked-deploy refusal behind *error*, however it was wrapped (#5287)."""
+    from apm_cli.utils.path_security import SymlinkedDeployError
 
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, SymlinkedDeployError):
+            return current
+        seen.add(id(current))
+        # An implicit context counts only when not suppressed (``raise ... from None``).
+        context = None if current.__suppress_context__ else current.__context__
+        current = current.__cause__ or context
+    return None
+
+
+def install_failure_message(error: Exception) -> str:
+    """Keep canonical lockfile guidance intact and frame other install failures."""
+    from apm_cli.deps.lockfile import LockfileConflictError, LockfileRefusal
+
+    if (refusal := symlinked_deploy_cause(error)) is not None:
+        return str(refusal)
     return (
         str(error)
-        if isinstance(error, LockfileConflictError)
+        if isinstance(error, (LockfileConflictError, LockfileRefusal))
         else f"Error installing dependencies: {error}"
     )
 
@@ -135,6 +203,58 @@ def log_frozen_install_error(error: FrozenInstallError, logger: InstallLogger) -
         logger.error_detail(reason)
     if tip := frozen_install_tip(error):
         logger.info(tip)
+
+
+def log_authentication_error(error: AuthenticationError, logger: InstallLogger) -> None:
+    """Render auth diagnostics on the default path, not only under --verbose (#1015)."""
+    logger.error(str(error))
+    if error.diagnostic_context:
+        logger.error_detail(error.diagnostic_context)
+    logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+
+
+def render_apm_dependency_failure(
+    error: Exception, logger: InstallLogger, *, verbose: bool
+) -> InstallFailureAlreadyRendered:
+    """Render a failed APM dependency phase once; the caller raises the returned marker.
+
+    Auth and frozen errors use their own renderers. A native plugin settings refusal
+    or the LSP capability gate is already actionable, so it prints verbatim with any
+    raw decoder detail behind --verbose. A policy violation prints as a refusal
+    without nesting (#832); anything else gets the "Failed to install" prefix.
+    """
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+    from apm_cli.utils.path_security import SymlinkedDeployError
+
+    if isinstance(error, AuthenticationError):
+        log_authentication_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, FrozenInstallError):
+        log_frozen_install_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    error = symlinked_deploy_cause(error) or error
+    verbatim = (
+        CopilotSettingsCollisionError,
+        ClaudeNativePluginError,
+        RequiredIntegrationError,
+        SymlinkedDeployError,
+    )
+    if isinstance(error, verbatim):
+        logger.error(str(error))
+        if detail := getattr(error, "detail", None):
+            logger.verbose_detail(detail)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, PolicyViolationError):
+        message = str(error)
+        logger.refusal(message)
+    else:
+        cause = error.summary() if isinstance(error, DependencyResolutionError) else error
+        message = f"Failed to install APM dependencies: {cause}"
+        logger.error(message)
+    if not verbose:
+        logger.progress("Run with --verbose for detailed diagnostics")
+    return InstallFailureAlreadyRendered(message)
 
 
 def frozen_install_tip(error: FrozenInstallError) -> str:
@@ -153,10 +273,9 @@ def frozen_install_tip(error: FrozenInstallError) -> str:
         lock_state = "MCP lock state"
     else:
         lock_state = "package lock state"
-    return (
-        f"Tip: rerun 'apm install' without --frozen to create or repair {lock_state}, "
-        "retaining the original options, including --root DIR or --global if specified."
-    )
+    from apm_cli.core.remediation import FROZEN_LOCK_STATE_DRIFT
+
+    return f"Tip: {FROZEN_LOCK_STATE_DRIFT.bind(lock_state=lock_state).sentence()}"
 
 
 class PolicyViolationError(RuntimeError):
@@ -175,6 +294,9 @@ class PolicyViolationError(RuntimeError):
         be empty when discovery failed before a source was resolved.
     """
 
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
+
     def __init__(
         self,
         message: str,
@@ -185,3 +307,37 @@ class PolicyViolationError(RuntimeError):
         super().__init__(message)
         self.audit_result = audit_result
         self.policy_source = policy_source
+
+
+def policy_transitive_refusals(view: CurrentMcpConfigView) -> list[str]:
+    """Transitive servers the trust owner withheld under org ``mcp.trust_transitive``."""
+    from apm_cli.security.trust import REASON_POLICY_TRANSITIVE
+
+    return sorted(
+        name
+        for name, evidence in view.omissions.items()
+        if isinstance(evidence, dict) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+    )
+
+
+def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission) -> None:
+    """Fail the install when an org policy that blocks refuses transitive servers.
+
+    Under ``mcp.trust_transitive: false`` the trust owner parks every
+    transitive server ``mcp.allow`` does not list; with ``enforcement: block``
+    the install stops before any write, as the direct mcp-allowlist check does.
+    """
+    refused = policy_transitive_refusals(view)
+    policy = admission.org_policy()
+    if not refused or getattr(policy, "enforcement", None) != "block":
+        return
+    raise PolicyViolationError(
+        "Install blocked by org policy: mcp.trust_transitive is false and mcp.allow does "
+        f"not list transitive MCP server(s) {', '.join(refused)}. Ask the policy owner to "
+        "add them to mcp.allow or set mcp.trust_transitive: true."
+    )
+
+
+def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
+    """One ``--frozen`` refusal line for an unrecorded service claim."""
+    return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"

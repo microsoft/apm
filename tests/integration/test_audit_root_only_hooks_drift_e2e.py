@@ -132,3 +132,126 @@ def test_root_only_hooks_with_hook_dependency_audit_clean_after_install(
     returncode, output = _audit(apm_binary_path, project)
     assert returncode == 1, output
     assert _drifted(output, _SIDECAR), output
+
+
+def test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4033: merged-only root hooks still produce a lockfile, so audit --ci replays them."""
+    project = tmp_path / "hooks-only"
+    project.mkdir()
+    (project / ".claude").mkdir()
+    (project / "apm.yml").write_text(
+        "name: hooks-only\nversion: 1.0.0\ntargets: [claude]\n", encoding="utf-8"
+    )
+    _write_json(
+        project / ".apm" / "hooks" / "root.json",
+        {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo root"}]}]},
+    )
+    lock_path = project / "apm.lock.yaml"
+
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert _commands(project, "PreToolUse") == ["echo root"]
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    # An unchanged reinstall restores a deleted lockfile.
+    lock_path.unlink()
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    returncode, output = _audit(apm_binary_path, project)
+    assert returncode == 0, output
+    assert "no drift detected" in output.lower(), output
+
+    settings_path = project / _SETTINGS
+    settings_path.write_text(
+        settings_path.read_text(encoding="utf-8").replace("echo root", "echo tampered"),
+        encoding="utf-8",
+    )
+    returncode, output = _audit(apm_binary_path, project)
+    assert returncode == 1, output
+    assert _drifted(output, _SETTINGS), output
+
+
+def test_root_only_kiro_hooks_get_a_lockfile_audit_replays(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4033 on Kiro: per-action hook docs count as registered root hooks, even unchanged."""
+    project = tmp_path / "kiro-hooks-only"
+    project.mkdir()
+    (project / ".kiro").mkdir()
+    (project / "apm.yml").write_text(
+        "name: kiro-hooks-only\nversion: 1.0.0\ntargets: [kiro]\n", encoding="utf-8"
+    )
+    _write_json(
+        project / ".apm" / "hooks" / "root.json",
+        {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo root"}]}]},
+    )
+    lock_path = project / "apm.lock.yaml"
+
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert list((project / ".kiro" / "hooks").glob("*.json")), install.stdout
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    # An unchanged reinstall restores a deleted lockfile.
+    lock_path.unlink()
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    returncode, output = _audit(apm_binary_path, project)
+    assert returncode == 0, output
+
+
+def test_audit_reports_apm_merged_hooks_as_owned_with_a_clean_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-043: APM's own merged hook is never "untracked"; path and pointer render apart."""
+    project = tmp_path / "consumer"
+    _write_issue_fixture(project)
+    install = _run(apm_binary_path, project, "install")
+    assert install.returncode == 0, install.stderr or install.stdout
+    settings = json.loads((project / _SETTINGS).read_text(encoding="utf-8"))
+    settings["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": "echo user"}]}]
+    (project / _SETTINGS).write_text(json.dumps(settings), encoding="utf-8")
+
+    result = _run(apm_binary_path, project, "audit", "--no-policy")
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = [line for line in result.stdout.splitlines() if "Discovered/" in line]
+    owned = [line for line in lines if "Discovered/apm-owned-entry:" in line]
+    untracked = [line for line in lines if "Discovered/untracked:" in line]
+    assert {line.split(": ", 1)[1].split(" (")[0] for line in owned} == {
+        f"{_SETTINGS} at /hooks/PreToolUse/0/hooks/0",
+        f"{_SETTINGS} at /hooks/PostToolUse/0/hooks/0",
+    }, lines
+    # Only the user's own hook is untracked.
+    assert [line.split(": ", 1)[1].split(" (")[0] for line in untracked] == [
+        f"{_SETTINGS} at /hooks/Stop/0/hooks/0"
+    ], lines
+    assert f"{_SETTINGS}/hooks" not in result.stdout + result.stderr
+
+
+def test_audit_ci_unicode_detail_renders_path_and_pointer_apart(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-043: a hidden-Unicode finding in a hook field names '<file> at <pointer>'."""
+    project = tmp_path / "unicode-hooks"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: unicode-hooks\nversion: 1.0.0\ntargets: [claude]\n", encoding="utf-8"
+    )
+    _write_json(
+        project / _SETTINGS,
+        {"hooks": {"Stop": [{"hooks": [{"type": "prompt", "prompt": "\u202e"}]}]}},
+    )
+
+    result = _run(
+        apm_binary_path, project, "audit", "--ci", "--no-policy", "--no-drift", "--no-fail-fast"
+    )
+    text = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, text
+    assert f"unicode: {_SETTINGS} at /hooks/Stop/0/hooks/0/prompt" in text, text
+    assert f"{_SETTINGS}/hooks" not in text, text

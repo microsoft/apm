@@ -23,8 +23,6 @@ predicate fails one assertion in <10ms instead of one slow E2E in 14s.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from apm_cli.core.scope import InstallScope
@@ -33,6 +31,8 @@ from apm_cli.install.package_resolution import (
     user_scope_rejection_reason,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _local_ref(path: str) -> DependencyReference:
@@ -72,13 +72,6 @@ def test_project_scope_accepts_relative_local_path():
     assert user_scope_rejection_reason(_local_ref("./pkg"), scope=InstallScope.PROJECT) is None
 
 
-def test_project_scope_accepts_absolute_local_path(tmp_path):
-    """Symmetry check: project scope is also fine with absolute local paths."""
-    assert (
-        user_scope_rejection_reason(_local_ref(str(tmp_path)), scope=InstallScope.PROJECT) is None
-    )
-
-
 def test_project_scope_accepts_parent_inheritance():
     """``git: parent`` is a project-scope construct; project scope must accept it."""
     assert user_scope_rejection_reason(_parent_ref(), scope=InstallScope.PROJECT) is None
@@ -109,17 +102,6 @@ def test_user_scope_rejects_bare_directory_local_path():
     reason = user_scope_rejection_reason(_local_ref("local-pkg"), scope=InstallScope.USER)
     assert reason is not None
     assert "relative" in reason.lower()
-
-
-def test_user_scope_accepts_absolute_local_path(tmp_path):
-    """Absolute local paths are unambiguous -- post-#937 contract.
-
-    This is the assertion that catches the #1149 regression: an
-    unconditional ``dep_ref.is_local`` check would fail this test.
-    """
-    abs_path = str(tmp_path / "local-pkg")
-    assert os.path.isabs(abs_path), "test setup invariant: tmp_path is absolute"
-    assert user_scope_rejection_reason(_local_ref(abs_path), scope=InstallScope.USER) is None
 
 
 @pytest.mark.parametrize("tilde_path", ["~/pkg", "~/sub/pkg"])

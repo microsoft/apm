@@ -119,6 +119,7 @@ apm outdated -j 8
 |---|---|
 | `up-to-date` | Locked ref matches the current state from the authoritative remote. |
 | `outdated` | A newer tag, branch tip SHA, or published registry version is available, even outside the manifest constraint. |
+| `origin-conflict` | A marketplace dep's alias now names a different catalog than the one `apm.lock.yaml` recorded (`source_url`). It is not compared against the new catalog; the error names both origins. |
 | `unknown` | The remote cannot be queried or the ref cannot be resolved. Registry deps also remain unknown when no published version matches the constraint, even if `Latest` is available. Cached Git refs are not reported as current. |
 
 Registry `Source` values:
@@ -137,11 +138,11 @@ Registry `Source` values:
 | Code | Condition |
 |---|---|
 | `0` | Check completed, including outdated or unknown dependencies. |
-| `1` | No lockfile found in the selected scope. |
+| `1` | No lockfile found in the selected scope, or a marketplace alias was rebound to a different catalog (`origin-conflict`). |
 
 ## Related
 
 - [`apm update`](../update/) -- re-resolve outdated deps and rewrite the lockfile after confirmation.
 - [`apm view`](../view/) -- inspect a single package's metadata or available versions.
 - [`apm audit`](../audit/) -- security scan over installed primitives, suitable for CI gating.
-- [Registries guide](../../../guides/registries/) -- declare registries, publish flat archives, and consume registry-sourced deps.
+- [Registries guide](../../registries/) -- declare registries, publish flat archives, and consume registry-sourced deps.

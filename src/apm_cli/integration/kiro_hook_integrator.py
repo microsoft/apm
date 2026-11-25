@@ -8,11 +8,11 @@ so the shared integrator stays under the source-length guardrail.
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.integration import write_seam
 from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
@@ -21,7 +21,7 @@ from apm_cli.integration.hook_integrator import (
 )
 from apm_cli.integration.hook_ir import HookBinding, HookHandler
 from apm_cli.integration.hook_native_formats import _entries_to_ir
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.integration.write_seam import atomic_write_text
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -132,7 +132,7 @@ def _write_kiro_hook_docs(
                 rendered = json.dumps(doc, indent=2) + "\n"
 
                 if target_path.exists() and target_path.read_text(encoding="utf-8") == rendered:
-                    os.chmod(target_path, 0o600)
+                    write_seam.chmod(target_path, 0o600)
                     files_adopted += 1
                     target_paths.append(target_path)
                     continue
@@ -145,10 +145,22 @@ def _write_kiro_hook_docs(
                 ):
                     files_skipped += 1
                     continue
+                if integrator.keeps_edited_output(
+                    target_path,
+                    hook_file,
+                    rel_path,
+                    force,
+                    diagnostics,
+                    target_paths,
+                    expected_content=rendered,
+                ):
+                    files_skipped += 1
+                    continue
 
                 atomic_write_text(target_path, rendered, new_file_mode=0o600)
+                integrator.note_rendered_write(target_path)
                 # Keep existing hook files private after updates too.
-                os.chmod(target_path, 0o600)
+                write_seam.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)
                 display_payloads.append(
@@ -248,7 +260,7 @@ def integrate_kiro_hooks(
         return HookIntegrationResult(0, 0, 0, [])
 
     hooks_dir = target_dir / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    write_seam.mkdir(hooks_dir, parents=True, exist_ok=True)
     deploy_root_for_rewrite = integrator._deploy_root_for_hook_rewrite(project_root, user_scope)
     home_reference = integrator._home_reference_for_hook_rewrite(target, user_scope)
 

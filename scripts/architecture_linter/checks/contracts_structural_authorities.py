@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import ast
 import shlex
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from scripts.architecture_linter.checks.contracts_scope_binding import (
+    _LOCAL_BINARY_FACADES,
     ScopeBindingMaps,
     _assignment_command_values,
     _attribute_name,
@@ -72,6 +75,7 @@ _RATCHET_AUTHORITY_CONSUMERS: dict[str, tuple[str, ...]] = {
         "from test_file_inventory import tracked_python_paths",
         "from ratchet_baseline import",
     ),
+    "scripts/check_complexity_ratchet.py": ("from ratchet_baseline import",),
     "tests/quality/repository_python_inventory.py": (
         "from scripts.test_file_inventory import tracked_python_paths",
     ),
@@ -378,38 +382,148 @@ def _cannot_inspect(facts: object, path: str, rule_id: str) -> Violation | None:
     return None
 
 
-def _binary_subcheck_results(index: TreeIndex) -> tuple[tuple[list[int], str], ...]:
-    """Run binary-selection detectors with one shared scope-binding derivation."""
-    binding_maps = _scope_binding_maps(index)
-    return (
-        (
-            _direct_binary_env_read_lines(index, binding_maps),
-            "direct APM_BINARY_PATH read outside {owner}; consume the apm_binary_path fixture",
-        ),
-        (
-            _direct_binary_path_lookup_lines(index, binding_maps),
-            "direct PATH lookup for apm outside {owner}; consume the apm_binary_path fixture",
-        ),
-        (
-            _venv_binary_fallback_lines(index),
-            "direct .venv apm fallback outside {owner}; consume the apm_binary_path fixture",
-        ),
-        (
-            _python_sibling_binary_lines(index),
-            "interpreter-relative apm selection outside {owner}; consume the apm_binary_path fixture",
-        ),
-        (
-            _local_binary_facade_lines(index),
-            "local apm binary fixture or facade outside {owner}; inject apm_binary_path directly",
-        ),
-        (
-            _direct_apm_subprocess_lines(index, binding_maps),
-            "direct apm subprocess selection outside {owner}; inject apm_binary_path directly",
-        ),
-        (
-            _implicit_lifecycle_runner_lines(index),
-            "implicit lifecycle runner APM selection outside {owner}; pass apm_binary_path as the runner command",
-        ),
+_FACADE_NAMES = frozenset({*_LOCAL_BINARY_FACADES, "_resolve_apm_binary", "apm_binary_path"})
+
+
+@dataclass(frozen=True)
+class _BinaryNeeds:
+    """Which binary-selection detectors can possibly match one file.
+
+    Every detector matches only on ``ast.Constant`` strings (the parser has
+    already folded implicit concatenation; assignment propagation only copies
+    tokens from such constants) and on identifiers (names, attributes, import
+    aliases and modules, function and parameter names). So a detector whose
+    required constants or identifiers are absent from the file cannot flag it:
+    each flag below is a superset test, never narrower than its detector.
+    """
+
+    env_read: bool
+    path_lookup: bool
+    venv: bool
+    sibling: bool
+    facade: bool
+    subprocess: bool
+    runner: bool
+
+
+def _binary_needs(index: TreeIndex) -> _BinaryNeeds:
+    strings: set[str] = set()
+    names: set[str] = set()
+    # Through walk() so the structural-work counters see this pass (scaling gate).
+    for node in index.walk(index.root) if index.root is not None else ():
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str):
+                strings.add(node.value)
+        elif isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.alias):
+            names.update(node.name.split("."))
+            if node.asname:
+                names.add(node.asname)
+        elif isinstance(node, ast.ImportFrom):
+            names.update((node.module or "").split("."))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+    parts = {
+        part.casefold() for value in strings for part in value.replace("\\", "/").split("/") if part
+    }
+    apm_named = bool(parts & _APM_EXECUTABLE_NAMES)
+    return _BinaryNeeds(
+        env_read="APM_BINARY_PATH" in strings,
+        path_lookup=apm_named and "which" in names,
+        venv=apm_named and ".venv" in parts,
+        sibling=apm_named and "executable" in names,
+        facade=bool(names & _FACADE_NAMES),
+        subprocess="subprocess" in names or "-m" in strings or "uv" in strings,
+        runner="ApmLifecycleRunner" in names,
+    )
+
+
+@dataclass(frozen=True)
+class _BinaryDetector:
+    """One binary-selection detector and the ``_BinaryNeeds`` flag that gates it.
+
+    ``gate=None`` means the detector always runs; every other gate must name a
+    ``_BinaryNeeds`` field (tests/unit/scripts/test_architecture_runner.py).
+    """
+
+    gate: str | None
+    uses_bindings: bool
+    lines: Callable[[TreeIndex, ScopeBindingMaps], list[int]]
+    message: str
+
+
+_BINARY_DETECTORS: tuple[_BinaryDetector, ...] = (
+    _BinaryDetector(
+        "env_read",
+        True,
+        _direct_binary_env_read_lines,
+        "direct APM_BINARY_PATH read outside {owner}; consume the apm_binary_path fixture",
+    ),
+    _BinaryDetector(
+        "path_lookup",
+        True,
+        _direct_binary_path_lookup_lines,
+        "direct PATH lookup for apm outside {owner}; consume the apm_binary_path fixture",
+    ),
+    _BinaryDetector(
+        "venv",
+        False,
+        lambda index, _maps: _venv_binary_fallback_lines(index),
+        "direct .venv apm fallback outside {owner}; consume the apm_binary_path fixture",
+    ),
+    _BinaryDetector(
+        "sibling",
+        False,
+        lambda index, _maps: _python_sibling_binary_lines(index),
+        "interpreter-relative apm selection outside {owner}; consume the apm_binary_path fixture",
+    ),
+    _BinaryDetector(
+        "facade",
+        False,
+        lambda index, _maps: _local_binary_facade_lines(index),
+        "local apm binary fixture or facade outside {owner}; inject apm_binary_path directly",
+    ),
+    _BinaryDetector(
+        "subprocess",
+        True,
+        _direct_apm_subprocess_lines,
+        "direct apm subprocess selection outside {owner}; inject apm_binary_path directly",
+    ),
+    _BinaryDetector(
+        "runner",
+        False,
+        lambda index, _maps: _implicit_lifecycle_runner_lines(index),
+        "implicit lifecycle runner APM selection outside {owner}; pass apm_binary_path as the runner command",
+    ),
+)
+
+
+def _binary_subcheck_results(
+    index: TreeIndex, *, prefilter: bool = True
+) -> tuple[tuple[list[int], str], ...]:
+    """Run binary-selection detectors with one shared scope-binding derivation.
+
+    With *prefilter*, a detector the file cannot satisfy (``_binary_needs``)
+    is skipped; ``prefilter=False`` runs every detector (equivalence checks).
+    """
+    needs = _binary_needs(index) if prefilter else None
+    selected = [
+        detector.gate is None or needs is None or getattr(needs, detector.gate)
+        for detector in _BINARY_DETECTORS
+    ]
+    uses_bindings = any(
+        run and detector.uses_bindings
+        for run, detector in zip(selected, _BINARY_DETECTORS, strict=True)
+    )
+    binding_maps = _scope_binding_maps(index) if uses_bindings else ({}, {})
+    return tuple(
+        (detector.lines(index, binding_maps) if run else [], detector.message)
+        for run, detector in zip(selected, _BINARY_DETECTORS, strict=True)
     )
 
 

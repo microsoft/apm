@@ -46,7 +46,7 @@ from apm_cli.deps.registry.extractor import (
 )
 from apm_cli.deps.registry.resolver import (
     RegistryResolutionError,
-    _split_owner_repo,
+    split_registry_identity,
 )
 from apm_cli.deps.revision_pins import (
     RevisionPinResolutionResult,
@@ -625,22 +625,22 @@ class TestRegistryClientFetchFromUrl:
 
 
 class TestSplitOwnerRepo:
-    """Tests for _split_owner_repo() path parsing."""
+    """Tests for split_registry_identity() path parsing."""
 
     def test_two_segments(self) -> None:
-        assert _split_owner_repo("owner/repo") == ("owner", "repo")
+        assert split_registry_identity("owner/repo") == ("owner", "repo")
 
     def test_three_segments(self) -> None:
         """Three segments: first N-1 are owner, last is repo."""
-        assert _split_owner_repo("group/subgroup/repo") == ("group/subgroup", "repo")
+        assert split_registry_identity("group/subgroup/repo") == ("group/subgroup", "repo")
 
     def test_single_segment_raises(self) -> None:
         with pytest.raises(RegistryResolutionError, match="owner/repo"):
-            _split_owner_repo("just-a-repo")
+            split_registry_identity("just-a-repo")
 
     def test_empty_string_raises(self) -> None:
         with pytest.raises(RegistryResolutionError):
-            _split_owner_repo("")
+            split_registry_identity("")
 
 
 class TestRegistryPackageResolverPickVersion:

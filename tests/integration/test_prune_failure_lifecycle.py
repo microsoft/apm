@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import PRUNE_INCOMPLETE
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
@@ -101,7 +102,7 @@ def test_prune_failure_reports_partial_state_and_retry_converges(
         f"Prune incomplete: removed {removed_count} orphaned package(s); "
         "failed to remove 1 package(s)."
     ) in output
-    assert "rerun 'apm prune'" in output
+    assert PRUNE_INCOMPLETE.sentence() in output
     assert "No packages were removed" not in output
     assert "Pruned " not in output
     after_failure = ArtifactSnapshot.capture(consumer.root)
@@ -242,3 +243,111 @@ def test_prune_mixed_failure_reconciles_only_successful_owners(tmp_path: Path) -
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr
     assert_unchanged(recovered, ArtifactSnapshot.capture(consumer.root))
     assert LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",)) == recovered_state
+
+
+def test_prune_lock_write_failure_after_removal_names_it_and_retry_converges(
+    tmp_path: Path,
+) -> None:
+    """A failed lockfile write after the removal names what went; the next prune repairs (#5185)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    environment = isolated.subprocess_env()
+    factory = LocalPackageFactory(isolated.work_root)
+    consumer = factory.create("consumer", targets=("copilot",))
+    for name in ("gone", "kept"):
+        source = factory.create(name, targets=("copilot",))
+        factory.add_instruction(source, name, f"---\napplyTo: '**'\n---\n# {name} instruction\n")
+        factory.add_relative_dependency(consumer, source)
+    runner = _runner(consumer.root / "apm_modules/_local/gone", "none")
+    installed = runner.run(
+        ("install", "--target", "copilot", "--no-policy"),
+        cwd=consumer.root,
+        env=environment,
+        scenario_id="prune-lock-write-install",
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"] = [
+        entry for entry in manifest["dependencies"]["apm"] if "gone" not in str(entry)
+    ]
+    dump_yaml(manifest, consumer.manifest_path)
+    locked = (consumer.root / "apm.lock.yaml").read_bytes()
+
+    failed = runner.run(
+        ("prune",),
+        cwd=consumer.root,
+        env={**environment, "APM_TEST_FAIL_LOCK_REPLACE": "1"},
+        scenario_id="prune-lock-write-failure",
+    )
+
+    output = " ".join((failed.stdout + failed.stderr).split())
+    assert failed.returncode == 1, output
+    assert "Failed to update apm.lock.yaml" in output, output
+    assert "Package directories already removed: _local/gone." in output, output
+    assert not (consumer.root / "apm_modules/_local/gone").exists()
+    assert (consumer.root / "apm.lock.yaml").read_bytes() == locked
+
+    retry = runner.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-lock-write-retry"
+    )
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    lock = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert lock is not None
+    assert [key for key in lock.dependencies if "gone" in key] == [], sorted(lock.dependencies)
+    assert [key for key in lock.dependencies if "kept" in key], sorted(lock.dependencies)
+    assert not (consumer.root / ".github/instructions/gone.instructions.md").exists()
+    assert (consumer.root / ".github/instructions/kept.instructions.md").is_file()
+    repeated = runner.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-lock-write-repeat"
+    )
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+    assert "No orphaned packages found" in repeated.stdout
+
+
+def test_prune_retry_converges_after_a_child_delete_failed_under_a_pruned_parent(
+    tmp_path: Path,
+) -> None:
+    """parent -> child, both orphaned; the child's delete fails, the parent's succeeds.
+
+    The retry must still read the chain and finish: the child never stays
+    "retained" forever under a parent with no lock row (#5238).
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    environment = isolated.subprocess_env()
+    factory = LocalPackageFactory(isolated.work_root)
+    consumer = factory.create("consumer", targets=("copilot",))
+    parent = factory.create("parent", targets=("copilot",))
+    child = factory.create("child", targets=("copilot",))
+    factory.add_relative_dependency(parent, child)
+    factory.add_relative_dependency(consumer, parent)
+    healthy = _runner(consumer.root / "apm_modules", "none")
+    installed = healthy.run(
+        ("install", "--target", "copilot", "--no-policy"),
+        cwd=consumer.root,
+        env=environment,
+        scenario_id="prune-child-failure-install",
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"] = []
+    dump_yaml(manifest, consumer.manifest_path)
+    blocked = next((consumer.root / "apm_modules/_local").glob("*/child"))
+
+    failed = _runner(blocked, "blocked").run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-child-failure"
+    )
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+
+    retry = healthy.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-child-failure-retry"
+    )
+    output = " ".join((retry.stdout + retry.stderr).split())
+    assert retry.returncode == 0, output
+    assert "Retained" not in output, output
+    assert not blocked.exists(), output
+    state = LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",))
+    assert state.lockfile_bytes is None, output
+    repeated = healthy.run(
+        ("prune",), cwd=consumer.root, env=environment, scenario_id="prune-child-failure-repeat"
+    )
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+    assert "No orphaned packages found" in repeated.stdout

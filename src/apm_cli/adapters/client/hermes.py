@@ -11,9 +11,12 @@ install was triggered at project or user scope.  Unrelated top-level config
 keys (model provider, telegram settings, ...) are preserved on every write;
 a malformed existing file is left untouched rather than overwritten.
 
-Per-server shape:
-  * stdio  -> ``command`` / ``args`` / ``env`` (+ ``enabled``)
-  * http   -> ``url`` / ``headers`` (+ ``enabled``)
+Per-server shape (https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference):
+  * stdio  -> ``command`` / ``args`` / ``env`` / ``cwd``
+  * remote -> ``url`` / ``headers`` / ``transport: sse`` (SSE only; the
+    remote keys come from the ``hermes`` row in ``_remote_shapes``)
+  * non-denylisted ``extra`` passthrough keys (``timeout``, ``auth``, ...),
+    then ``enabled``.
 
 YAML serialization goes through ``utils.yaml_io`` (lint forbids raw
 ``yaml.dump``); the document is written atomically with ``0o600`` perms via
@@ -28,15 +31,29 @@ from pathlib import Path
 
 import yaml
 
+from ...core.command_logger import library_logger
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success
 from ...utils.yaml_io import load_yaml, yaml_to_str
+from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
 # Credential-bearing config file mode: owner read/write only. Hermes' config.yaml
 # holds literal MCP env values plus native model-provider keys / messaging tokens,
 # so it must never be group/world-readable (parity with claude/codex/gemini/cursor).
 _CONFIG_FILE_MODE = 0o600
+
+# Modeled keys in on-disk order. ``cwd`` is read by Hermes' stdio launcher
+# (NousResearch/hermes-agent tools/mcp_tool_transport.py ``_stdio_launch``).
+_MODELED_KEYS = ("command", "args", "env", "cwd", "url", "headers", "transport")
+# Emitted only when non-empty, so a malformed entry never writes ``url: null``.
+_OMIT_WHEN_EMPTY = frozenset({"command", "args", "env", "url", "headers"})
+# Copilot CLI fields the shared formatter adds that Hermes does not read the
+# same way (``tools`` is a list there but a filter mapping in Hermes).
+_COPILOT_ONLY_KEYS = frozenset({"type", "tools", "id"})
+# The only keys APM <= 0.36 kept (an allowlist that dropped cwd, transport and
+# every passthrough key); used to recognize and heal those earlier writes.
+_V036_REMOTE_KEYS = ("url", "headers")
+_V036_STDIO_KEYS = ("command", "args", "env")
 
 
 class _MalformedHermesConfig(Exception):
@@ -54,9 +71,9 @@ class HermesClientAdapter(CopilotClientAdapter):
     converted to Hermes' on-disk shape via :meth:`_to_hermes_format`.
     """
 
+    remote_shape = remote_shape_row("hermes")
+
     supports_user_scope: bool = True
-    # Non-JSON or JetBrains-managed config: no native content comparison yet.
-    compares_native_connections: bool = False
     target_name: str = "hermes"
     mcp_servers_key: str = "mcp_servers"
 
@@ -67,46 +84,74 @@ class HermesClientAdapter(CopilotClientAdapter):
 
     def _config_path(self) -> Path:
         """Resolve ``<hermes-home>/config.yaml`` honouring ``$HERMES_HOME``."""
-        from ...integration.targets import resolve_hermes_root
+        from ...integration.targets import resolve_user_root
 
-        return resolve_hermes_root() / "config.yaml"
+        # ``resolve`` collapses ``..`` so ``mkdir(parents=True)`` cannot create
+        # unintended intermediate directories.
+        return resolve_user_root("hermes").resolve(strict=False) / "config.yaml"
 
     @staticmethod
     def _to_hermes_format(copilot_entry: dict, *, enabled: bool = True) -> dict:
         """Convert a Copilot-format server entry to Hermes' on-disk shape.
 
-        Drops Copilot-CLI-only fields (``type: "local"``, default
-        ``tools: ["*"]``, empty ``id``) and stamps an explicit ``enabled``.
-        Required transport fields (``url`` for remote, ``command`` for stdio)
-        are only emitted when truthy so a malformed entry never serializes as
-        ``url: null`` / ``command: null`` into Hermes' config.
+        Keeps the modeled keys (``command``/``args``/``env``/``cwd`` for
+        stdio; ``url``/``headers``/``transport`` for remotes) and every
+        passthrough key the shared formatter merged through the ``_extra``
+        denylist (``timeout``, ``auth``, ...). Drops Copilot-CLI-only fields
+        (``type``, ``tools``, ``id``) and stamps an explicit ``enabled`` last.
+        Idempotent, so an entry already in Hermes' shape converts unchanged.
         """
         if not isinstance(copilot_entry, dict):
             return copilot_entry
 
-        url = copilot_entry.get("url")
-        t = copilot_entry.get("type")
-        is_remote = bool(url) or t in ("http", "sse", "streamable-http")
-
         out: dict = {}
-        if is_remote:
-            if url:
-                out["url"] = url
-            headers = copilot_entry.get("headers")
-            if headers:
-                out["headers"] = headers
-        else:
-            command = copilot_entry.get("command")
-            if command:
-                out["command"] = command
-            args = copilot_entry.get("args")
-            if args:
-                out["args"] = list(args)
-            env = copilot_entry.get("env")
-            if env:
-                out["env"] = dict(env)
+        for key in _MODELED_KEYS:
+            value = copilot_entry.get(key)
+            if value is None or (key in _OMIT_WHEN_EMPTY and not value):
+                continue
+            if key == "args":
+                value = list(value)
+            elif key in ("env", "headers"):
+                value = dict(value)
+            out[key] = value
+        skipped = {*_MODELED_KEYS, *_COPILOT_ONLY_KEYS, "enabled"}
+        for key, value in copilot_entry.items():
+            if key not in skipped:
+                out[key] = value
         out["enabled"] = enabled
         return out
+
+    @staticmethod
+    def _v036_render(entry: dict) -> dict:
+        """The entry APM <= 0.36 wrote for the same declaration (lossy allowlist)."""
+        keys = _V036_REMOTE_KEYS if entry.get("url") else _V036_STDIO_KEYS
+        out = {key: entry[key] for key in keys if entry.get(key)}
+        out["enabled"] = entry.get("enabled", True)
+        return out
+
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Render the native Hermes entry, so ownership compares on-disk content."""
+        config = super()._format_server_config(server_info, env_overrides, runtime_vars)
+        return self._to_hermes_format(config) if isinstance(config, dict) else config
+
+    def legacy_managed_renders(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> tuple[dict, ...]:
+        """Add the 0.36 allowlist render, which also dropped stdio ``cwd`` and extras."""
+        kwargs = {"env_overrides": env_overrides, "runtime_vars": runtime_vars}
+        renders = list(super().legacy_managed_renders(server_info, **kwargs))
+        try:
+            current = self.render_server_config(server_info, **kwargs)
+        except ValueError:
+            return tuple(renders)
+        legacy = self._v036_render(current)
+        if legacy != current and legacy not in renders:
+            renders.append(legacy)
+        return tuple(renders)
 
     def get_config_path(self):
         """Path to the Hermes config file (``<hermes-home>/config.yaml``)."""
@@ -153,10 +198,18 @@ class HermesClientAdapter(CopilotClientAdapter):
         untouched (returns ``False``) rather than overwritten.
         """
         path = self._config_path()
+        from ...integration.targets import resolve_user_root
+        from .base import _warn_symlinked_mcp_config
+
+        # Check the configured path: resolving it first would erase the link.
+        user_root = resolve_user_root("hermes")
+        if self._is_linked_config(user_root / "config.yaml", user_root=user_root):
+            _warn_symlinked_mcp_config(path)
+            return False
         try:
             data = self._load_document()
         except _MalformedHermesConfig:
-            _rich_error(
+            library_logger().error(
                 f"{path} is malformed YAML; refusing to overwrite. "
                 "Fix or remove the file manually, then retry."
             )
@@ -168,12 +221,16 @@ class HermesClientAdapter(CopilotClientAdapter):
             for name, cfg in config_updates.items():
                 servers[name] = self._to_hermes_format(cfg, enabled=enabled)
             data[self.mcp_servers_key] = servers
-            path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, yaml_to_str(data), new_file_mode=_CONFIG_FILE_MODE)
+            from .config_journal import journal_config_write, journal_config_written
+
+            text = yaml_to_str(data)
+            journal_config_write(path, text, lf=True)
+            atomic_write_text(path, text, new_file_mode=_CONFIG_FILE_MODE)
             # Tighten perms even when the file pre-existed with a looser mode
             # (atomic_write_text only applies new_file_mode on first create).
             with contextlib.suppress(OSError, NotImplementedError):
                 os.chmod(path, _CONFIG_FILE_MODE)
+            journal_config_written(path)
             return True
         except OSError:
             return False
@@ -188,7 +245,7 @@ class HermesClientAdapter(CopilotClientAdapter):
         runtime_vars=None,
     ):
         if not server_url:
-            _rich_error("server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         try:
@@ -200,13 +257,13 @@ class HermesClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             ok = self.update_config({config_key: server_config}, enabled=enabled)
             if not ok:
-                _rich_error(f"Failed to write MCP config for '{config_key}' to Hermes")
+                library_logger().error(f"Failed to write MCP config for '{config_key}' to Hermes")
                 return False
 
-            _rich_success(f"Successfully configured MCP server '{config_key}' for Hermes")
+            # The integrator's install tree reports success once (#3994).
             return True
         except Exception:
             # Do not interpolate the exception message: registry URLs and
             # other inputs may carry embedded credentials.
-            _rich_error("Error configuring MCP server")
+            library_logger().error("Error configuring MCP server")
             return False

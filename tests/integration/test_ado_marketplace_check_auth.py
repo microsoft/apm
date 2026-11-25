@@ -5,10 +5,13 @@ from __future__ import annotations
 import subprocess
 from urllib.parse import urlparse
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.core.auth import AuthContext, AuthResolver
+
+pytestmark = pytest.mark.component
 
 
 def test_marketplace_check_uses_ado_url_and_bearer_auth(monkeypatch, tmp_path) -> None:
@@ -35,7 +38,7 @@ marketplace:
     monkeypatch.setattr(
         AuthResolver,
         "resolve",
-        lambda _self, host, org=None: AuthContext(
+        lambda _self, host, org=None, **_kwargs: AuthContext(
             token=bearer,
             source="AAD_BEARER_AZ_CLI",
             token_type="unknown",
@@ -72,7 +75,7 @@ marketplace:
             stderr="",
         )
 
-    monkeypatch.setattr("apm_cli.marketplace.ref_resolver.subprocess.run", fake_git)
+    monkeypatch.setattr("subprocess.run", fake_git)
 
     result = CliRunner().invoke(marketplace, ["check", "--verbose"])
 

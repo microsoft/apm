@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.commands.outdated import (
     OutdatedRow,
@@ -16,6 +16,8 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -108,6 +110,26 @@ class TestCheckMarketplaceRef:
         dep = _marketplace_dep()
         result = _check_marketplace_ref(dep, verbose=False)
         assert result is None
+
+    @patch("apm_cli.marketplace.client.fetch_or_cache")
+    @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
+    def test_denied_catalog_is_an_error_row_not_a_git_fallback(self, mock_get_mkt, mock_fetch):
+        """A 401/403 catalog never falls back to a Git-derived answer (#3300)."""
+        from apm_cli.marketplace.errors import MarketplaceAccessDeniedError
+
+        mock_get_mkt.return_value = _source()
+        mock_fetch.side_effect = MarketplaceAccessDeniedError(
+            "acme-tools",
+            "Access to marketplace 'acme-tools' was denied (HTTP 401): no credential is "
+            "set. Set APM_MARKETPLACE_TOKEN_ACME_TOOLS (Bearer token).",
+            status=401,
+        )
+
+        result = _check_marketplace_ref(_marketplace_dep(), verbose=False)
+
+        assert result is not None
+        assert result.status == "access-denied"
+        assert "APM_MARKETPLACE_TOKEN_ACME_TOOLS" in result.error
 
     @patch("apm_cli.marketplace.client.fetch_or_cache")
     @patch("apm_cli.marketplace.registry.get_marketplace_by_name")

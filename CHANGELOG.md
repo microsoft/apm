@@ -7,115 +7,362 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.38.1] - 2026-11-23
 
-- The README and quickstart now show how to teach your coding agent APM with the official `apm-guide` package (`apm install microsoft/apm/packages/apm-guide#<release>`); the README "Works with agentrc" section is removed. (#3776)
-- Release CI is faster: Linux integration is split across runners by measured test duration, macOS runs a smaller platform-sensitive subset (still one job per architecture), and a release tag whose commit already passed a full nightly or dispatched run is promoted in minutes without re-running the suites; any other tag validates fully before publishing, as before. (#3771)
-- `apm init --discover` now explains that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` reported as `unsupported` stays in place and is not adopted as an APM package, and that copies outside known target directories such as `.claude/` are not inventoried; `apm compile` with no APM content notes that native files are not APM content and points to `apm init --discover`. Statuses, report keys and exit codes are unchanged. -- by @AndresDvst (#3737)
+### Highlights
 
-## [0.36.0] - 2026-11-17
+- `apm install` now enforces org policy `manifest.content_types.allow` on the primitive kinds each package ships. (#4838)
+- `apm install -g` fixes for user-root primitives, shared skill directories, context links, dropped Claude targets and `CLAUDE_CONFIG_DIR` hooks. (#4684, #4868, #4880, #4751, #4795)
+- Upgrade notes: content-type policy, native plugin `.gitattributes`, merged hook entries and kept MCP entries can now fail installs or `apm audit --ci`. (#4838, #4842, #4798, #4818)
 
-**Upgrade notes:** APM now requires Python 3.11 or newer for `pip`, `pipx` and `uv` installs; the standalone installers and prebuilt binaries are unaffected. After upgrading, run `apm install` once and commit the re-rendered files and `apm.lock.yaml` (export local edits with `apm export-patch` first), because `apm install --frozen` now fails closed when a deployed file differs from its locked hash (#3654). Packages that relied on `*-<target>-hooks.json` or `hooks-<target>.json` filenames to route hooks must declare the target in a package `apm.yml` instead, or consumers can narrow the dependency with `targets:`; see "Migrating from filename routing" in the hooks guide (#3613). Hostless policy patterns whose first segment contains a dot, such as `my.group/**`, are now read as hosts; rewrite them with their host, for example `gitlab.com/my.group/**` (#3606). Transitive MCP servers that set their own registry, env, headers, args or URL now need `--trust-transitive-mcp` on each `apm install` or `apm update`, because consent is no longer carried in the lockfile; and `ARTIFACTORY_APM_TOKEN` is only sent when `PROXY_REGISTRY_URL` is set, so set `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_TOKEN` (#3716).
+### Breaking changes and upgrade notes
 
-### Added
-
-- New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
-- `apm view --file PATH` (`-g` for user scope) shows which package deployed one installed file, such as a skill's `SKILL.md`: its recorded owners, source, ref and commit, and whether the file still matches. Read-only; exits `1` when provenance is unrecorded or an owner is unresolved. (#3608)
-- Declare marketplaces once in the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and `apm install -g` registers them on every machine, removing entries you delete from the list while leaving registrations made with `apm marketplace add` untouched. A project or package `apm.yml` with `marketplaces:` fails with an error pointing to the user manifest. (#3610)
-- `apm marketplace add --path catalogs/<audience>/marketplace.json` registers a catalog stored anywhere inside a git-backed marketplace repository, so one repository can serve one catalog per audience; the path is saved with the registration and reused by `browse`, `search`, `update` and `apm install`. (#3628)
-- `apm marketplace add ./apm.yml --name <name>` registers a local authoring `apm.yml` as a live marketplace without running `apm pack`; `browse`, `view` and `install` reread the file on each command, and `--offline` reads it without network when remote entries pin full commit SHAs. Registering or browsing never installs packages, runs hooks or writes catalog files. -- by @Nadeesha-D-Shalom (#3367)
-- `apm marketplace package add` and `apm marketplace package set` accept `--category` to set a package's marketplace category, which Codex output requires, without hand-editing `apm.yml`. -- by @WilliamK112 (#2637)
-- Dependency policy `allow`/`deny` patterns can name a host, such as `github.com/example-org/**` or `ghes.corp.example/**`, matched against every direct and transitive dependency at install and in `apm audit`, which now also checks dev dependencies, `replace`-selected sources and transitive lockfile entries. Hostless patterns still match any host. (#3606)
-- GitLab policy discovery now combines the `apm-policy` projects from the top-level group down to the project's subgroup with the tighten-only merge, so a team policy adds rules without dropping company ones; `policy.hash` pins the nearest policy, and CI needs read access to every ancestor `apm-policy`. -- by @rrazvd (#2933)
-- Licence files now travel with subdirectory installs: APM copies the repository's nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` into the package and next to each deployed skill without one, and records each copy under `carried_licenses` in `apm.lock.yaml`. `apm uninstall` removes the copies and `apm audit` reports a missing or edited one. (#3646)
-- `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first; a lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`. -- by @Ryangr0 (#3596)
-- `apm init --yes` accepts `--name`, `--description`, `--version` and `--author`, so one command writes a finished `apm.yml` with no prompts; without `--yes` the flags seed the prompt defaults. -- by @atulya-singh (#2231)
-- `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
-- OpenCode targets write native OpenCode 2 MCP entries under `mcp.servers` when `opencode.json` already declares that map, translating `enabled` to `disabled` and keeping extra fields; files without it keep the OpenCode 1 layout. -- by @RamsesJM (#3414)
+- `apm install` now enforces policy `manifest.content_types.allow` against each package's primitive kinds and refuses under `block`; widen the allow list or remove the package. (#4838)
+- `apm install` refuses native plugins when `.agents/plugins/.gitattributes` lets git convert their bytes; end that file with `* -text` or delete it. (#4842)
+- `apm audit --ci` fails, and `apm install` warns, on merged hook entries matching a denied or unapproved package's hook with no valid ownership evidence; remove entries you did not add. (#4798)
+- Without a lockfile, `apm install` retires undeclared local bundle MCP entries it can prove unchanged, and `apm audit --ci` fails on kept ones; remove or redeclare them. (closes #4801, #4818)
 
 ### Changed
 
-- **BREAKING:** APM now requires Python 3.11 or newer (Python 3.10 reached end of life in October 2026); standalone installers and prebuilt binaries are unaffected. (closes #3562, #3589)
-- **BREAKING:** `apm install --frozen` now verifies every deployed file against its hash in `apm.lock.yaml` and exits `1` on a mismatch, naming each path with its expected and observed hash (OpenAPM req-lk-017), instead of rewriting or keeping the file and exiting `0`; this includes user-edited skills and files a newer APM renders differently. Migration: after upgrading APM, run `apm install` once and commit the re-rendered files and `apm.lock.yaml`; export local edits with `apm export-patch` first. (closes #3654, #3672)
-- **BREAKING:** hook filenames no longer choose install targets. `*-<target>-hooks.json` and `hooks-<target>.json` routing is removed; every hook file in a package reaches every target allowed by `apm.yml` (the active targets, narrowed by the package's `target:` and the dependency's `targets:`), and a package that relied on those names to keep a hook file from a target now fails `apm install` (and `apm uninstall` of another package stops before changing hook settings), naming the target and files. Migration: package authors split each target's hook files into a package whose `apm.yml` declares that target; consumers can instead narrow the dependency with `targets: [claude]`; then reinstall. See "Migrating from filename routing" in the hooks guide. (#3613)
-- **BREAKING:** a dependency policy pattern whose first segment contains a dot (and does not start with one) is now read as a host, so an existing hostless pattern for a dotted GitLab group such as `my.group/**` matches nothing: an `allow` entry rejects those packages and a `deny` entry no longer blocks them. Rewrite it with its host, for example `gitlab.com/my.group/**`; `./` and `../` local-path patterns are unchanged. (#3606)
-- `apm install` writes Copilot hook events with a documented Claude name (`subagentStop`, `sessionEnd`, `userPromptSubmitted`, `postToolUseFailure`, `preCompact`) to `.claude/settings.json` under that Claude name, once per hook. Lower-case events Claude Code does not support (for example `errorOccurred`) now fail the package before Claude settings change. (#3613)
-- Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553, #3708)
-- Cursor rules now use Cursor's native always-on `alwaysApply: true` instead of `globs: **` when an instruction's `applyTo` is exactly `**`; reinstalling replaces old rules. -- by @WilliamK112 (#2030)
-- `apm mcp install --help` now lists its forwarded install options (`--transport`, `--url`, `--env`, `--header`, `--target`, `--registry` and the rest) with the same help text, accepted values and shell completion as `apm install`; forwarded installs behave as before. (#3633)
-- `apm compile` places scoped `applyTo` instructions much faster on large projects (about 41x on a ~10,000-directory benchmark); generated output is unchanged. -- by @sekosen (#3379)
-- `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so validation no longer spends anonymous REST quota; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
-- When a direct `apm install --mcp NAME` finds no match, the error names the searched registry and shows how to search it or choose another with `--registry <URL>`; APM never falls back to another registry. New docs page: "Choosing an MCP registry". -- by @VedanthB (#2803)
-- `apm install` now exits `1` when a same-name MCP server in a JSON-config target (VS Code, Copilot, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity) differs from a dependency's, as Claude and Codex already did, keeping the user's entry. `apm audit --ci` fails when the current directory has no `apm.yml`, and `apm.yml` files with a duplicate top-level key, or that declare a repository together with one of its own subdirectory packages, are rejected before any file changes. (#3709)
-- `apm install <bundle>` without `--target` deploys only to the `targets:` declared in the project's `apm.yml` (then `apm config target`) instead of auto-detecting past them. (#3709)
-- Transitive MCP entries that set their own registry or env, header, args or URL overlays now need `--trust-transitive-mcp`; `apm update` accepts `--trust-transitive-mcp`, and the lockfile no longer carries transitive MCP consent between runs. (#3716)
-- `apm uninstall` without `apm.lock.yaml` no longer removes skill directories, at project or user scope, because it cannot tell which ones APM deployed. (#3716)
-- `APM_POLICY_DISABLE` accepts only the documented value `1` in every command, including `apm audit` `fail_on_drift`; lifecycle scripts follow `fetch_failure_default` when the org policy cannot be fetched. (#3716)
-
-### Removed
-
-- The unpublished Dev Container Feature (`devcontainer/`) is gone; it was never released to GHCR. The installation guide now has a "Dev containers" section showing the installer and pip recipes. (#3642)
+- `apm install`, `apm update` and `apm lock` parse `apm.lock.yaml` once instead of twice when nothing changed. (closes #4742, #4835)
 
 ### Fixed
 
-- `APM_HOME` is now the single root for APM-owned user state (global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, deployment receipts), so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; a relative value resolves against the starting directory. -- by @WilliamK112 (#3614, #3707)
-- Packages with in-repo symbolic links now record the same `content_hash` on Windows, macOS and Linux, so `apm install --frozen` verifies a lockfile generated on another platform, and they install on Windows without Developer Mode or symlink privileges. Links that escape the repository, are broken or loop fail before hashing, and older cached checkouts are re-created automatically. (#3545, #3603, #3673)
-- Packages from repositories whose `.gitattributes` uses `text` or `text=auto` now record the same `content_hash` on Windows as on Linux and macOS, so `apm install --frozen` accepts a lockfile generated on another platform. A lockfile that already recorded a CRLF hash still fails `--frozen`; follow the `Content hash mismatch` recovery steps in the troubleshooting guide to re-record it. -- with credit to @vlsi for the report (#3599)
-- `apm install`, `apm update` and other commands that run Git no longer crash with `UnicodeDecodeError` on Windows hosts whose locale codec is not UTF-8 (such as cp936): APM decodes Git output as UTF-8 and stops with an error naming the Git command and offending byte when it is not valid UTF-8. -- with credit to @Bortlesboat (#3626)
-- `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write, instead of failing as in 0.35.0; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
-- `apm update` on a fresh clone or CI runner without local receipts (such as `microsoft/apm-action` scheduled updates) now replaces committed skill files that match what the locked version renders and adds the new version's files; when any skill file was edited locally, the update fails before writing anything. (#3638)
-- `apm install` now resolves a local package's dependencies from the `apm.yml` it copies in that run, so a dependency added to or dropped from a local package is installed or removed at once. `apm update` and `apm install --update` now fetch plain Git dependencies on a branch or tag during resolution, so children re-pinned by the new commit are resolved, deployed and locked in the same run. -- by @adityaanikam (#3571)
-- `apm install` again resolves transitive `git:` + `path:` dependencies from private GitHub monorepos on Git older than 2.36: an incomplete sparse checkout is retried with credentials instead of being cached as an empty package, and incomplete caches left by 0.29.1 and later are rebuilt, so `APM_NO_CACHE=1` is no longer needed. -- with credit to @jiteshjadav-rogers (#3602)
-- A first install of an SSH-declared dependency on a non-GitHub host (for example `git@gitlab.example.com:org/repo.git`) now fills the persistent Git cache over SSH instead of trying `https://<host>` first. (#3640)
-- When a registry proxy serves an archive that APM rejects (an unsafe member such as a symlink, or a body that is not a zip), `apm install` now reports that rejection instead of a later fallback URL's HTTP 404. -- by @MohammedAlkindi (#3375)
-- Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release unless the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1. Credit to @xubenqiang for the approach in #3469. (#3601)
-- `require_pinned_constraint` judges each direct dependency's constraint as declared in `apm.yml`, so a bounded range such as `pkg-a#^1.0.0` passes even when it resolves to a `pkg-a-v1.1.0` tag, and a package's own release tags count as pinned; fresh install, locked reinstall, update and `apm audit` agree. -- by @Kaustubh1235 (#3652)
-- `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing anything, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
-- `apm install DIR` with a single argument now installs an APM source package that has `apm.yml` and a root `plugin.json` as a local dependency, exactly like `apm install DIR DIR`, instead of copying its source tree as a legacy bundle. Approach from #3447 by @xubenqiang. (#3604)
-- `apm install --update` and other same-process re-downloads of a Claude marketplace plugin now stamp the re-materialized tree with the short commit SHA, so the recorded `content_hash` matches and a later fresh install passes the integrity check. If a lockfile already recorded an unstamped hash, run `apm install --update` once to re-record it. -- by @McNultyyy (#2627)
-- When `apm install` fails after deploying files to harness directories such as `.claude/agents/`, the failure output now lists each file `apm.lock.yaml` does not track and how to recover, instead of reporting that no changes were committed. (#3641)
-- `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; `apm init` still fills it in. (#3630)
-- `apm install --target claude` keeps `${VAR}` and `${VAR:-default}` references in the project `.mcp.json` instead of prompting for and writing the values, and names missing variables; user scope (`~/.claude.json`) is unchanged. -- by @Aaryan-Dadu (#3377)
-- `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place. -- by @Bronyal-lzx (#2944)
-- `apm install` and `apm update` now write untyped flat command hooks as Codex `"type": "command"` handlers in `.codex/hooks.json`, as Codex's hook schema requires; reinstalling replaces older APM-owned untyped entries. -- by @Parth-Vasave (#3385)
-- `apm install --target codex` rewrites package-relative Markdown links in a converted agent's `developer_instructions` for its `.codex/agents/` location, so a link such as `../skills/<name>/SKILL.md` reaches the installed file. Reported by @hcoona. (#3611)
-- `apm install` for Codex now warns, naming the agent, when an agent's `model` is a Claude alias (`opus`, `sonnet`, `haiku`, `inherit`) or `claude-*` id; the value is still written as declared. Rebuilt from #3481 by @xubenqiang. (#3650)
-- `apm compile --global` and `apm install -g` honor an absolute `CODEX_HOME` for Codex `AGENTS.md`, agents and hooks; unset or blank keeps `~/.codex`, and a relative value fails before writing. -- by @xubenqiang (#3491, #3653)
-- `apm install -g` and `apm update -g` for Cursor now deploy package instructions as `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context, instead of skipping them; `apm uninstall -g` removes only package-owned rules. -- by @yahavi (#2506)
-- `apm deps tree` now places transitive dependencies under the declaring package when sibling subdirectory packages from one repository share a legacy `resolved_by` value, instead of listing them as "could not place in tree"; `apm deps why` names subdirectory parents by full path. (#3537)
-- `apm deps list` no longer reports skills bundled inside a declared whole-repository package as orphaned, and switching a dependency to `path:` subdirectory dependencies on the same repository trims the old checkout on the next `apm install` or `apm update`, so `apm deps list`, `apm deps tree` and `apm prune` agree. Reproduction by @maro114510. (#3612)
-- `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks. -- reproduction and approach by @nefayran (#3600)
-- `apm pack` writes the `apm.yml` version into every `plugin.json` in the bundle, so a bundle no longer ships a manifest version from a stale authored `plugin.json`; a warning names the authored file to update. -- by @abhishekacharya200 (#3408)
-- When `apm install` fails TLS verification, the hint now matches the selected trust mode (`APM_DISABLE_TRUSTSTORE`, `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`) instead of recommending settings those modes ignore; certificate verification is unchanged. -- by @aryansk (#2602)
-- HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells); an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
-- `apm --help` prints every top-level command summary in full at 80 columns, including `apm view`, instead of cutting some of them off with `...`; each command's own `--help` text is unchanged. (#3643, #3651)
-- `apm export-patch` writes patches for subdirectory packages with paths from the repository root, so `git apply` works from a clone of the package repository, and exports skill edits in Claude plugin packages instead of skipping them; `apm view --file` accepts an absolute path through a symlinked working directory such as macOS `/tmp`. (#3672)
-- When `apm.lock.yaml` is a symlink, `apm update`, `apm install --update` and `apm uninstall` refuse before deploying, deleting or editing anything. `apm install --frozen` keeps the files and lock rows of a dependency you removed from `apm.yml`, replays a lockfile written under `PROXY_REGISTRY_ONLY` without further proxy requests, and no longer prints "Updated apm.lock.yaml" when it writes nothing. (#3672)
-- Stale-file cleanup in `apm install`, `apm update`, `apm prune` and `apm uninstall` deletes a lockfile-listed file only when its recorded hash matches, and `apm compile` keeps a hand-authored nested `AGENTS.md`, `CLAUDE.md` or `GEMINI.md` with a warning instead of overwriting it. Removing an MCP server or a hook file now cleans its entries from `.mcp.json`, `opencode.json` and merged hook configs, including after the harness directory was pruned, without touching user-authored servers that share a short name. (#3672)
-- A targeted `apm install PKG` and `apm prune` keep a dependency another installed package still needs, `apm uninstall` keeps `is_dev` on dependencies `devDependencies` still need, and a refused `apm uninstall` leaves `apm.lock.yaml` claiming only files still on disk so a retry completes. `apm uninstall -g` under `CLAUDE_CONFIG_DIR` or `HERMES_HOME` no longer removes the package from the other runtime's default profile. (#3672)
-- `apm audit --ci` replays local packages through the same package image install builds, so a local `apm.yml` package with a root `plugin.json`, or a contained symlinked instruction, no longer reports false `unintegrated` or `orphaned` drift; `apm audit --ci --no-cache` fetches a fresh auto-discovered org policy. (#3672)
-- `apm mcp install` exits non-zero when the forwarded install fails, and `apm deps list` shows the host-qualified key and correct source for non-GitHub dependencies. `apm pack` and `apm marketplace package add/set --ref` give accurate ref errors, bundles include hook scripts referenced from `.apm/hooks/`, `apm pack` warns about each skipped symlink, and a local bundle install skips plugin hooks with a warning. (#3672)
-- The policy docs now state that org policy governs project installs only: `apm install -g` (user scope) is not governed by org policy today, including lifecycle `executables.deny_all`. (#3672)
-- `apm install` no longer rewrites a JSONC or trailing-comma MCP config (`.vscode/mcp.json`, `.github/mcp.json`, Gemini, Kiro, Claude) from scratch, which deleted user servers; it leaves the file unchanged, reports the server as not configured and exits `1`. All JSON MCP configs are written atomically and symlink-safely, and project MCP config files that are symbolic links are refused like user-scope ones. (#3709)
-- `apm install` no longer overwrites a user-authored rule with the same name in `.claude/rules`, `.cursor/rules`, `.windsurf/rules` or `.kiro/steering` (it adopts identical bytes, otherwise skips with a warning unless `--force`), and `apm uninstall` without a lockfile no longer deletes user-authored `.cursor/rules/*.mdc` and `.github/instructions/*.instructions.md` files. Removing a dependency whose skill directory also holds a user file keeps that directory, and `apm audit --ci` reports such a name clash as `unmanaged-conflict` with rename guidance. (#3709)
-- `apm uninstall X` removes every declaration of `X` (both sections, any spelling), and `apm install --dev X` moves `X` from `dependencies` to `devDependencies` instead of adding a duplicate. A mixed-case `Owner/Repo` dependency keeps its transitive dependencies in `apm deps tree` and `apm deps why`, targeted `apm install PKG` / `apm update PKG` no longer re-read unselected local packages, and on macOS and Windows `apm update` keeps primitives a package renamed only by case. (#3709)
-- SIGTERM (for example a cancelled CI job) now takes the same path as Ctrl+C: the install transaction rolls back and running lifecycle scripts, such as `pre-compile`, are stopped before APM exits; a second SIGTERM terminates. (#3709)
-- `apm approve` now takes effect for `github.com` dependencies and `apm approve --pending` honours user-level grants; `apm approve`, `apm deny` and `apm install --mcp` keep comments, key order and anchors in `apm.yml`. (#3709)
-- `apm view -g --file` reports provenance for user-scope files of every target and `apm view --file` matches decomposed (NFD) path spellings; `apm export-patch` no longer writes two packages whose names differ only by case to one patch file. (#3709)
-- Install, compile and export-patch name an obstructed path and how to fix it instead of printing raw errno text; an unquoted `lockfile_version: 1` is read as `"1"`, `apm config get/set` with an unknown key lists the valid keys, and `apm deps list`, `apm deps tree` and `apm prune` name a lockfile with merge conflict markers. (#3709)
-- `apm install <bundle>` for Codex, Gemini or OpenCode no longer records the instructions it stages under `apm_modules/` as deployed files, so `apm audit --ci` passes after a clean bundle install; staging is recorded in the new `local_staged_files` lockfile field, still feeds `apm compile`, and `apm prune` removes it. (closes #3705, #3717)
-- `apm install <bundle> --target codex` skips the bundle's Markdown agents with one `[!]` warning per agent instead of writing them unchanged into `.codex/agents/*.toml`, which Codex cannot load. (closes #3706, #3717)
-- Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
+- `apm install -g` records files from user-root primitives (`~/.apm/agents`) in the user lockfile, so later installs deploy source edits. (closes #3772, #4684)
+- `apm install -g` retires a Claude plugin's `bin/`, plugin root and Claude registration after `claude` is dropped from `targets:`. (closes #4744, #4751)
+- `apm install -g` deploys scripted hooks under an absolute `CLAUDE_CONFIG_DIR` outside HOME instead of refusing them; paths leaving that root are still refused. (closes #4772, #4795)
+- The first `apm install -g` after upgrading updates an edited user-root skill when switching between targets sharing `~/.agents/skills` (Copilot, Codex). (closes #4813, #4868)
+- `apm audit --ci` no longer reports drift after a clean `apm install -g` of a user-root agent that links to a context file. (closes #4832, #4880)
+- `apm install --mcp` refuses a name that collides with your own `.mcp.json` entry before writing, leaving `apm.yml` and `.github/` unchanged. (#4803)
+- `apm uninstall` names the executable kinds it retires from a no-longer-allowed survivor, such as LSP servers or canvas extensions, instead of always saying hooks. (closes #4567, #4662)
+- When `apm uninstall` keeps a dependency another package needs, every lock entry it reaches, including virtual subdirectory packages, matches what `apm install` records. (#4811, #4848, #4870)
+- `apm install <bundle>`, `apm install --mcp` and `apm mcp install` also warn about kept MCP entries, and kept-entry warnings are accurate. (#4908)
+- `apm prune --dry-run` lists native plugins a real prune would retire, and `apm prune` exits 1 when it cannot check their approvals and policy. (#4845)
+- `apm pack` in a Claude project refuses, naming `apm install`, when a shipped dependency's installed copy is missing, unless that package excludes Claude in `targets:`. (closes #4850, #4824, #4858)
+- The policy docs no longer say user-scope org policy ships in 0.38; `apm install -g` still skips org policy until 0.39. (#4806)
+
+## [0.38.0] - 2026-11-22
+
+### Highlights
+
+- `apm install` runs up to 3x faster on large projects and recognises its own earlier writes after a branch round trip. (#4735, #4730)
+- Project-scope installs deploy Claude-format plugins whole and declare them in Claude Code and GitHub Copilot settings. (#4559)
+- `--policy` enforces an explicit policy, failing closed, and org dependency policy now also gates `apm compile`, `apm run`, `apm preview`, `apm pack` and local bundles. (#4001, #4724, #4734, #4645, #4769)
+- Upgrade notes: Claude instructions move to `AGENTS.md`, hook packages need `apm approve` once, and non-dotted IPv4 `http://` registry hosts are no longer private. (#4005, #4688, #4521)
+
+### Breaking changes and upgrade notes
+
+- Hook approvals now pin every file deployed with the hook; existing hook approvals show as changed once, so run `apm approve <pkg>` again. (#4688)
+- Claude `**` and directory instructions move from `.claude/rules/` to `AGENTS.md`, imported by `CLAUDE.md`: run `apm install` then `apm compile`; hand-authored `CLAUDE.md` needs `@AGENTS.md`. (closes #3939, #4787, #4005, #4805)
+- Under a blocking `dependencies.allow`, `apm install <bundle>` refuses bundles recording a disallowed package or none; install an allowed package or update the policy. (closes #4646, #4769)
+- `http://` registry URLs with an integer, hex or leading-zero IPv4 host (`http://167772161/apm`) are no longer private; use `http://10.0.0.1/apm` or set `insecure: true`. (#4521)
+
+### Added
+
+- `apm install --policy` and `apm update --policy` enforce a local, URL or `owner/repo` policy, tighten-only with discovered policy, failing closed if it cannot load. (closes #1925, #4001)
+- `APM_STRICT_HOST_CREDENTIALS=1` keeps GitHub token variables on the configured host; other `github.com` and `*.ghe.com` hosts need their own sign-in. (closes #4324, #4615)
+- Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
+- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/`, deriving missing descriptions and skipping agents with an empty name or body. (closes #3714, #4007, #4613)
+- Private hosted `marketplace.json` catalogs added with `--name` authenticate via `APM_MARKETPLACE_TOKEN_<NAME>` (Bearer) or `APM_MARKETPLACE_USER_<NAME>` and `APM_MARKETPLACE_PASS_<NAME>` (Basic). (closes #3300, #4020)
+- The CLI reference lists every deprecation with its replacement, deprecating version and removal horizon; warning text is unchanged. (closes #4019, #4035)
+- The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, verified end to end on every PR. (#4015)
+- `apm compile` and `apm audit` warn when a deployed file links to a missing `apm_modules/` target, naming the file and `apm install` as the fix. (closes #3143, #4676)
+- Project-scope `apm install` deploys Claude-format plugins whole to `.agents/plugins/` and declares them in Claude Code and GitHub Copilot settings. (closes #3921, #4559)
+- After switching branches and back without reinstalling, `apm install` deploys a source edit to a skill directly instead of asking to move it aside. (closes #4428, #4730)
+
+### Changed
+
+- `apm install` and `apm update` run up to 3x faster on large projects: a no-op install of 200 packages drops from 133 to 44 seconds. (closes #4733, #4735, #4761, #4766, #4771)
+- A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (closes #4282, #4612)
+- `apm install` refuses before writing anything when a managed file it would replace lacks deployment evidence, naming every such file. (closes #4381, #4652)
+- `apm install` refuses a self-defined or registry MCP server that collides with a native connection or a lockfile record before writing any file. (closes #4268, #4741, #4745, #4763)
+- OpenAPM native plugin activation profile Part C records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
+
+### Fixed
+
+- `apm install` (including `--frozen`) replays a registry package from its new registry URL when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
+- The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs change no bytes. (closes #4572, #4597)
+- `apm install` with a native Claude plugin and MCP or LSP servers writes `apm.lock.yaml` once instead of committing it before MCP/LSP reconciliation. (closes #4329, #4579)
+- `apm install` keeps a same-name LSP server entry you wrote, configures the other servers and exits 1, as with MCP conflicts. (closes #4628, #4654)
+- `apm install` deploys an approved package that declares both hooks and LSP servers instead of failing. (closes #4658, #4680)
+- `apm install --target` narrowed to fewer runtimes keeps still-declared MCP servers on the other runtimes instead of removing them. (closes #4562, #4666)
+- `apm install` retires the hook files a denied package deployed even when `apm.lock.yaml` is missing; edited files stay and `apm audit --ci` reports them. (#4644)
+- Without `apm.lock.yaml`, `apm install` removes an MCP entry it provably wrote and no longer deploys; unproven entries stay and `apm audit --ci` reports them. (closes #4737, #4760)
+- `apm install` warns, and `apm audit --ci` fails, naming any unrecorded file at a denied or unapproved package's hook path; nothing is deleted. (#4767)
+- A failed MCP or LSP configuration write during `apm install` restores the deployed files, configs and `apm.lock.yaml`; connection collisions are unchanged. (closes #4594, #4681)
+- A failed lockfile write after `apm update` or `apm deps update` restores the deployed files and leaves `apm.lock.yaml` unchanged. (closes #4664, #4686)
+- `apm install` replaces each deployed file atomically, so a running hook or script never reads a partially written file. (closes #4691, #4712)
+- A converged `apm install` no longer rewrites identical `apm_modules/*/.apm-pin` cache markers, so a no-op install writes nothing. (closes #4790, #4794)
+- `apm install` in a github.com org without a policy repository makes 4 policy requests instead of 24, saving seconds per run. (closes #4782, #4786)
+- A refused `apm install --frozen` on a widened target set no longer leaves merged hook configuration (`.claude/`, `.gemini/`) on disk. (closes #4638, #4682)
+- `apm install` narrowed by `--target` names each stale skill copy it keeps in an inactive target, with the command that refreshes it. (closes #4692, #4708)
+- A failed `apm install` on a same-name user LSP entry leaves `apm.lock.yaml` unchanged when no other LSP server was written. (closes #4697, #4705)
+- A refused native plugin registration no longer adds an empty `mcp_target_servers` field to `apm.lock.yaml`. (closes #4685, #4689)
+- On macOS and Linux, backslash local paths (`.\pkg`, `..\pkg`, `~\pkg`) install like their `/` forms instead of failing with a traversal error. (closes #4699, #4707)
+- `apm install` tells you to set `GITHUB_HOST` when a positional argument names an unrecognised GitHub Enterprise Server host. (closes #2775, #4665)
+- `apm install --frozen` and `apm audit --ci` accept a plugin installed from a local marketplace directory or `marketplace.json` file. (closes #4639, #4655)
+- `apm install --frozen` and `apm audit --ci` accept a monorepo library referenced as `./packages/lib` from the root and `../lib` from a sibling. (closes #4731, #4739)
+- `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4620)
+- `apm uninstall` keeps a skill-directory file another installed package still deploys, rechecking each file right before removing it. (closes #4750, #4752)
+- `apm uninstall` keeps a dependency another installed package still needs, so `apm install --frozen` keeps passing. (closes #4749, #4765)
+- `apm uninstall` no longer writes `apm.yml` or `.apm/` into a surviving local dependency's source directory; it validates a staged copy. (closes #4566, #4649)
+- `apm uninstall` after a target change no longer deploys unrecorded files to the new target; it says to run `apm install` instead. (closes #4636, #4663)
+- `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content. (closes #4556, #4580)
+- `apm install <bundle>` and `apm pack` apply org `dependencies.deny`, and a local bundle's canvas follows the executables gate like its hooks. (#4645)
+- Reinstalling a local bundle after `apm.lock.yaml` is lost no longer leaves MCP lock state that `apm audit --ci` and `apm install --frozen` reject. (closes #4634, #4657)
+- `apm pack` ships a package's root `skills/` when `.apm/` authors no skill, so the bundle carries the skills a path install deploys. (closes #4709, #4713)
+- `apm pack` omits a canvas dependency the executables gate parks, naming `apm approve` or `apm policy explain`, instead of failing. (closes #4714, #4729)
+- Claude hook bundles keep a nested `package.json`, so a nested ES module hook runs with its own module type. (closes #2950, #4672)
+- `apm compile` checks a relative Markdown link's file path without its `#fragment` or `?query`, ending false `Referenced file not found` warnings. -- by @bodapatisaikrishna (closes #3255, #3713)
+- `apm compile`, `apm run` and `apm preview` apply the org dependency policy to installed packages and prompts; under `enforcement: block` they refuse, naming blocked packages. (#4724, #4734)
+- `apm audit --ci` and `apm install` accept required packages declared as explicit registry-proxy URLs (`<proxy-host>/owner/repo`) under `required-packages-deployed`. (closes #4037, #4067)
+- `apm outdated` lists refs separately for dependencies that share a host and path but use different providers. (closes #4560, #4622)
+- `apm marketplace list` no longer creates `~/.apm/marketplaces.json` when no marketplace is registered; only registration changes write it. (closes #4600, #4616)
+- `apm pack`, `apm marketplace check` and `apm outdated` print `marketplace.outputs` list-form and output-path conflict warnings, once each. (closes #4046, #4062)
+- Marketplace entries routed to a package registry install by name and replay with `apm install --frozen` from the lockfile, without a commit or the catalog. (closes #4009, #4017)
+- A rebound marketplace refusal under `apm install -g` prints runnable re-record steps instead of telling you to restore `~/.apm/apm.lock.yaml` from version control. (#4555)
+- The marketplace docs explain that a bare `owner/repo` plugin on a `*.ghe.com` marketplace needs `GITHUB_HOST` set to that host; `default_host:` does not admit it. (closes #3970, #4656)
+- On Windows, a policy cache write that overlaps a concurrent cache read no longer leaves the cached org policy unusable. (closes #4601, #4643)
+- Git credential-helper tokens up to 16384 characters, such as enterprise IdP tokens from Git Credential Manager, now authenticate instead of failing as "no credential". (closes #4391, #4587)
+- `apm runtime setup codex` retries transient GitHub API failures instead of failing on the first one. (#4573)
+- An HTTP lifecycle script that finishes late logs to the `scripts.log` of the APM home it fired under, not a later one. (closes #4706, #4717)
 
 ### Security
 
-- Credentials stay with their configured origin: the registry proxy token goes only to the `PROXY_REGISTRY_URL` origin, `ARTIFACTORY_APM_TOKEN` without a proxy URL is not sent (APM warns; set `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_TOKEN`), credential headers are dropped on cross-origin redirects, GitHub MCP credentials attach only to unambiguous `https` hosts, and policy fetches resolve tokens only through APM's auth resolver. (#3716)
-- Deployment refuses symlinked primitive directories and destination files, project MCP config and hook settings files reached through a symlink are not written, `apm unpack` writes only under managed integration directories, and skill cleanup stays inside the project root. (#3716)
-- `apm install <bundle>` deploys only files under a target's primitive directories, and bundle hooks and canvas files follow the executables gate. (#3716)
-- The executables gate now covers package-declared self-defined MCP and LSP servers by the declaring package, survives `apm uninstall` and `apm prune` rebuilds, and matches deny rules on the canonical package identity in any spelling. (#3716)
-- A full-SHA manifest pin stays authoritative over the commit recorded in `apm.lock.yaml`. (#3716)
-- Copilot-family MCP configs outside the project, such as Windsurf's, are written owner-only (0600). (#3716)
-- Org policy `executables.deny_all: true` now suppresses lifecycle scripts on `apm install`, `apm update`, `apm uninstall` and `apm compile` as documented. A `lifecycle:` block that names `pre-compile` asks for fresh `apm lifecycle trust` after upgrading; trust for other blocks is unchanged. -- by @Ryangr0 (#3596)
+- Release CI refuses to publish a `v*` tag whose commit is not on `main` or a `release/*` branch, and fails closed when it cannot check. (closes #3778, #4568)
+
+## [0.37.0] - 2026-11-21
+
+### Highlights
+
+- 0.37 writes lockfile version 4 (security hardening). APM 0.36.1 and older refuse v4 lockfiles, so upgrade every machine and CI runner together. (#4026)
+- **BREAKING:** Copilot project MCP servers move to a root `.mcp.json` shared with Claude Code. (#3875)
+- `apm approve` pins each package's hooks, MCP servers and native plugins to their content. (#3918)
+- Marketplace installs replay from the lockfile and fail closed on rebound aliases and cross-repo `*.ghe.com` sources. (#3915, #3917, #3923)
+- `apm install -g --target claude` installs Claude plugins natively, with MCP, LSP and `bin/` under one approval; non-interactive runs also need `--trust-bin`. (#3290)
+
+### Breaking changes and upgrade notes
+
+- **BREAKING:** `copilot` project MCP servers move to root `.mcp.json`, shared with Claude Code (which ignores `tools` allow-lists); run `apm install`, review static `env:`, commit. (#3875)
+- **BREAKING:** `apm audit --ci` fails MCP servers the lockfile admits but `apm.yml` does not approve; replace `--trust-transitive-mcp` with `apm approve <pkg>` and commit `apm.yml`. (#3918)
+- **BREAKING:** Hostless `dependencies.require` entries match only the default host; host-qualify others, or `enforcement: block` fails `apm install` and `apm audit --ci`. (closes #3993, #4008)
+- `apm install` writes `lockfile_version: "4"`, which older APM refuses; move CI to APM 0.37 before committing it. (closes #4000, #4026)
+- Replace the deprecated `vscode` target with `copilot`; VS Code Local mode no longer gets MCP servers, and `vscode` lockfiles still install. (#3875)
+- Replace singular `target:` with the `targets:` value its warning prints, and delete the ignored `compilation.target`. (#3801, #3875)
+- Remove the deprecated `auto-integrate` config key; it never had an effect. (#3865)
+- With `default_host:` in `apm.yml`, shorthand dependencies resolve against it; write `github.com/owner/repo` for GitHub packages. (#3865)
+- Diamond dependencies deploy each skill only to its own declaration's harnesses; older lockfiles fail `--frozen` until you run `apm install` and commit. (#3769)
+- `mcp.transport.allow` checks the transport APM writes; registry servers on a disallowed or unresolvable transport are blocked, so set `transport:` or update the policy. (#3788)
+- Non-default-port dependencies are keyed `host:8443/owner/repo` and no longer merge with the default port; re-approve their executables with `apm approve`. (#3932)
+- Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#3918)
+- `hooks: true` and `mcp: true` approvals still deploy but warn; run `apm approve <pkg>` to pin them to content. (#3918)
+- `apm lifecycle test --execute` fires only what an install would; run `apm lifecycle trust` for project scripts. `APM_NO_SCRIPTS` and org `deny_all` apply. (#3988)
+- After `apm install -g --target claude` moves to native Claude plugins, reinstall older loose Claude hooks after `apm uninstall -g <package>`. (closes #3181, #3191, #3290)
+- `apm install --frozen` fails before deploying on any edited deployed file; delete the files, rerun `apm install`, commit. (closes #3994, #4004)
+- `PROXY_REGISTRY_ONLY=1` also refuses MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
+- Cleanup deletes only files a receipt or the locked render proves APM wrote; others, such as old hook `package.json` sidecars, are named for you to delete. (closes #3701, #4049)
+- After upgrading, `apm uninstall` needs deployment evidence per file; without it, it changes nothing and names each file (see the uninstall reference if the source is unreachable). (#3701)
+- `apm install` keeps a managed file it cannot prove it deployed, names it and exits 1. (#4382)
+- In CI, `apm install` with a committed lockfile verifies it like `--frozen`; pass `--no-frozen` to opt out. (#4509)
+- **Coming in 0.38:** CLI contract changes to exit codes, stderr routing and locally-authored files at a dependency's path; details in the 0.38 notes. (#3983)
+
+### Added
+
+- Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`; `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
+- OpenAPM v0.1 adds the native plugin activation profile (`req-na-001`-`007`). (closes #3919, #3929)
+- `apm approve` lists what each package runs and pins MCP servers, hook files and native plugins to their content; changed content waits for re-approval. (#3918)
+- `targets:` on `dependencies.mcp` entries limits which targets get each server. (closes #2606, #3989)
+
+### Changed
+
+- Azure DevOps installs report success or HTTP 401 to your Git credential helper; `ADO_APM_PAT` and `az` tokens are never reported. (#3765, #3818)
+- OpenAPM v0.1 adopts amendments 0.1.61-0.1.63 (`vscode` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure`, per-file `.mcp.json` ownership). (#3851, #3865, #3875, #3888, #3905)
+- Docs are rebuilt around the agent supply chain, old URLs redirect, and they state which hosts receive `GITHUB_APM_PAT`. (#3996, #4092, #4371)
+- `apm install --refresh`, `apm update`, `apm marketplace update`, `apm deps update` and `apm lock --update` revalidate marketplace catalogs and fail rather than use stale data. (#3910, #3988)
+- `apm install` upgrades pre-0.37 projects automatically: unedited files re-render once, edited files are kept and named, and a blocked upgrade exits 1. (#4398, #4504)
+- `apm unpack` applies org policy and integrity checks like `apm install <bundle>` and records deployed files in an APM project. (closes #4080, #4157)
+- User-scope (`-g`) policy comes from `$APM_HOME/apm.yml`, never from a git remote; `apm policy status -g` shows the source. (#4158)
+- Remedies never suggest `--force`, `--no-policy`, `APM_POLICY_DISABLE` or editing `apm.lock.yaml`; policy refusals say nothing changed and point to `apm policy status`. (#4424, #4500)
+- `apm audit --format json` adds a structured `remediation` to failing CI checks, and a failed install replay is reported once under `drift`. (#4143, #4424)
+- Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile from a newer APM before changing files. (closes #4086, #4255)
+- `apm lock export` identifies GitHub packages as `pkg:github/<owner>/<repo>@<commit>`, with subpaths and labelled lock hashes. (closes #3994, #4004)
+- `apm init --apply` implies `--discover`, and `apm plugin init` scaffolds a commented `license:` line. (closes #3994, #4004)
+- ASCII tables and panels, full names in `apm marketplace browse`, clearer `--frozen` help, no `apm run` in `apm --help`, and a semver-range hint for unpinned dependencies. (closes #3994, #4004)
+- Faster CLI startup: commands and GitPython load only when needed (`apm --help` imports 332 modules instead of 767). (closes #4118, #4150)
+
+### Removed
+
+- **BREAKING:** `apm init --plugin` and `apm init --marketplace` exit 2 and print the replacement: `apm plugin init` (now with `--version`, `--author`, `--description`) or `apm marketplace init`. (closes #4073, #4074)
+- The unused `marketplace-authoring` experimental flag; marketplace authoring has been GA since 0.11. (closes #3994, #4004)
+
+### Fixed
+
+- Install, lockfile and manifests: 24 fixes, including a failed multi-package install integrating nothing, a symlinked `apm.lock.yaml` refused before deploying, and 0.36-era edits staying proven. (#3989, #4255, #4424)
+- Audit and `--frozen`: 23 fixes, including one verdict on locked content hashes, blocked or interrupted installs restoring deployed files, and stale `apm_modules` copies no longer failing a lock. (#3989, #4255, #4271)
+- Local bundles and `apm pack`: 32 fixes, including pack refusing credential files and packing `.agents/skills/`, and `apm approve --pending` listing parked bundle executables with their key. (#4217, #4283, #4339)
+- Marketplace: 20 fixes, including locked dependencies replaying without the catalog, refusing a plugin whose ref changed since install, and `apm update` re-verifying recorded provenance. (#3915, #4338, #4416)
+- MCP and LSP: 36 fixes, including the `.mcp.json` move never stranding APM entries, config rewrites keeping their formatting, and repeated warnings printing once. (#3909, #4405, #4530)
+- Executables, `apm approve` and `apm deny`: 24 fixes, including `replace:` dependencies (by @MohammedAlkindi), org-denied hooks reported as denied, and `--frozen` agreeing with `audit --ci` on hook pins. (#3742, #4055, #4272)
+- Org policy and proxy: 26 fixes, including denied dependencies refused before any fetch, cached policy verified and applied offline, and exact release tags in `require_pinned_constraint` (by @MohammedAlkindi). (#3775, #4315, #4464, #4534)
+- Uninstall, prune and cleanup: 17 fixes, including uninstall keeping your own files in a removed skill directory and every command listing each path it deletes. (#4217, #4255)
+- Targets and compile: 20 fixes, including Kiro agents with current tool IDs, `targets: [vscode]` dependencies in `copilot` projects, and `--target antigravity` skill paths. (#3864, #3947, #3992)
+- Auth and credentials: 5 fixes, including inaccessible-repository errors naming the host and credential sources tried, never their values, and redacted registry tokens. (#4217, #4240)
+- Windows and terminal output: 13 fixes, including `apm self-update` under PowerShell 7, deep project paths, and non-ASCII paths printed as ASCII escapes. (#3931, #4425, #4487)
+
+### Security
+
+- For dependencies resolved through a registry proxy, prefer pinning to a full commit SHA over a movable tag. (#3777)
+- `apm install -g`, `apm install -g <bundle>` and global `apm uninstall` apply `executables` approvals only from `~/.apm/apm.yml`. (#3986, #3989)
+- `apm install`, `apm update` and `apm audit --ci` retire or report executables once `apm deny` or a removed approval gates them, including those recorded while the gate was off. (closes #3944, #3958, #3990, #3991, #3988, #3989)
+- `apm approve` and `apm deny` match package names exactly and refuse ambiguous names. (#3988)
+- `*.ghe.com` marketplaces refuse bare cross-repo sources, rebound aliases fail closed, and cold installs keep the locked commit. (closes #3912, #3913, #3917, #3923, #3937, #3942, #3945, #3952, #3959, #3961, #3988, #3989)
+- `apm pack` builds plugin MCP servers from authored sources only, so packs carry no install-resolved credentials. (closes #3966, #3988)
+- Local bundles drop revoked, denied or repacked MCP servers on reinstall, and `apm audit --ci` applies org MCP policy to every locked server. (closes #3956, #3988, #3989)
+- Trust and integrity consistency hardening. (#4051, #4061)
+
+The full list of 0.37.0 fixes is in the [closed 0.37.0 milestone issues](https://github.com/microsoft/apm/milestone/19?closed=1) and the closing references of [#4424](https://github.com/microsoft/apm/pull/4424).
+
+## [0.36.1] - 2026-11-18
+
+### Highlights
+
+- Azure DevOps installs fall back to your Git credential helper on every path. (#3790)
+- Remote MCP servers keep their native transport per harness, and older APM-written entries heal on the next install. (#3789, #3807)
+- `COPILOT_HOME` now applies to all Copilot CLI user files. (#3782)
+
+### Breaking changes and upgrade notes
+
+- Lockfiles from 0.36.0 with diamond `skills:`/`targets:` selections fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3786)
+
+### Changed
+
+- `apm init --plugin` and `apm plugin init` no longer default the license to MIT. (#3799)
+
+### Fixed
+
+- Azure DevOps installs, clones, downloads, org policy and marketplace reads use one chain: `ADO_APM_PAT`, `az`, then your Git credential helper; `az` errors show the real reason. Not yet verified against a live Azure DevOps organization. (closes #3752, #3753, #3758, #3790)
+- GitHub org policy discovery uses `GITHUB_APM_PAT_<ORG>` and the same fallback chain as installs. (#3790)
+- Diamond dependencies with different `skills:` or `targets:` deploy and lock the union of every declaration. -- by @azevedo-luis (#3786)
+- Repository names ending in `g`, `i`, `t` or `.`, such as `git/git`, install again. -- by @goranai (#3767)
+- `apm install -g --target copilot` honors `COPILOT_HOME`; relative `COPILOT_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HERMES_HOME` values fail clearly. (#3782)
+- `apm uninstall` keeps a surviving package's `skills:` selection instead of redeploying all its skills. (#3784)
+- `apm install --target opencode` writes LSP servers to `opencode.json`, and installs stop before writing when no target supports LSP. -- by @gideruette (#3730)
+- Registry installs and `apm publish` follow redirects only within the configured registry origin. -- reported by @ashky23 (closes #3726, #3785)
+- Remote MCP transports render per harness (SSE stays SSE; unsupported SSE is skipped with a warning), and `apm mcp show` prints the real transport. (#3789)
+- `compilation.target` policy checks the targets a project actually selects, including `targets:`, CSV values and aliases. -- tests from #3739 by @MohammedAlkindi (#3774)
+- `apm audit --ci` from `~/.apm` no longer fails after `apm update -g` when the user manifest has no packages. (#3797)
+- `apm audit --ci` and `apm uninstall` respect the recorded `--legacy-skill-paths` layout. (#3793)
+- `apm install` rejects `target: intellij` and `target: copilot-app` before writing anything. (#3791)
+- `apm install -g` adopts APM's own converted agents instead of reporting them as skipped. -- by @MohammedAlkindi (closes #3722, #3743)
+- Hermes MCP config keeps `cwd`, `transport: sse` and extra keys such as `timeout`. -- with @Parth-Vasave (#3807)
+
+## [0.36.0] - 2026-11-17
+
+### Highlights
+
+- `apm export-patch` turns your local edits to managed files into upstream patches. -- by @edenfunf (#2162)
+- `apm install --frozen` verifies every deployed file against its locked hash. (#3672)
+- Marketplaces can be declared in the user manifest, served per audience, or registered from a local `apm.yml`. (#3610, #3628, #3367)
+- Dependency policy can match hosts, and GitLab policies inherit from ancestor groups. (#3606, #2933)
+
+### Breaking changes and upgrade notes
+
+- **BREAKING:** Python 3.11+ is required for pip, pipx and uv installs; standalone binaries are unaffected. (closes #3562, #3589)
+- **BREAKING:** `apm install --frozen` fails when a deployed file differs from its locked hash; export edits with `apm export-patch`, then run `apm install` and commit. (closes #3654, #3672)
+- **BREAKING:** Hook filenames no longer route hooks to targets; declare the target in a package `apm.yml` or narrow with `targets:`. (#3613)
+- **BREAKING:** Policy patterns whose first segment has a dot are hosts; rewrite `my.group/**` as `gitlab.com/my.group/**`. (#3606)
+- Transitive MCP servers with their own registry or overlays need `--trust-transitive-mcp` on each run. (#3716)
+- `ARTIFACTORY_APM_TOKEN` is sent only with `PROXY_REGISTRY_URL`; set `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_TOKEN`. (#3716)
+
+### Added
+
+- `apm export-patch` writes one `git apply`-ready patch per package. -- by @edenfunf (#2162)
+- `apm view --file PATH` shows which package deployed a file and whether it still matches. (#3608)
+- Marketplaces listed in the user manifest are registered by `apm install -g` on every machine. (#3610)
+- `apm marketplace add --path` registers a catalog stored anywhere in a marketplace repository. (#3628)
+- `apm marketplace add ./apm.yml` registers a local manifest as a live marketplace. -- by @Nadeesha-D-Shalom (#3367)
+- `apm marketplace package add/set --category` sets a package's category. -- by @WilliamK112 (#2637)
+- Dependency policy patterns can name a host, such as `github.com/example-org/**`. (#3606)
+- GitLab policy discovery merges `apm-policy` from every ancestor group. -- by @rrazvd (#2933)
+- Subdirectory installs carry the repository's licence files, recorded under `carried_licenses`. (#3646)
+- `apm compile` fires a `pre-compile` lifecycle event. -- by @Ryangr0 (#3596)
+- `apm init --yes` accepts `--name`, `--description`, `--version` and `--author`. -- by @atulya-singh (#2231)
+- `github.com` installs work behind TLS-inspecting proxies, with `--auth-first` to skip the anonymous attempt. -- by @rgarciapariente (#2999)
+- OpenCode targets use the OpenCode 2 `mcp.servers` layout when `opencode.json` already does. -- by @RamsesJM (#3414)
+
+### Changed
+
+- Copilot hook events with a Claude equivalent are written to `.claude/settings.json` under the Claude name. (#3613)
+- Linux binaries need glibc 2.28 instead of 2.38 (RHEL 8, Debian 10, Ubuntu 20.04 and newer). -- by @eraow (#3553, #3708)
+- Cursor rules use `alwaysApply: true` for `applyTo: **`. -- by @WilliamK112 (#2030)
+- `apm mcp install --help` lists its forwarded install options. (#3633)
+- `apm compile` places scoped instructions about 41x faster on large projects. -- by @sekosen (#3379)
+- Public `github.com` subdirectory packages validate through `raw.githubusercontent.com`, saving REST quota. -- by @ShaoLOWu (#3348)
+- `apm install --mcp NAME` without a match names the searched registry and how to choose another. -- by @VedanthB (#2803)
+- `apm install` fails when a same-name MCP server differs in a JSON-config target, keeping your entry. (#3709)
+- `apm install <bundle>` without `--target` deploys only to the targets declared in `apm.yml`. (#3709)
+- `apm uninstall` without `apm.lock.yaml` no longer removes skill directories. (#3716)
+- `APM_POLICY_DISABLE` accepts only `1`. (#3716)
+- The README and quickstart show how to teach your agent APM with `apm-guide`. (#3776)
+
+### Removed
+
+- The unpublished Dev Container Feature; the install guide shows installer and pip recipes instead. (#3642)
+
+### Fixed
+
+- `APM_HOME` is the single root for all APM user state. -- by @WilliamK112 (#3614, #3707)
+- `content_hash` matches on every OS for packages with symlinks or `.gitattributes` line endings, so `--frozen` works across platforms. -- reported by @vlsi (#3545, #3599, #3603, #3673)
+- Git output no longer crashes APM on non-UTF-8 Windows locales. -- thanks @Bortlesboat (#3626)
+- Fresh clones and CI runners keep or update committed skills that match the locked version. (#3564, #3638)
+- Local package dependencies and re-pinned Git children resolve in the same run. -- by @adityaanikam (#3571)
+- Private monorepo `git:` + `path:` dependencies work again on Git older than 2.36. -- thanks @jiteshjadav-rogers (#3602)
+- SSH dependencies on non-GitHub hosts fill the Git cache over SSH. (#3640)
+- Rejected registry proxy archives are reported instead of a later 404. -- by @MohammedAlkindi (#3375)
+- Stable semver ranges no longer resolve to pre-releases. -- approach from #3469 by @xubenqiang (#3601)
+- `require_pinned_constraint` judges the constraint as declared in `apm.yml`. -- by @Kaustubh1235 (#3652)
+- Marketplace `sha` pins win over `ref`, and malformed SHAs are rejected. -- by @abhishekacharya200 (#3534)
+- `apm install DIR` installs an APM package with a root `plugin.json` as a local dependency. -- approach from #3447 by @xubenqiang (#3604)
+- Re-downloaded Claude marketplace plugins record a matching `content_hash`. -- by @McNultyyy (#2627)
+- Failed installs list untracked harness files and how to recover. (#3641)
+- Auto-created `apm.yml` no longer copies your Git `user.name` as `author`. (#3630)
+- `apm install --target claude` keeps `${VAR}` references in `.mcp.json`. -- by @Aaryan-Dadu (#3377)
+- `apm install -g` writes POSIX hook commands as `$HOME/...`. -- by @Bronyal-lzx (#2944)
+- Codex hooks are written as typed `command` handlers. -- by @Parth-Vasave (#3385)
+- Codex agents' package-relative links point at the installed files. -- reported by @hcoona (#3611)
+- Codex warns when an agent's `model` is a Claude alias. -- from #3481 by @xubenqiang (#3650)
+- `CODEX_HOME` is honored for Codex `AGENTS.md`, agents and hooks. -- by @xubenqiang (#3491, #3653)
+- `apm install -g` for Cursor deploys instructions as `~/.cursor/rules/*.mdc`. -- by @yahavi (#2506)
+- `apm deps tree`, `apm deps list` and `apm prune` handle subdirectory packages from one repository correctly. -- reproduction by @maro114510 (#3537, #3612)
+- `apm audit --ci` reports no false drift on Claude hook files when root `.apm/` holds only hooks. -- by @nefayran (#3600)
+- `apm pack` writes the `apm.yml` version into every `plugin.json`. -- by @abhishekacharya200 (#3408)
+- TLS failure hints match the selected trust mode. -- by @aryansk (#2602)
+- HTTP lifecycle scripts keep the direct connection when only `NO_PROXY` is set. -- by @bodapatisaikrishna (#3575)
+- `apm --help` no longer truncates command summaries at 80 columns. (#3643, #3651)
+- `apm export-patch` works for subdirectory and Claude plugin packages, and `apm view --file` accepts paths through symlinked directories. (#3672)
+- A symlinked `apm.lock.yaml` is refused, and `--frozen` keeps rows for removed dependencies and replays proxy-only lockfiles offline. (#3672)
+- Stale cleanup deletes only hash-matching files, removed MCP servers and hooks are cleaned from shared configs, and `apm compile` keeps hand-authored nested `AGENTS.md`. (#3672)
+- Targeted installs, `apm prune` and `apm uninstall` keep dependencies another package still needs. (#3672)
+- `apm audit --ci` replays local packages like install, removing false drift. (#3672)
+- `apm mcp install` exits non-zero on failure, and `apm pack` bundles referenced hook scripts. (#3672)
+- The policy docs state that org policy governs project installs only. (#3672)
+- `apm install` no longer rewrites a JSONC MCP config from scratch, which dropped your servers; MCP configs are written atomically. (#3709)
+- `apm install` no longer overwrites a same-name user rule, and `apm uninstall` without a lockfile keeps user files. (#3709)
+- `apm uninstall X` removes every declaration of `X`, and `apm install --dev X` moves it instead of duplicating it. (#3709)
+- SIGTERM rolls back an install like Ctrl+C. (#3709)
+- `apm approve` takes effect for `github.com` dependencies and keeps `apm.yml` comments and order. (#3709)
+- `apm view -g --file` works for every target, and errors name an obstructed path instead of raw errno text. (#3709)
+- Bundle installs for Codex, Gemini and OpenCode pass `apm audit --ci`, and Markdown agents are skipped for Codex with a warning. (closes #3705, #3706, #3717)
+
+### Security
+
+- Credentials are sent only to their configured origin and dropped on cross-origin redirects. (#3716)
+- Deployment refuses symlinked primitive directories, destination files and config files. (#3716)
+- `apm install <bundle>` deploys only under target primitive directories, and bundle hooks follow the executables gate. (#3716)
+- The executables gate covers package-declared MCP and LSP servers in any identity spelling. (#3716)
+- A full-SHA manifest pin wins over the commit recorded in `apm.lock.yaml`. (#3716)
+- Copilot-family MCP configs outside the project are written owner-only. (#3716)
+- `executables.deny_all` suppresses lifecycle scripts as documented; `pre-compile` lifecycle blocks need fresh trust. -- by @Ryangr0 (#3596)
 
 ## [0.35.1] - 2026-11-11
 
@@ -2972,7 +3219,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added CODEOWNERS, simplified PR/issue templates, triage labels, and updated CONTRIBUTING.md (#115, #118)
 - Added missing `version` field in the apm.yml README example (#108)
 - Slim PR pipelines to Linux-only, auto-approve integration tests, added agentic workflows for maintenance (#98, #103, #104, #119)
-
 
 ## [0.7.3] - 2025-02-15
 

@@ -105,6 +105,14 @@ merge, a particular implementation, or a release date. You may experiment in
 your own fork without approval, but an unsolicited PR does not oblige
 maintainers to review or adopt it.
 
+### Adding your organization to ADOPTERS.md
+
+Adding or updating your own organization's row in
+[ADOPTERS.md](ADOPTERS.md) needs no issue, scope record, or PR template
+sections. Either open a one-row PR, or fill in the
+[adopter form](https://github.com/microsoft/apm/issues/new?template=adopter.yml)
+and a maintainer will open the PR for you after you confirm the wording.
+
 ### Small corrections
 
 Typo fixes and broken documentation links have standing preapproval. Create
@@ -130,7 +138,11 @@ authors to expose confidential evidence.
 
 1. Fork and create a branch for the approved issue.
 2. Keep the PR focused on one concern. Include relevant tests and update
-   documentation for changed behavior.
+   documentation for changed behavior. For a user-visible change, add a
+   one-line fragment, `changelog.d/<pr>.<section>.md` (see
+   [changelog.d/README.md](changelog.d/README.md)), following the
+   [changelog rules](.github/instructions/changelog.instructions.md); do not
+   edit `## [Unreleased]` in `CHANGELOG.md`.
 3. Follow the [development guide](docs/src/content/docs/contributing/development-guide.md)
    for setup, local checks, and any surface-specific requirements.
 4. In the PR template, link the canonical issue and human approval comment,
@@ -184,6 +196,12 @@ For responsibilities, progression, and how disagreements are resolved, see
 The [development guide](docs/src/content/docs/contributing/development-guide.md)
 contains environment setup, testing, linting, optional agent tooling, and
 merge-queue guidance. Required technical checks are unchanged by this policy.
+
+### Complexity ratchet
+
+New and changed functions must meet the Stage 2 complexity limits; existing
+violators are grandfathered in a shrink-only baseline. See the
+[complexity ratchet instructions](docs/src/content/docs/contributing/development-guide.md#complexity-ratchet).
 
 ### Running the bounded mutation pilot
 

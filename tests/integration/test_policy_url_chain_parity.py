@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.policy.discovery import _read_cache_entry
+
+pytestmark = pytest.mark.component
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "policy_url_chain"
 
@@ -38,7 +41,7 @@ def test_policy_status_preserves_url_chain_denials_on_warm_cache(
     with (
         patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
         patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: payloads[url],
         ) as transport,
     ):

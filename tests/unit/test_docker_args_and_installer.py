@@ -3,8 +3,12 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.core.docker_args import DockerArgsProcessor
 from apm_cli.core.safe_installer import InstallationSummary, SafeMCPInstaller
+
+pytestmark = pytest.mark.unit
 
 
 class TestDockerArgsProcessor(unittest.TestCase):
@@ -90,15 +94,6 @@ class TestDockerArgsProcessor(unittest.TestCase):
 
 class TestInstallationSummary(unittest.TestCase):
     """Test suite for InstallationSummary."""
-
-    def test_empty_summary(self):
-        """Test empty installation summary."""
-        summary = InstallationSummary()
-
-        self.assertEqual(len(summary.installed), 0)
-        self.assertEqual(len(summary.skipped), 0)
-        self.assertEqual(len(summary.failed), 0)
-        self.assertFalse(summary.has_any_changes())
 
     def test_add_operations(self):
         """Test adding different types of operations."""

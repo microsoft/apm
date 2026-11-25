@@ -23,6 +23,7 @@
 # the earliest hook we have without writing a pytest plugin.
 
 import contextlib
+import functools
 import os
 import tempfile
 from pathlib import Path
@@ -56,11 +57,14 @@ def _ensure_home_env(home: Path) -> None:
 
 
 _ensure_home_env(_TMP_HOME)
-# User-scope Codex roots honor CODEX_HOME; keep a developer's value from
-# redirecting tests that expect the default ~/.codex root.
-os.environ.pop("CODEX_HOME", None)
+# User-scope harness roots honor these variables; keep a developer's value
+# from redirecting tests that expect the default roots.
+for _user_root_variable in ("CODEX_HOME", "COPILOT_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"):
+    os.environ.pop(_user_root_variable, None)
 # A developer's APM_HOME must not redirect user-scope metadata during tests.
 os.environ.pop("APM_HOME", None)
+# A runner's CI makes `apm install` frozen (req-lk-018); tests that need it set it.
+os.environ.pop("CI", None)
 
 
 def _hermetic_home(_cls=Path) -> Path:
@@ -122,6 +126,185 @@ def _validate_primitive_coverage():
 
 
 @pytest.fixture(autouse=True)
+def _apm_state_leak_detector(request: pytest.FixtureRequest):
+    """Fail the test that leaves process state changed, then restore it.
+
+    Snapshots the environment (including PATH), the working directory and the
+    process-global state in ``tests/utils/state_leaks.py`` (console routing,
+    config cache, git/gh executable memos). A leak there reaches every later
+    test on the same xdist worker, so a victim fails far from its cause.
+    Known leakers live in ``tests/fixtures/test_state_leak_baseline.json``,
+    which may only shrink.
+
+    The name sorts first among this file's autouse fixtures, so it wraps the
+    resets below and judges the state they leave; a unit guard pins that.
+    """
+    from tests.utils import state_leaks
+
+    nodeid = request.node.nodeid
+    if not state_leaks.applies_to(nodeid):
+        yield
+        return
+    before = state_leaks.take_snapshot()
+    yield
+    after = state_leaks.take_snapshot()
+    leaks = state_leaks.leaked_keys(before, after)
+    if not leaks and nodeid not in _state_leak_baseline():
+        return
+    state_leaks.restore(before)
+    message = state_leaks.verdict(nodeid, leaks, _state_leak_baseline())
+    if message:
+        pytest.fail(message, pytrace=False)
+
+
+@functools.cache
+def _state_leak_baseline() -> dict[str, frozenset[str]]:
+    from tests.utils import state_leaks
+
+    return state_leaks.load_baseline()
+
+
+@pytest.fixture(autouse=True)
+def _reset_console_state():
+    """Reset APM and Rich console singletons before and after each test.
+
+    Machine-readable output (``--json``, ``--format json``; see
+    ``configure_output_mode``) calls ``set_console_stderr(True)``, which
+    routes rich/click output to stderr for the rest of the process. A test
+    that invokes such a command in-process would otherwise leave every later
+    test on the worker reading empty stdout.
+
+    Tests that initialize Rich's process-global console while its
+    ``Console`` class is patched can also leave a ``MagicMock`` clock
+    behind. Rich progress then compares mock timestamps in later tests.
+    """
+    reset_console_singletons()
+    yield
+    reset_console_singletons()
+
+
+def reset_console_singletons() -> None:
+    """Drop every cached console so the next one reads the current environment.
+
+    Rich fixes a console's width when it is built. The themed console that
+    ``commands/_helpers._get_console`` returns is a module singleton, so a
+    console built by an earlier test (under another ``COLUMNS``) would render
+    every later table on the worker at that width (#4773).
+    """
+    import rich
+
+    from apm_cli.utils import themed_console
+    from apm_cli.utils.console import _reset_console
+
+    # ``rich._console`` is Rich's process-global default console (the one
+    # ``rich.get_console()``/``rich.print`` lazily create). Nulling it forces
+    # a fresh real console next call. The attribute has lived at this name
+    # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
+    _reset_console()
+    rich._console = None
+    themed_console._console = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_cache():
+    """Drop the process-wide ``~/.apm/config.json`` cache around each test.
+
+    ``get_config`` caches the file for the process lifetime. A test that reads
+    config under a patched HOME would otherwise serve that config to later
+    tests on the worker.
+    """
+    from apm_cli import config
+
+    config._invalidate_config_cache()
+    yield
+    config._invalidate_config_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_verdict_stage():
+    """Discard a commit-reachability verdict stage a test left open.
+
+    An install transaction opens a process-global stage whose ref listings
+    are memoized per remote. A test that builds one without committing or
+    discarding it would serve those listings to later tests on the worker
+    (#5199: a no-ref dependency now lists refs too).
+    """
+    from apm_cli.cache import commit_reachability
+
+    def _discard() -> None:
+        stage = commit_reachability._stage()
+        if stage is not None:
+            stage.discard()
+
+    _discard()
+    yield
+    _discard()
+
+
+@pytest.fixture(autouse=True)
+def _reset_marketplace_registry_cache():
+    """Drop the process-wide marketplace registry cache around each test.
+
+    ``marketplace.registry`` caches ``marketplaces.json`` for the process. A
+    test that registers a marketplace under a temporary HOME would otherwise
+    leave that alias visible to later tests on the worker.
+    """
+    from apm_cli.marketplace import registry
+
+    registry._invalidate_cache()
+    yield
+    registry._invalidate_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_once_per_process_warnings():
+    """Forget which once-per-process CLI notices were shown (#4242, #4256).
+
+    One CLI process prints each such notice once; a test is one process
+    in production, so a notice seen by an earlier test must not hide it here.
+    """
+    from apm_cli.integration import mcp_config_view
+    from apm_cli.models.dependency import mcp
+
+    shown = (mcp._PASSTHROUGH_WARNED, mcp_config_view._TRUST_NOTICES_SHOWN)
+    for notices in shown:
+        notices.clear()
+    yield
+    for notices in shown:
+        notices.clear()
+
+
+@pytest.fixture(autouse=True)
+def _restore_executable_caches():
+    """Restore the process-wide git/gh executable caches after each test.
+
+    A test that patches ``shutil.which`` while git resolves would otherwise
+    cache a wrong path for every later test on the same worker. Restoring
+    the pre-test value (rather than clearing it) undoes that leak without
+    changing what any test observes at its start.
+    """
+    from apm_cli.utils import git_env
+
+    if git_env._git_executable is None:
+        # Start every test from the real, resolved git, so a test that clears
+        # PATH sees the same warm cache whatever ran before it on the worker.
+        with contextlib.suppress(FileNotFoundError):
+            git_env.get_git_executable()
+    saved = (git_env._git_executable, git_env._gh_executable)
+    # An in-process CLI start disables the Windows working-directory program
+    # search for the process; undo it so later tests see the original env.
+    cwd_search = os.environ.get(git_env._NO_CWD_SEARCH)
+    user_cwd_search = git_env._user_no_cwd_search
+    yield
+    git_env._git_executable, git_env._gh_executable = saved
+    git_env._user_no_cwd_search = user_cwd_search
+    if cwd_search is None:
+        os.environ.pop(git_env._NO_CWD_SEARCH, None)
+    else:
+        os.environ[git_env._NO_CWD_SEARCH] = cwd_search
+
+
+@pytest.fixture(autouse=True)
 def _isolate_discovery_state():
     """Clear process-scoped discovery cache + perf counters between tests.
 
@@ -161,3 +344,163 @@ def _hermetic_copilot_plugin_capability():
     finally:
         with contextlib.suppress(ValueError):
             reset_native_registration(token)
+
+
+class _OfflineMcpRegistryClient:
+    registry_url = "https://mcp-registry.invalid"
+
+    def find_server_by_reference(self, name):
+        raise ConnectionError("MCP registry lookups are disabled in tests")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_mcp_transport_lookup():
+    """Keep policy transport resolution off the public MCP registry.
+
+    Policy ``mcp.transport.allow`` resolves registry servers through
+    ``mcp_transport_resolution._registry_client``; tests that need a
+    registry patch that seam with their own fake. Restored by hand (not
+    ``monkeypatch``) so this autouse fixture does not reorder other
+    fixtures' monkeypatch teardown.
+    """
+    from apm_cli.integration import mcp_transport_resolution
+
+    original = mcp_transport_resolution._registry_client
+    mcp_transport_resolution.clear_registry_info_memo()
+    mcp_transport_resolution._registry_client = lambda registry_url: _OfflineMcpRegistryClient()
+    try:
+        yield
+    finally:
+        mcp_transport_resolution._registry_client = original
+        mcp_transport_resolution.clear_registry_info_memo()
+
+
+_LIFECYCLE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
+_LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Imply ``lifecycle_smoke`` and bind OpenAPM req markers to the conformance map.
+
+    A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``, so the
+    merge-group selection is a subset of the full lifecycle smoke selection by
+    construction; ``tryfirst`` runs this before ``-m`` deselection. Running
+    first also means environment-dependent skip markers that other conftests
+    add at collection time never change a requirement's recorded status.
+    """
+    for item in items:
+        if item.get_closest_marker(_LIFECYCLE_MERGE_GROUP_MARKER) and not item.get_closest_marker(
+            _LIFECYCLE_SMOKE_MARKER
+        ):
+            item.add_marker(_LIFECYCLE_SMOKE_MARKER)
+
+    # Bounded candidate copies (mutation harnesses) ship no tests/spec_conformance.
+    if not config.getoption("collectonly", False) and not any(
+        item.get_closest_marker("req") for item in items
+    ):
+        return
+    from tests.spec_conformance.coverage_map import record
+
+    record(config, items)
+
+
+_MOCK_GLOBALS_KEY = "apm_mock_bound_module_globals"
+
+# Modules that production code imports lazily and that bind names from a
+# module tests patch at its source (lockfile, scope, marketplace registry,
+# policy discovery, github_host). First imported inside such a patch, each
+# would keep the mock for the rest of the worker; loading them at session
+# start keeps every later patch transient. pytest_sessionfinish below fails
+# the run if another module is captured this way.
+_LAZY_CONSUMERS = (
+    "apm_cli.claude_plugins.registrar",
+    "apm_cli.deps.artifactory_orchestrator",
+    "apm_cli.deps.clone_engine",
+    "apm_cli.deps.download_strategies",
+    "apm_cli.deps.file_provenance",
+    "apm_cli.deps.git_reference_resolver",
+    "apm_cli.deps.git_semver_resolver",
+    "apm_cli.deps.github_downloader",
+    "apm_cli.install.audit_replay",
+    "apm_cli.install.integrity",
+    "apm_cli.install.legacy_plugin_compat",
+    "apm_cli.install.phases.claude_plugins",
+    "apm_cli.install.phases.cleanup",
+    "apm_cli.install.phases.codex_plugins",
+    "apm_cli.marketplace.catalog_origin",
+    "apm_cli.marketplace.yml_editor",
+    "apm_cli.policy.install_preflight",
+)
+
+
+def _load_command_tree(group, ctx) -> None:
+    import click
+
+    for name in group.list_commands(ctx):
+        command = group.get_command(ctx, name)
+        if isinstance(command, click.Group):
+            _load_command_tree(command, click.Context(command, parent=ctx, info_name=name))
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Load lazily imported modules before any test can patch their sources.
+
+    The CLI imports each verb's module on first dispatch; loading the command
+    tree here keeps tests that patch a source module and then invoke a verb
+    from leaving that verb's module bound to the mock.
+    """
+    import importlib
+
+    import click
+
+    from apm_cli.cli import cli
+
+    for name in _LAZY_CONSUMERS:
+        importlib.import_module(name)
+    _load_command_tree(cli, click.Context(cli, info_name="apm"))
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the run when an ``apm_cli`` module global is left as a mock.
+
+    xdist workers hand their findings to the controller, which reports them.
+    """
+    from tests.utils import state_leaks
+
+    config = session.config
+    found = set(state_leaks.mock_bound_module_globals())
+    if hasattr(config, "workeroutput"):
+        config.workeroutput[_MOCK_GLOBALS_KEY] = sorted(found)
+        return
+    found |= getattr(config, "_apm_worker_mock_globals", set())
+    if found:
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        lines = [
+            "[x] apm_cli module globals left as unittest.mock objects "
+            "(a patch was captured by a module first imported inside it):",
+            *(f"    {name}" for name in sorted(found)),
+        ]
+        if reporter is not None:
+            reporter.write_line("\n".join(lines), red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error) -> None:
+    """Collect an xdist worker's mock-bound module globals on the controller."""
+    found = getattr(node, "workeroutput", {}).get(_MOCK_GLOBALS_KEY, [])
+    collected = getattr(node.config, "_apm_worker_mock_globals", set())
+    collected.update(found)
+    node.config._apm_worker_mock_globals = collected
+
+
+_KNOWN_CELLS_PLUGIN = "apm-known-cells"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Enforce KnownFailure signatures on every strict known cell (tests/lifecycle/known.py)."""
+    from tests.lifecycle import known
+
+    if not config.pluginmanager.has_plugin(_KNOWN_CELLS_PLUGIN):
+        config.pluginmanager.register(known, _KNOWN_CELLS_PLUGIN)

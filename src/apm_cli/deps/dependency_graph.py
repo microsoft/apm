@@ -84,6 +84,22 @@ class DependencyTree:
     _repo_lookup_index: set[str] = field(default_factory=set)
     max_depth: int = 0
     resolution_errors: list[str] = field(default_factory=list)
+    resolution_warnings: list[str] = field(default_factory=list)
+    # apm.yml mistakes every install refuses, whatever is cached locally; a
+    # subset of resolution_errors that previews must show (#3967).
+    declaration_errors: list[str] = field(default_factory=list)
+    # --dry-run: subtrees whose metadata could not be loaded. Install treats
+    # them as leaves; a preview reports them as incomplete.
+    unavailable_subtrees: list[str] = field(default_factory=list)
+    # unique key -> the resolution error of a replacement whose selected
+    # source did not load; install drops it when org policy refused that
+    # source before fetch, so the policy gate reports the refusal.
+    replacement_load_errors: dict[str, str] = field(default_factory=dict)
+
+    def add_declaration_error(self, error: str) -> None:
+        """Record an apm.yml declaration error install always refuses."""
+        self.resolution_errors.append(error)
+        self.declaration_errors.append(error)
 
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""
@@ -199,6 +215,7 @@ class DependencyGraph:
     flattened_dependencies: FlatDependencyMap
     circular_dependencies: list[CircularRef] = field(default_factory=list)
     resolution_errors: list[str] = field(default_factory=list)
+    declaration_errors: list[str] = field(default_factory=list)
 
     def has_circular_dependencies(self) -> bool:
         """Check if there are any circular dependencies."""

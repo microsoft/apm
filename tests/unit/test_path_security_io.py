@@ -1,0 +1,294 @@
+"""Tests for path security utilities (CVE path traversal fix) (filesystem, process and CLI boundary cases)."""
+
+import shutil  # noqa: F401
+import sys
+from pathlib import Path
+
+import pytest
+
+from apm_cli.models.dependency import DependencyReference
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+    resolve_for_containment,
+    resolved_relative_within,
+    safe_rmtree,
+)
+
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-url-path-containment-decoding")]
+
+# ---------------------------------------------------------------------------
+# ensure_path_within
+# ---------------------------------------------------------------------------
+
+
+class TestEnsurePathWithin:
+    """Unit tests for the ensure_path_within containment check."""
+
+    def test_path_inside_base_passes(self, tmp_path):
+        child = tmp_path / "apm_modules" / "owner" / "repo"
+        child.mkdir(parents=True)
+        result = ensure_path_within(child, tmp_path / "apm_modules")
+        assert result == child.resolve()
+
+    def test_dotdot_escape_raises(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        bad = base / ".." / "etc"
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(bad, base)
+
+    def test_deep_dotdot_escape_raises(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        bad = base / "owner" / "repo" / ".." / ".." / ".." / "secrets"
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(bad, base)
+
+    def test_base_itself_passes(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        result = ensure_path_within(base, base)
+        assert result == base.resolve()
+
+    def test_absolute_outside_raises(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(Path("/tmp/evil"), base)
+
+    def test_symlink_escape_raises(self, tmp_path):
+        """Symlink inside base pointing outside should be caught."""
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        outside = tmp_path / "outside_target"
+        outside.mkdir()
+        link = base / "evil_link"
+        link.symlink_to(outside)
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(link, base)
+
+
+# ---------------------------------------------------------------------------
+# safe_rmtree
+# ---------------------------------------------------------------------------
+
+
+class TestSafeRmtree:
+    """Unit tests for the safe_rmtree wrapper."""
+
+    def test_removes_directory_inside_base(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        target = base / "owner" / "repo"
+        target.mkdir(parents=True)
+        (target / "file.txt").write_text("content")
+
+        safe_rmtree(target, base)
+        assert not target.exists()
+
+    def test_refuses_to_remove_outside_base(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        outside = tmp_path / "SAFE_DELETE_ME"
+        outside.mkdir()
+        (outside / "proof.txt").write_text("do not delete")
+
+        bad_path = base / ".." / "SAFE_DELETE_ME"
+        with pytest.raises(PathTraversalError):
+            safe_rmtree(bad_path, base)
+
+        # Verify the directory was NOT deleted
+        assert outside.exists()
+        assert (outside / "proof.txt").read_text() == "do not delete"
+
+    def test_refuses_traversal_in_package_name(self, tmp_path):
+        """Simulates the MSRC PoC: attacker/repo/../../../SAFE_DELETE_ME."""
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        victim = tmp_path / "SAFE_DELETE_ME"
+        victim.mkdir()
+        (victim / "proof.txt").write_text("critical data")
+
+        evil_path = base / "attacker" / "repo" / ".." / ".." / ".." / "SAFE_DELETE_ME"
+        with pytest.raises(PathTraversalError):
+            safe_rmtree(evil_path, base)
+
+        assert victim.exists()
+
+
+# ---------------------------------------------------------------------------
+# validate_path_segments
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Strict URL-path decoding
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# DependencyReference parse-time traversal rejection
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# DependencyReference.get_install_path containment
+# ---------------------------------------------------------------------------
+
+
+class TestGetInstallPathContainment:
+    """Verify get_install_path() rejects paths that escape apm_modules/."""
+
+    def test_normal_package_path(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        dep = DependencyReference.parse("owner/repo")
+        path = dep.get_install_path(base)
+        assert path == base / "owner" / "repo"
+
+    def test_traversal_in_virtual_path_raises(self, tmp_path):
+        """Even if parse-time validation is bypassed, get_install_path catches it."""
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        dep = DependencyReference(repo_url="owner/repo")
+        dep.is_virtual = True
+        # Need enough ../s to escape: owner/repo/../../../../esc  → 2 up from subdir + 2 more
+        dep.virtual_path = "../../../../etc/passwd"
+        with pytest.raises(PathTraversalError):
+            dep.get_install_path(base)
+
+    def test_traversal_in_repo_url_raises(self, tmp_path):
+        """repo_url with .. should be caught by get_install_path."""
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        dep = DependencyReference(repo_url="owner/repo/../../..")
+        dep.is_virtual = False
+        with pytest.raises(PathTraversalError):
+            dep.get_install_path(base)
+
+    def test_ado_normal_path(self, tmp_path):
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        dep = DependencyReference.parse("https://dev.azure.com/myorg/myproject/_git/myrepo")
+        path = dep.get_install_path(base)
+        assert "myorg" in str(path)
+        assert path.resolve().is_relative_to(base.resolve())
+
+    def test_local_path_dotdot_basename_raises(self, tmp_path):
+        """Crafted local_path with '..' basename must be caught."""
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        dep = DependencyReference(repo_url="unused")
+        dep.is_local = True
+        dep.local_path = "/some/path/.."
+        with pytest.raises(PathTraversalError):
+            dep.get_install_path(base)
+
+    def test_local_path_dot_basename_raises(self, tmp_path):
+        """Path('.').name returns '' on some platforms — guard handles it."""
+        base = tmp_path / "apm_modules"
+        base.mkdir()
+        dep = DependencyReference(repo_url="unused")
+        dep.is_local = True
+        dep.local_path = "."
+        # Path(".").name is "" which is in our reject set
+        with pytest.raises(PathTraversalError):
+            dep.get_install_path(base)
+
+
+class TestResolvedContainment:
+    """One resolution per side, then a pure containment verdict (rt-06)."""
+
+    def test_relative_path_leads_back_to_the_same_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "base" / "a" / "b.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("inside\n", encoding="utf-8")
+        (tmp_path / "other").mkdir()
+        (tmp_path / "other" / "b.md").write_text("outside\n", encoding="utf-8")
+        base = resolve_for_containment(tmp_path / "base")
+
+        relative = resolved_relative_within(resolve_for_containment(target), base)
+        outside = resolve_for_containment(tmp_path / "other" / "b.md")
+
+        assert relative == "a/b.md"
+        assert (base / relative).read_text(encoding="utf-8") == "inside\n"
+        assert resolved_relative_within(outside, base) is None
+        assert outside.read_text(encoding="utf-8") == "outside\n"
+
+    def test_extended_prefix_on_one_side_still_contains(self, tmp_path: Path) -> None:
+        target = tmp_path / "base" / "a.md"
+        target.parent.mkdir()
+        target.write_text("inside\n", encoding="utf-8")
+        prefixed_base = Path("\\\\?\\" + str(resolve_for_containment(tmp_path / "base")))
+
+        relative = resolved_relative_within(resolve_for_containment(target), prefixed_base)
+
+        assert relative == "a.md"
+        assert (tmp_path / "base" / relative).read_text(encoding="utf-8") == "inside\n"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_link_out_of_the_base_is_outside(self, tmp_path: Path) -> None:
+        (tmp_path / "base").mkdir()
+        (tmp_path / "elsewhere").mkdir()
+        (tmp_path / "base" / "link").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+
+        base = resolve_for_containment(tmp_path / "base")
+        escaped = resolve_for_containment(tmp_path / "base" / "link" / "f.md")
+
+        assert resolved_relative_within(escaped, base) is None
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(tmp_path / "base" / "link" / "f.md", tmp_path / "base")
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component
+# ---------------------------------------------------------------------------
+
+
+def _tree(root: Path) -> list[str]:
+    return sorted(
+        f"{p.relative_to(root).as_posix()}{'@' if p.is_symlink() else ''}" for p in root.rglob("*")
+    )
+
+
+def _assert_tree_unchanged(root: Path, before: list[str]) -> None:
+    assert _tree(root) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+class TestHasSymlinkComponent:
+    """``..`` is collapsed below the base before linked components are checked.
+
+    The check is read-only: every case also asserts the tree is unchanged.
+    """
+
+    @pytest.fixture
+    def base(self, tmp_path):
+        base = tmp_path / "base"
+        (base / "real").mkdir(parents=True)
+        (tmp_path / "outside").mkdir()
+        (base / "link").symlink_to(tmp_path / "outside", target_is_directory=True)
+        return base
+
+    @pytest.mark.parametrize(
+        ("relative", "expected"),
+        [
+            pytest.param("../outside/f.md", True, id="dotdot-escapes-base"),
+            pytest.param("missing/../link/f.md", True, id="missing-dir-dotdot-then-link"),
+            pytest.param("missing/../real/f.md", False, id="missing-dir-dotdot-then-real"),
+            pytest.param("link/../real/f.md", True, id="dotdot-steps-back-over-link"),
+            pytest.param("real/f.md", False, id="no-dotdot-real"),
+            pytest.param("real/missing/f.md", False, id="no-dotdot-missing-tail"),
+            pytest.param("missing/deeper/f.md", False, id="no-dotdot-missing-middle"),
+            pytest.param("link/f.md", True, id="no-dotdot-through-link"),
+            pytest.param("link", True, id="no-dotdot-link-itself"),
+        ],
+    )
+    def test_collapses_dotdot_and_leaves_the_tree_unchanged(self, base, relative, expected):
+        before = _tree(base.parent)
+
+        linked = has_symlink_component(base, base / relative)
+
+        assert linked is expected
+        _assert_tree_unchanged(base.parent, before)

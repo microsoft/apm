@@ -15,6 +15,8 @@ import pytest
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.cache.paths import get_git_checkouts_path, get_git_db_path
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.cached_repo_trust import trust_cached_repos
+from tests.utils.checkout_trust import trust_checkout_contents
 
 
 class TestGitCacheShardinig:
@@ -198,6 +200,7 @@ class TestGitCacheLSRemoteResolution:
             assert resolved == "f" * 40
 
 
+@trust_cached_repos()
 class TestGitCacheBareRepoEnsurance:
     """Test ensuring bare repos exist."""
 
@@ -259,6 +262,7 @@ class TestGitCacheBareRepoEnsurance:
                 mock_fetch.assert_called_once()
 
 
+@trust_cached_repos()
 class TestGitCacheBareHasSHA:
     """Test SHA verification in bare repos."""
 
@@ -345,7 +349,7 @@ class TestGitCacheCheckoutEviction:
         checkout_dir = tmp_path / "fake-checkout"
         checkout_dir.mkdir()
 
-        with patch("apm_cli.cache.git_cache.logging.getLogger") as mock_logger:
+        with patch("logging.getLogger") as mock_logger:
             mock_log_instance = MagicMock()
             mock_logger.return_value = mock_log_instance
             cache._evict_checkout(checkout_dir)
@@ -354,6 +358,7 @@ class TestGitCacheCheckoutEviction:
             assert not checkout_dir.exists()
 
 
+@trust_checkout_contents()
 class TestGitCacheGetCheckoutHitPath:
     """Test main checkout retrieval happy path."""
 
@@ -485,6 +490,7 @@ class TestGitCacheURLSanitization:
             )
 
 
+@trust_checkout_contents()
 class TestGitCacheEnvHandling:
     """Test git subprocess environment handling."""
 
@@ -517,6 +523,7 @@ class TestGitCacheEnvHandling:
                     # (if ls-remote was called)
 
 
+@trust_checkout_contents()
 class TestGitCacheIntegrityVerification:
     """Test integration with integrity verification."""
 
@@ -543,6 +550,7 @@ class TestGitCacheIntegrityVerification:
                         mock_resolve.assert_called_once()
 
 
+@trust_cached_repos()
 class TestGitCacheLocking:
     """Test locking mechanisms."""
 

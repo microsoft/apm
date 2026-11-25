@@ -103,8 +103,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-audit-policy-discovery",
         path="src/apm_cli/commands/audit.py",
-        old="fetch_result = discover_policy_with_chain(\n            cfg.project_root,",
-        new="fetch_result = discover_policy(\n            cfg.project_root,",
+        old="lambda: discover_policy_with_chain(\n                cfg.project_root,",
+        new="lambda: discover_policy(\n                cfg.project_root,",
         intent="Audit resolves policy without the chain-aware discovery entry point.",
     ),
     MutationCase(
@@ -159,10 +159,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     ),
     MutationCase(
         rule_id="install-deployment-local-bundle-policy-preflight",
-        path="src/apm_cli/install/local_bundle_handler.py",
-        old="cache_only=True,",
-        new="cache_only=False,",
-        intent="Local bundle policy preflight stops running cache-only.",
+        path="src/apm_cli/install/bundle_admission.py",
+        old="        effective_target_source=target_decision.source,\n",
+        new=("        effective_target_source=target_decision.source,\n        cache_only=True,\n"),
+        intent="Local bundle policy preflight reads a cold policy cache as no policy.",
     ),
     MutationCase(
         rule_id="install-deployment-local-identity-anchor",
@@ -228,10 +228,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-require-hashes-enforcement",
         path="src/apm_cli/install/pipeline.py",
-        old="        _enforce_require_hashes(ctx)",
+        old="        LockfileBuilder(ctx).build_and_save()",
         new=(
             "        if ctx.policy.security.integrity.require_hashes:\n"
-            "            _enforce_require_hashes(ctx)"
+            "            LockfileBuilder(ctx).build_and_save()"
         ),
         intent="The install pipeline re-reads require_hashes from policy itself.",
     ),
@@ -290,10 +290,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old=(
             "    enforce_agent_plugin_deployment_boundary(package_info)\n"
             "\n"
-            "    from apm_cli.integration.dispatch import get_dispatch_table\n"
+            "    from apm_cli.core.deployment_ledger import recorded_writes\n"
         ),
         new=(
-            "    from apm_cli.integration.dispatch import get_dispatch_table\n"
+            "    from apm_cli.core.deployment_ledger import recorded_writes\n"
             "\n"
             "    enforce_agent_plugin_deployment_boundary(package_info)\n"
         ),
@@ -363,7 +363,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     ),
     MutationCase(
         rule_id="registry_delegation.lifecycle_docs_aggregate",
-        path="docs/src/content/docs/concepts/lifecycle.md",
+        path="docs/src/content/docs/concepts/how-apm-works.md",
         old="deploys individual primitives but does not run aggregate",
         new="deploys individual primitives and also runs aggregate",
         intent="Lifecycle docs stop stating that install skips aggregate compilation.",
@@ -371,9 +371,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="registry_delegation.lockfile_version_authority",
         path="src/apm_cli/bundle/local_bundle.py",
-        old="from ..deps.lockfile import require_supported_lockfile_version",
+        old="from ..deps.lockfile import recorded_generator, require_supported_lockfile_version",
         new=(
-            "from ..deps.lockfile import SUPPORTED_LOCKFILE_VERSIONS,"
+            "from ..deps.lockfile import SUPPORTED_LOCKFILE_VERSIONS, recorded_generator,"
             " require_supported_lockfile_version"
         ),
         intent="Local bundles import the supported-version vocabulary instead of the check.",

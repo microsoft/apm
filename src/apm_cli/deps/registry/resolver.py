@@ -14,6 +14,7 @@ that returns a ``PackageInfo``. Wiring into the install pipeline is done in
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,13 +27,15 @@ from ...bundle.local_bundle import route_agent_plugin_package
 from ...models.apm_package import PackageInfo, validate_apm_package
 from ...models.dependency.reference import DependencyReference
 from ...models.dependency.types import GitReferenceType, ResolvedReference
+from ...utils.console import _rich_info
+from ...utils.credential_rendering import redact_url_userinfo
 from .auth import (
     RegistryAuthContext,
     make_auth_context,
     remediation_message,
 )
 from .client import RegistryClient, RegistryError, VersionEntry
-from .extractor import extract_archive
+from .extractor import HashMismatchError, extract_archive, verify_sha256
 from .semver import is_semver_range, pick_best
 
 
@@ -45,12 +48,14 @@ class RegistryResolutionError(Exception):
     """
 
 
-def _split_owner_repo(repo_url: str) -> tuple[str, str]:
-    """Split ``owner/repo`` (or longer paths) into (owner, repo) for the API.
+def split_registry_identity(repo_url: str) -> tuple[str, str]:
+    """Split a registry package identity into ``(owner, repo)`` for the API.
 
-    For paths with more than two segments (e.g. ``group/subgroup/repo``), we
-    treat the last segment as the repo and the rest as the owner — the API
-    contract uses ``{owner}/{repo}`` as a flat two-segment identity.
+    Registry HTTP API section 1.2: the last ``/``-separated part is the repo
+    and everything before it, including any host, is the owner (e.g.
+    ``gitlab.com/acme/x`` -> ``("gitlab.com/acme", "x")``). The client
+    percent-encodes each part as one path segment. Both install (consumer)
+    and ``apm publish`` route through this function.
     """
     parts = [p for p in repo_url.split("/") if p]
     if len(parts) < 2:
@@ -154,6 +159,39 @@ def _package_info_from_extracted_registry_tree(
     return package_info, reg_resolution
 
 
+def _verify_moved_archive(
+    dep_ref: DependencyReference,
+    version: str,
+    archive_bytes: bytes,
+    resolved_hash: str,
+    locked_url: str,
+    configured_url: str,
+) -> None:
+    """Accept bytes from the configured registry for a moved locked URL (req-rs-009).
+
+    Runs before the install target is touched, so a mismatch leaves nothing
+    extracted (req-lk-013).
+    """
+    try:
+        verify_sha256(archive_bytes, resolved_hash)
+    except HashMismatchError as exc:
+        actual = hashlib.sha256(archive_bytes).hexdigest()
+        raise RegistryResolutionError(
+            f"registry archive for {dep_ref.repo_url!r} {version} from the configured "
+            f"registry does not match the lockfile; nothing was extracted.\n"
+            f"  locked URL:     {locked_url}\n"
+            f"  configured URL: {configured_url}\n"
+            f"  expected hash:  {resolved_hash}\n"
+            f"  actual hash:    sha256:{actual}"
+        ) from exc
+    _rich_info(
+        f"{dep_ref.repo_url} {version}: fetched from configured registry "
+        f"{configured_url} instead of lockfile URL {locked_url}; locked hash verified",
+        symbol="info",
+        soft_wrap=True,
+    )
+
+
 class RegistryPackageResolver:
     """Drop-in download callback that fetches packages from a REST registry.
 
@@ -209,8 +247,9 @@ class RegistryPackageResolver:
     def _resolve_registry_url(self, registry_name: str | None) -> str:
         if not registry_name:
             raise RegistryResolutionError(
-                "registry-sourced dep is missing registry_name "
-                "(parser bug or unconfigured default registry)"
+                "registry-sourced dep is missing registry_name: no configured "
+                "registry serves it. Add the registry that serves this package "
+                "to the 'registries:' block in apm.yml"
             )
         url = self._registries.get(registry_name)
         if not url:
@@ -303,7 +342,7 @@ class RegistryPackageResolver:
                 f"{dep_ref.repo_url!r} (source={dep_ref.source!r})"
             )
 
-        owner, repo = _split_owner_repo(dep_ref.repo_url)
+        owner, repo = split_registry_identity(dep_ref.repo_url)
         base_url = self._resolve_registry_url(dep_ref.registry_name)
         client = self._build_client(dep_ref.registry_name, base_url)
 
@@ -352,6 +391,31 @@ class RegistryPackageResolver:
         return package_info
 
     # ------------------------------------------------------------------
+    def _lockfile_replay_client(
+        self, dep_ref: DependencyReference, resolved_url: str, version: str
+    ) -> tuple[RegistryClient, str]:
+        """Return the declared registry client and the URL it fetches the locked bytes from.
+
+        Any registry declared in apm.yml may serve the locked bytes; the
+        caller verifies them against ``resolved_hash`` (req-rs-009, #4278).
+        Each registry's credentials reach only its own archive URL. A URL no
+        declared registry serves (a moved endpoint, #4013) is never fetched:
+        the locked version comes from the dependency's configured registry.
+        """
+        owner, repo = split_registry_identity(dep_ref.repo_url)
+        locked_name = dep_ref.registry_name
+        locked_url = self._resolve_registry_url(locked_name)
+        candidates = [(locked_name, locked_url)] + [
+            (name, url) for name, url in self._registries.items() if name != locked_name and url
+        ]
+        for name, base_url in candidates:
+            client = self._build_client(name, base_url)
+            if client.archive_url(owner, repo, version) == resolved_url:
+                return client, resolved_url
+        client = self._build_client(locked_name, locked_url)
+        return client, client.archive_url(owner, repo, version)
+
+    # ------------------------------------------------------------------
     def download_from_lockfile(
         self,
         dep_ref: DependencyReference,
@@ -361,30 +425,29 @@ class RegistryPackageResolver:
         resolved_hash: str,
         version: str,
     ) -> PackageInfo:
-        """Fetch from the locked URL and verify against the locked hash.
+        """Fetch the locked version and verify it against the locked hash.
 
         This is the npm-install-model lockfile replay path: instead of calling
-        ``/versions`` to re-negotiate the best semver match, we fetch directly
-        from ``resolved_url`` (recorded in the lockfile) and re-verify the
-        bytes against ``resolved_hash``.  Called by ``apm install`` when the
+        ``/versions`` to re-negotiate the best semver match, we fetch the
+        locked version from a declared registry and re-verify the bytes
+        against ``resolved_hash``. When no declared registry serves the
+        locked ``resolved_url`` (a moved endpoint), the configured registry's
+        bytes must hash to ``resolved_hash`` before anything is extracted
+        (req-rs-009, req-lk-013); the lockfile keeps its recorded URL.  Called by ``apm install`` when the
         lockfile has full replay data and the manifest range still covers the
         locked version.  ``apm update`` bypasses this path entirely via
         ``update_refs=True``.
         """
-        registry_name = dep_ref.registry_name
-        base_url = self._resolve_registry_url(registry_name)
-        client = self._build_client(registry_name, base_url)
-        owner, repo = _split_owner_repo(dep_ref.repo_url)
-        expected_url = client.archive_url(owner, repo, version)
-        if resolved_url != expected_url:
-            raise RegistryResolutionError(
-                "lockfile registry URL does not match the configured registry endpoint"
-            )
+        client, fetch_url = self._lockfile_replay_client(dep_ref, resolved_url, version)
         try:
-            archive_bytes, content_type = client.fetch_from_url(resolved_url)
+            archive_bytes, content_type = client.fetch_from_url(fetch_url)
         except RegistryError as exc:
-            self._raise_for_http(exc, dep_ref, resolved_url)
+            self._raise_for_http(exc, dep_ref, fetch_url)
             raise  # unreachable; appeases type checker
+        if fetch_url != resolved_url:
+            _verify_moved_archive(
+                dep_ref, version, archive_bytes, resolved_hash, resolved_url, fetch_url
+            )
 
         _clear_install_target(target_path)
         actual_hash = extract_archive(
@@ -460,7 +523,7 @@ class RegistryPackageResolver:
         if exc.status == 404:
             msg = (
                 f"registry {dep_ref.registry_name!r} has no package "
-                f"{dep_ref.repo_url!r} (HTTP 404 from {exc.url})"
+                f"{dep_ref.repo_url!r} (HTTP 404 from {redact_url_userinfo(exc.url)})"
             )
             ref = dep_ref.reference or ""
             if ref and not is_semver_range(ref):

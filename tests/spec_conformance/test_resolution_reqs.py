@@ -51,6 +51,21 @@ from tests.integration.test_immutable_requirements_install import (
 from tests.integration.test_immutable_requirements_install import (
     test_install_checks_every_immutable_requirement as _run_immutable_install_contract,
 )
+from tests.integration.test_install_pinned_commit_reachability import (
+    _install as _install_pinned,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    _Origin as _PinnedOrigin,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    _project as _pinned_project,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    test_a_locked_commit_is_verified_once_then_replays_without_contact as _run_verified_once,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    test_a_locked_commit_only_a_pull_ref_reaches_is_refused_on_replay as _run_pull_only_replay,
+)
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -68,6 +83,8 @@ from tests.unit.deps.test_immutable_requirement_conflicts import (
 from tests.unit.install.test_dry_run_graph import _preview
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
 from tests.utils.local_package import LocalPackageFactory
+
+pytestmark = pytest.mark.component
 
 # --- req-rs-001..014 ---------------------------------------------------
 
@@ -136,6 +153,49 @@ def test_locked_literal_equivalence_requires_no_remote_discovery(
 ) -> None:
     """Unchanged lock evidence survives a deleted remote tag."""
     _run_immutable_install_contract(tmp_path, monkeypatch, frozen, False, True, True, True)
+
+
+@pytest.mark.req("req-rs-015")
+def test_an_unverified_locked_commit_is_verified_once_then_replays_without_contact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One recorded reachability verification; later replays make no origin request."""
+    _run_verified_once(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch)
+    assert (tmp_path / "app" / "apm.lock.yaml").is_file()
+
+
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("no_cache", [False, True], ids=["repo-cached", "repo-no-cache"])
+def test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_cache: bool
+) -> None:
+    """A rewritten lockfile pinning a commit only refs/pull/* reaches is refused."""
+    _run_pull_only_replay(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch, None, no_cache)
+    assert not list((tmp_path / "cache2").rglob("verified-v2/*"))
+
+
+@pytest.mark.req("req-rs-015")
+def test_an_unverified_locked_replay_fails_closed_and_keeps_the_lockfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replay with no recorded outcome and no reachable origin refuses, lockfile intact."""
+    import shutil
+
+    origin = _PinnedOrigin(tmp_path / "remote")
+    project = _pinned_project(tmp_path, origin.m1)
+    first = _install_pinned(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "c1"))
+    assert first.exit_code == 0, first.output
+    lock = (project / "apm.lock.yaml").read_bytes()
+    shutil.rmtree(project / "apm_modules")
+    shutil.rmtree(origin.path)
+
+    replay = _install_pinned(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "c2"))
+
+    output = " ".join(replay.output.split())
+    assert replay.exit_code == 1, replay.output
+    assert "needs network access once" in output
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+    assert not list((tmp_path / "c2").rglob("verified-v2/*"))
 
 
 @pytest.mark.req("req-rs-002")
@@ -244,6 +304,68 @@ def test_resolver_supports_tilde_range():
         assert c["expected"] in c["tags"] or c["expected"] is None
 
 
+_MIRROR_CONFIGURED_URL = (
+    "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+)
+_MIRROR_LOCKED_URL = (
+    "https://moved.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+)
+
+
+def _mirror_replay(tmp_path: Path, locked_hash: str | None = None):
+    from unittest.mock import MagicMock
+
+    from apm_cli.deps.registry.client import RegistryClient
+    from tests.unit.registry.test_resolver import _make_apm_tarball, _make_dep, _make_resolver
+
+    raw, digest = _make_apm_tarball()
+    client = MagicMock(spec=RegistryClient)
+    client.fetch_from_url.return_value = (raw, "application/gzip")
+    resolver = _make_resolver(client)
+    dep = _make_dep()
+    expected = locked_hash or f"sha256:{digest}"
+
+    def replay():
+        return resolver.download_from_lockfile(
+            dep,
+            tmp_path / "pkg",
+            resolved_url=_MIRROR_LOCKED_URL,
+            resolved_hash=expected,
+            version="1.2.0",
+        )
+
+    return resolver, client, dep, replay, digest
+
+
+@pytest.mark.req("req-rs-009")
+def test_locked_url_mismatch_is_satisfied_by_configured_registry_when_hash_matches(tmp_path):
+    resolver, client, dep, replay, digest = _mirror_replay(tmp_path)
+    replay()
+    client.fetch_from_url.assert_called_once_with(_MIRROR_CONFIGURED_URL)
+    assert (tmp_path / "pkg" / "apm.yml").exists()
+    recorded = resolver.last_resolutions[dep.get_unique_key()]
+    assert (recorded.resolved_url, recorded.resolved_hash) == (
+        _MIRROR_LOCKED_URL,
+        f"sha256:{digest}",
+    )
+
+
+@pytest.mark.req("req-rs-009")
+@pytest.mark.req("req-lk-013")
+def test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction(tmp_path):
+    from apm_cli.deps.registry.resolver import RegistryResolutionError
+
+    expected = "sha256:" + "0" * 64
+    _, client, _, replay, digest = _mirror_replay(tmp_path, expected)
+    with pytest.raises(RegistryResolutionError) as excinfo:
+        replay()
+    client.fetch_from_url.assert_called_once_with(_MIRROR_CONFIGURED_URL)
+    message = str(excinfo.value)
+    for needle in ("acme/web-skills", expected, digest, _MIRROR_LOCKED_URL, _MIRROR_CONFIGURED_URL):
+        assert needle in message
+    assert not (tmp_path / "pkg").exists()
+
+
 @pytest.mark.req("req-rs-010")
 def test_resolver_supports_exact_pin():
     oracle = load_json_fixture("resolution", "semver-dialect.json")
@@ -328,7 +450,7 @@ def test_registry_picker_matches_semver_dialect_oracle(case):
     assert pick_best(case["range"], case["tags"]) == case["expected"]
 
 
-@pytest.mark.xfail(strict=True, reason="registry range grammar does not accept this form yet")
+@pytest.mark.xfail(strict=True, reason="#3648 registry range grammar does not accept this form yet")
 @pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=True))
 def test_registry_picker_range_grammar_gaps(case):
     assert pick_best(case["range"], case["tags"]) == case["expected"]
@@ -342,6 +464,11 @@ def test_resolver_replays_locked_commit_without_network():
         "non-update install",
         "WITHOUT issuing a network ref-resolution",
         "network-free at the resolution step",
+        "reachable from a branch or tag",
+        "MUST refuse the entry (fail closed)",
+        "consumer-local state",
+        "fails the operation",
+        "the endpoint it would contact",
     )
 
 

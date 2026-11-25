@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 from ..models.apm_package import (
     APMPackage,
     ValidationResult,
@@ -66,7 +68,7 @@ class PackageValidator:
         ):
             return self.validate_package(package_path)
 
-        apm_yml = package_path / "apm.yml"
+        apm_yml = manifest_file(package_path)
         if not apm_yml.exists():
             result.add_error("Missing required file: apm.yml")
             return result
@@ -293,7 +295,7 @@ def stamp_plugin_version(
 
     short_sha = resolved_commit[:7]
     package.version = short_sha
-    apm_yml_path = target_path / "apm.yml"
+    apm_yml_path = manifest_file(target_path)
     if not apm_yml_path.exists():
         return
     from ..utils.yaml_io import dump_yaml, load_yaml

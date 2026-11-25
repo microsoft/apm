@@ -78,6 +78,54 @@ def test_unreceipted_package_keeps_detected_type(tmp_path: Path) -> None:
     assert result is PackageType.SKILL_BUNDLE
 
 
+@pytest.mark.parametrize("locked_type", [None, "apm_package", "skill_bundle"])
+def test_normalized_plugin_does_not_become_apm_intent_on_second_pass(
+    tmp_path: Path,
+    locked_type: str | None,
+) -> None:
+    from apm_cli.models.validation import detect_package_type, validate_apm_package
+
+    root = tmp_path / "raw-plugin"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        '{"name":"normalized","commands":[]}',
+        encoding="ascii",
+    )
+    validated = validate_apm_package(root)
+    assert validated.package_type is PackageType.MARKETPLACE_PLUGIN
+    detected, _ = detect_package_type(root)
+    assert detected is PackageType.APM_PACKAGE
+    locked = (
+        LockedDependency(repo_url="owner/repo", package_type=locked_type) if locked_type else None
+    )
+
+    assert (
+        preserve_normalized_marketplace_plugin_type(
+            root,
+            locked,
+            detected,
+        )
+        is PackageType.MARKETPLACE_PLUGIN
+    )
+
+
+def test_authored_apm_layout_with_incidental_manifest_keeps_intent(tmp_path: Path) -> None:
+    from apm_cli.models.validation import detect_package_type, validate_apm_package
+
+    root = tmp_path / "apm-package"
+    (root / ".apm/prompts").mkdir(parents=True)
+    (root / ".claude-plugin").mkdir()
+    (root / "apm.yml").write_text("name: authored\nversion: 1.0.0\n", encoding="ascii")
+    (root / ".claude-plugin/plugin.json").write_text('{"name":"publishing"}', encoding="ascii")
+    validated = validate_apm_package(root)
+    assert validated.package_type is PackageType.APM_PACKAGE
+    detected, _ = detect_package_type(root)
+
+    assert (
+        preserve_normalized_marketplace_plugin_type(root, None, detected) is PackageType.APM_PACKAGE
+    )
+
+
 @pytest.mark.parametrize(
     ("apm_version", "package_type", "fetched_this_run"),
     [
@@ -344,7 +392,8 @@ def test_normalization_persists_portable_plugin_root_paths(tmp_path: Path) -> No
     assert ".apm-resolution-staging" not in manifest
     assert "${CLAUDE_PLUGIN_ROOT}/server" in manifest
     server = result.get_all_mcp_dependencies()[0]
-    assert server.command == f"{package.resolve()}/server"
+    assert server.command == "${CLAUDE_PLUGIN_ROOT}/server"
+    assert server.plugin_root == str(package.resolve())
 
 
 def test_fresh_hash_accepts_only_the_parser_receipt_delta(tmp_path: Path) -> None:
@@ -437,7 +486,7 @@ def test_backup_copy_failure_cleans_staging_without_touching_cache(tmp_path: Pat
 
     with (
         patch(
-            "apm_cli.install.legacy_plugin_compat.shutil.copytree",
+            "shutil.copytree",
             side_effect=fail_second_copy,
         ),
         pytest.raises(OSError, match="backup copy failed"),
@@ -473,3 +522,56 @@ def test_verified_legacy_cache_routes_through_canonical_validator(tmp_path: Path
     assert validate.call_count == 2
     assert validate.call_args_list[-1].args == (package, package / "plugin.json")
     assert validate.call_args_list[-1].kwargs == {"source_path": package}
+
+
+def _classification_tree(root: Path, manifest: str | None, shape: str) -> Path:
+    if manifest is not None:
+        (root / manifest).parent.mkdir(parents=True, exist_ok=True)
+        (root / manifest).write_text('{"name":"bundle","version":"1.0.0"}', encoding="ascii")
+    if shape == "skills":
+        (root / "skills/review").mkdir(parents=True)
+        (root / "skills/review/SKILL.md").write_text(
+            "---\nname: review\ndescription: review\n---\nbody\n", encoding="ascii"
+        )
+    else:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "SKILL.md").write_text(
+            "---\nname: bundle\ndescription: bundle\n---\nbody\n", encoding="ascii"
+        )
+    (root / "bin").mkdir()
+    (root / "bin/tool").write_text("#!/bin/sh\n", encoding="ascii")
+    return root
+
+
+@pytest.mark.parametrize("locked_type", [None, "skill_bundle", "hybrid"])
+@pytest.mark.parametrize("shape", ["skills", "root-skill"])
+@pytest.mark.parametrize(
+    "manifest",
+    [".claude-plugin/plugin.json", ".github/plugin/plugin.json", "plugin.json", None],
+)
+def test_cached_pass_classifies_as_the_fresh_pass(
+    tmp_path: Path, manifest: str | None, shape: str, locked_type: str | None
+) -> None:
+    """A cached pass gives the fresh fetch's type, whatever the parser wrote (#4270).
+
+    A plugin manifest makes the tree a marketplace plugin on its fresh pass,
+    with or without root skills/ or SKILL.md; without one, a skills/ bundle
+    stays skill_bundle (its --skill subsets) and a root SKILL.md a claude_skill.
+    """
+    from apm_cli.models.validation import detect_package_type, validate_apm_package
+
+    root = _classification_tree(tmp_path / "pkg", manifest, shape)
+    fresh = detect_package_type(root)[0]
+    validate_apm_package(root)
+    locked = (
+        LockedDependency(repo_url="owner/repo", package_type=locked_type) if locked_type else None
+    )
+
+    cached = preserve_normalized_marketplace_plugin_type(root, locked, detect_package_type(root)[0])
+
+    assert cached is fresh
+    if manifest is None:
+        expected = PackageType.SKILL_BUNDLE if shape == "skills" else PackageType.CLAUDE_SKILL
+        assert cached is expected
+    else:
+        assert cached is PackageType.MARKETPLACE_PLUGIN

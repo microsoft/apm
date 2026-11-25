@@ -6,6 +6,17 @@ import pytest
 
 from apm_cli.runtime.copilot_runtime import CopilotRuntime
 
+pytestmark = pytest.mark.component
+
+
+@pytest.fixture(autouse=True)
+def _runtime_binary_installed():
+    """Resolve the runtime helper to its bare name so argv assertions stay exact."""
+    with patch(
+        "apm_cli.runtime.copilot_runtime.require_runtime_binary", side_effect=lambda name: name
+    ):
+        yield
+
 
 class TestCopilotRuntime:
     """Test Copilot Runtime."""
@@ -20,13 +31,13 @@ class TestCopilotRuntime:
             runtime = CopilotRuntime()
             assert runtime.get_runtime_name() == "copilot"
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_is_available_true(self, mock_which):
         """Test is_available when copilot binary exists."""
         mock_which.return_value = "/usr/local/bin/copilot"
         assert CopilotRuntime.is_available() is True
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_is_available_false(self, mock_which):
         """Test is_available when copilot binary doesn't exist."""
         mock_which.return_value = None

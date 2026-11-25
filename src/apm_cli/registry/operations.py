@@ -549,19 +549,15 @@ class MCPServerOperations:
                         # For other variables, use empty string or reasonable default
                         env_vars[var_name] = ""
 
-            if is_e2e_tests:
-                print("E2E test mode detected")
-            else:
-                print("CI environment detected")
-
             return env_vars
 
         try:
             # Try to use Rich for better prompts
-            from rich.console import Console
             from rich.prompt import Prompt
 
-            console = Console()
+            from apm_cli.utils.console import new_console
+
+            console = new_console()
             console.print(
                 "Registry runtime variables needed:"
                 if prompt_defaults

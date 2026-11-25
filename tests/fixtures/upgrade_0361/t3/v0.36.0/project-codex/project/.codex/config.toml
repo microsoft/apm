@@ -1,0 +1,5 @@
+[mcp_servers.heal-registry]
+url = "https://registry-sse.example.invalid/sse"
+
+[mcp_servers.heal-http]
+url = "https://http.example.invalid/mcp"

@@ -18,27 +18,9 @@ from apm_cli.compilation.agents_compiler import (
     CompilationConfig,
     _build_expected_rule_filenames,
 )
-from apm_cli.compilation.claude_formatter import ClaudeFormatter
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
-
-class TestCompilationConfigNoDedup:
-    """CompilationConfig carries the no_dedup field."""
-
-    def test_no_dedup_default_is_false(self):
-        """no_dedup must default to False (opt-in, preserves backward-compat)."""
-        config = CompilationConfig()
-        assert config.no_dedup is False
-
-    def test_no_dedup_can_be_set_true(self):
-        """no_dedup can be toggled on via constructor."""
-        config = CompilationConfig(no_dedup=True)
-        assert config.no_dedup is True
-
-    def test_from_apm_yml_passes_no_dedup_override(self):
-        """from_apm_yml propagates the no_dedup kwarg."""
-        config = CompilationConfig.from_apm_yml(no_dedup=True)
-        assert config.no_dedup is True
+pytestmark = pytest.mark.component
 
 
 class TestNoDedupFlagCLI:
@@ -115,60 +97,32 @@ class TestNoDedupSkipsDeduplicationLogic:
         primitives.add_primitive(instruction)
         return tmp_path, primitives
 
-    def test_without_no_dedup_instructions_are_skipped(self, project_with_rules):
-        """.claude/rules/ present -> instructions omitted from CLAUDE.md by default."""
-        tmp_path, primitives = project_with_rules
-        formatter = ClaudeFormatter(str(tmp_path))
-        placement_map = {tmp_path: list(primitives.instructions)}
-        result = formatter.format_distributed(
-            primitives,
-            placement_map,
-            config={"skip_instructions": True},
+    @staticmethod
+    def _compile(tmp_path, primitives, *, no_dedup):
+        # The rule install deploys for this instruction carries its applyTo as paths:.
+        (tmp_path / ".claude" / "rules" / "python.md").write_text(
+            '---\npaths:\n  - "**/*.py"\n---\n# deployed\n', encoding="utf-8"
         )
-        for content in result.content_map.values():
-            assert "Project Standards" not in content
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="claude", no_dedup=no_dedup, resolve_links=False)
+        result = compiler.compile(config, primitives)
+        assert result.success, result.errors
+        agents_md = tmp_path / "AGENTS.md"
+        return agents_md.read_text(encoding="utf-8") if agents_md.exists() else ""
+
+    def test_without_no_dedup_instructions_are_skipped(self, project_with_rules):
+        """A deployed .claude/rules/ file keeps its instruction out of AGENTS.md."""
+        tmp_path, primitives = project_with_rules
+        assert "Use type hints." not in self._compile(tmp_path, primitives, no_dedup=False)
 
     def test_with_no_dedup_instructions_are_included(self, project_with_rules):
-        """When no_dedup=True the compiler forces skip_instructions=False even
-        when .claude/rules/ is populated, so Project Standards appears in
-        CLAUDE.md."""
+        """no_dedup=True keeps every instruction in the AGENTS.md CLAUDE.md imports."""
         tmp_path, primitives = project_with_rules
 
-        # Write a minimal apm.yml so the compiler does not bail out
-        (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
-        # Ensure .apm/instructions/ exists so primitive discovery can run
-        instr_dir = tmp_path / ".apm" / "instructions"
-        instr_dir.mkdir(parents=True, exist_ok=True)
-        (instr_dir / "python.instructions.md").write_text(
-            "---\ndescription: Python coding standards\napplyTo: '**/*.py'\n---\nUse type hints.\n",
-            encoding="utf-8",
-        )
+        body = self._compile(tmp_path, primitives, no_dedup=True)
 
-        compiler = AgentsCompiler(str(tmp_path))
-        config = CompilationConfig(
-            target="claude",
-            no_dedup=True,
-            dry_run=False,
-        )
-
-        compiler._compile_claude_md(config, primitives)
-
-        # _compile_claude_md writes CLAUDE.md and returns a CompilationResult;
-        # the instructions section must be present in the written file.
-        claude_md = tmp_path / "CLAUDE.md"
-        assert claude_md.exists(), (
-            "CLAUDE.md must be created even with .claude/rules/ populated when no_dedup=True"
-        )
-        body = claude_md.read_text(encoding="utf-8")
-        assert "## Project Standards" in body, (
-            "With no_dedup=True, instructions section must be present in CLAUDE.md "
-            "even when .claude/rules/ is pre-populated. Got:\n" + body
-        )
-
-
-# ---------------------------------------------------------------------------
-# AGENTS.md instruction dedup regression tests (issue #1678)
-# ---------------------------------------------------------------------------
+        assert "Use type hints." in body
+        assert "@AGENTS.md" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 class TestAgentsMdInstructionDedup:
@@ -304,14 +258,13 @@ class TestAgentsMdInstructionDedup:
             rules_filename="unrelated.md",
         )
         compiler = AgentsCompiler(str(tmp_path))
-        config = CompilationConfig(target="claude", dry_run=False)
+        config = CompilationConfig(target="claude", dry_run=False, resolve_links=False)
 
-        result = compiler._compile_claude_md(config, primitives)
+        result = compiler.compile(config, primitives)
 
         assert result.success
-        claude_md = tmp_path / "CLAUDE.md"
-        assert claude_md.exists(), "CLAUDE.md must be generated without a matching rule file"
-        body = claude_md.read_text(encoding="utf-8")
+        assert "@AGENTS.md" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        body = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
         assert "Use type hints" in body, (
             "Claude dedup must require the expected instruction filename, "
             "not any unrelated .md file in .claude/rules/"

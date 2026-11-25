@@ -7,8 +7,31 @@ import sys
 import click
 from click.core import ParameterSource
 
+from apm_cli.core.remediation import (
+    MCP_REGISTRY_URL_OVERRIDE,
+)
+
 from ..core.command_logger import CommandLogger
+from ..mcp_transport import (
+    TRANSPORT_SSE,
+    TRANSPORT_STREAMABLE_HTTP,
+    canonical_remote_transport,
+)
 from ._helpers import _get_console
+
+_REMOTE_DEPLOYMENT_LABELS = {
+    TRANSPORT_STREAMABLE_HTTP: " Remote Streamable HTTP Endpoint",
+    TRANSPORT_SSE: " Remote SSE Endpoint",
+}
+
+
+def _remote_transport_label(remote) -> str:
+    """Canonical transport of a registry remote, or ``unknown`` when unrecognized."""
+    try:
+        return canonical_remote_transport(remote)
+    except (ValueError, AttributeError):
+        return "unknown"
+
 
 # Restore builtin since a subcommand is named ``list``
 list = builtins.list
@@ -74,17 +97,17 @@ def _handle_registry_network_error(exc, registry, console, logger, action):
     elif source == "config":
         hint = (
             "mcp-registry-url is set in apm config -- verify the URL is correct "
-            "and reachable, or run 'apm config unset mcp-registry-url'."
+            f"and reachable, or {MCP_REGISTRY_URL_OVERRIDE.clause()}."
         )
     else:
         hint = "The registry may be temporarily unavailable. Retry shortly."
 
     msg = f"Could not {action} MCP registry at {url}"
     if console:
-        from ..utils.console import STATUS_SYMBOLS
+        from ..utils.console import STATUS_SYMBOLS, _rich_echo
 
-        console.print(f"\n{STATUS_SYMBOLS['error']} {msg}", style="red")
-        console.print(f"  -> {hint}", style="dim")
+        _rich_echo(f"\n{STATUS_SYMBOLS['error']} {msg}", color="red")
+        _rich_echo(f"  -> {hint}", color="dim", err=True)
     else:
         logger.error(msg)
         logger.error(hint)
@@ -313,9 +336,9 @@ def search(ctx, query, limit, verbose):
         )
 
         # Professional results table
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(show_header=True, header_style="bold cyan", border_style="cyan")
+        table = new_table(show_header=True, header_style="bold cyan", border_style="cyan")
         table.add_column("Name", style="bold white", no_wrap=True, min_width=20)
         table.add_column("Description", style="white", ratio=1)
         table.add_column("Latest", style="cyan", justify="center", min_width=8)
@@ -418,10 +441,10 @@ def show(ctx, server_name, verbose):
             repo_url = server_info["repository"].get("url", "Unknown")
 
         # Professional server info table with consistent styling
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         # Main server information table
-        info_table = Table(
+        info_table = new_table(
             title=f" MCP Server: {name}",
             show_header=True,
             header_style="bold cyan",
@@ -442,11 +465,10 @@ def show(ctx, server_name, verbose):
         packages = server_info.get("packages", [])
 
         deployment_info = []
-        if remotes:
-            for remote in remotes:
-                transport_type = remote.get("transport_type", "unknown")
-                if transport_type == "sse":
-                    deployment_info.append(" Remote SSE Endpoint")
+        for remote in remotes:
+            label = _REMOTE_DEPLOYMENT_LABELS.get(_remote_transport_label(remote))
+            if label and label not in deployment_info:
+                deployment_info.append(label)
         if packages:
             deployment_info.append(" Local Package")
 
@@ -457,18 +479,18 @@ def show(ctx, server_name, verbose):
 
         # Show remote endpoints if available
         if remotes:
-            remote_table = Table(
+            remote_table = new_table(
                 title=" Remote Endpoints",
                 show_header=True,
                 header_style="bold cyan",
                 border_style="cyan",
             )
-            remote_table.add_column("Type", style="yellow", width=10)
+            remote_table.add_column("Type", style="yellow", width=16)
             remote_table.add_column("URL", style="white", min_width=40)
             remote_table.add_column("Features", style="cyan", min_width=20)
 
             for remote in remotes:
-                transport_type = remote.get("transport_type", "unknown")
+                transport_type = _remote_transport_label(remote)
                 url = remote.get("url", "unknown")
 
                 # Describe features/limitations of remote endpoints
@@ -482,7 +504,7 @@ def show(ctx, server_name, verbose):
 
         # Installation packages in consistent table format
         if packages:
-            pkg_table = Table(
+            pkg_table = new_table(
                 title=" Local Packages",
                 show_header=True,
                 header_style="bold cyan",
@@ -498,10 +520,9 @@ def show(ctx, server_name, verbose):
                 pkg_name = pkg.get("name", "unknown")
                 runtime_hint = pkg.get("runtime_hint", " --")
 
-                # Describe features of local packages
+                # Describe features of local packages. Registry names such as
+                # io.github.<owner>/... say nothing about GitHub toolsets (#3994).
                 features = "Full configuration control"
-                if "github" in name.lower():
-                    features = "Supports GITHUB_TOOLSETS"
 
                 # Truncate long package names intelligently
                 if len(pkg_name) > 25:
@@ -513,7 +534,7 @@ def show(ctx, server_name, verbose):
 
         # Installation instructions in structured table format
         install_name = server_info.get("name", server_name)
-        install_table = Table(
+        install_table = new_table(
             title="* Installation Guide",
             show_header=True,
             header_style="bold cyan",
@@ -530,9 +551,9 @@ def show(ctx, server_name, verbose):
         )
         install_table.add_row("2", "Install dependencies", "[bold cyan]apm install[/bold cyan]")
         install_table.add_row(
-            "3",
-            "Direct install (coming soon)",
-            f"[bold cyan]apm install {install_name}[/bold cyan]",
+            "",
+            "Or add and install in one step",
+            f"[bold cyan]apm install --mcp {install_name}[/bold cyan]",
         )
 
         console.print(install_table)
@@ -595,9 +616,9 @@ def list(ctx, limit, verbose):  # noqa: F811
             )
 
         # Professional catalog table
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(show_header=True, header_style="bold cyan", border_style="cyan")
+        table = new_table(show_header=True, header_style="bold cyan", border_style="cyan")
         table.add_column("Name", style="bold white", no_wrap=True, min_width=25)
         table.add_column("Description", style="white", ratio=1)
         table.add_column("Latest", style="cyan", justify="center", min_width=8)

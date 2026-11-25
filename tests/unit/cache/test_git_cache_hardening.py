@@ -28,7 +28,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
+import pytest
+
 from apm_cli.cache.git_cache import GitCache, _safe_git_args
+from tests.utils.cached_repo_trust import trust_cached_repos
+from tests.utils.checkout_trust import trust_checkout_contents
+
+pytestmark = pytest.mark.component
 
 
 def _all_cmd_argvs(mock_run: MagicMock) -> list[list[str]]:
@@ -73,6 +79,7 @@ class TestLsRemoteHardening:
         assert "submodule.recurse=false" in argv
 
 
+@trust_checkout_contents()
 class TestCacheHitDiagnostics:
     def test_cache_hit_log_omits_ssh_userinfo(self, caplog, tmp_path: Path) -> None:
         cache = GitCache(tmp_path)
@@ -81,6 +88,9 @@ class TestCacheHitDiagnostics:
         checkout = cache._checkouts_root / shard / sha / "full"
         checkout.mkdir(parents=True)
         (checkout / ".git").mkdir()
+        (checkout / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (checkout / ".git" / "objects").mkdir()
+        (checkout / ".git" / "refs").mkdir()
         (checkout / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -135,6 +145,7 @@ class TestCloneHardening:
             assert "--no-recurse-submodules" in argv, argv
 
 
+@trust_cached_repos()
 class TestFetchHardening:
     @patch("subprocess.run")
     def test_fetch_into_bare_carries_safe_args(self, mock_run: MagicMock, tmp_path: Path) -> None:

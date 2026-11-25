@@ -14,46 +14,39 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.deprecations import deprecation_message
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.integration.targets import TargetProfile
 
 
-def _package_field(apm_package: Any, name: str) -> Any:
-    """Return a real APMPackage field without treating MagicMock attrs as set."""
-    if apm_package is None:
-        return None
-    try:
-        attrs = vars(apm_package)
-    except TypeError:
-        attrs = {}
-    if name in attrs:
-        return attrs[name]
-    value = getattr(apm_package, name, None)
-    if type(value).__module__ == "unittest.mock":
-        return None
-    return value
-
-
 def _package_target_value(apm_package: Any) -> str | list[str] | None:
-    """Read singular target or plural targets from the parsed package model."""
-    from apm_cli.core.apm_yml import parse_targets_field
+    """Return the package's declared target selection from the declaration owner."""
+    from apm_cli.models.apm_package import package_target_selection
 
-    target = _package_field(apm_package, "target")
-    targets = _package_field(apm_package, "targets")
-    if target is not None and targets is not None:
-        parse_targets_field({"target": target, "targets": targets})
-    if targets is not None:
-        parsed = parse_targets_field({"targets": targets})
-        return parsed if parsed else None
-    return target
+    return package_target_selection(apm_package)
 
 
 def _raise_target_usage_error(ctx: Any, exc: Exception) -> None:
     """Render target field user errors consistently before exiting."""
     if ctx.logger:
-        ctx.logger.error(str(exc), symbol="")
+        ctx.logger.error(str(exc), symbol="error")
     raise SystemExit(2) from exc
+
+
+def reject_undeployable_manifest_targets(apm_package: Any, logger: Any) -> None:
+    """Exit 2 before any write when the manifest declares a target install cannot deploy."""
+    from apm_cli.core.errors import TargetResolutionError
+    from apm_cli.models.apm_package import package_target_declaration
+
+    try:
+        package_target_declaration(apm_package).validate_for_install()
+    except TargetResolutionError as exc:
+        if logger:
+            logger.error(str(exc), symbol="error")
+            logger.render_summary()
+        raise SystemExit(2) from exc
 
 
 def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
@@ -86,31 +79,16 @@ def _normalize_runtime_target_aliases(tokens: Iterable[str]) -> list[str]:
 
 
 def _read_yaml_targets(ctx) -> list[str] | None:
-    """Read targets/target from raw apm.yml using v2 parser.
+    """Return the names the package manifest restricts deployment to.
 
-    Returns a list of canonical target names, or None if neither key
-    is present.  Raises ConflictingTargetsError if both keys appear.
+    ``None`` when nothing restricting is declared (including legacy ``all``).
+    Raises ConflictingTargetsError if both keys appear.
     """
     if ctx.apm_package is None:
         return None
-    apm_yml_path = getattr(ctx.apm_package, "package_path", None)
-    if apm_yml_path is None:
-        return _as_yaml_targets(_package_target_value(ctx.apm_package))
-    manifest = apm_yml_path / "apm.yml"
-    if not manifest.exists():
-        return _as_yaml_targets(_package_target_value(ctx.apm_package))
-    try:
-        from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.models.apm_package import package_target_declaration
 
-        data = load_yaml(manifest)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    from apm_cli.core.apm_yml import parse_targets_field
-
-    result = parse_targets_field(data)
-    return result if result else None
+    return package_target_declaration(ctx.apm_package).restriction()
 
 
 def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
@@ -282,18 +260,15 @@ def _gate_cowork_target(
             ):
                 import sys as _sys
 
+                from apm_cli.core.remediation import COWORK_SKILLS_DIR_REQUIRED
+
+                _cowork_fix = (
+                    f"Set APM_COPILOT_COWORK_SKILLS_DIR, or {COWORK_SKILLS_DIR_REQUIRED.clause()}."
+                )
                 if _sys.platform.startswith("linux"):
-                    _cowork_msg = (
-                        "Cowork has no auto-detection on Linux.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
+                    _cowork_msg = f"Cowork has no auto-detection on Linux.\n{_cowork_fix}"
                 else:
-                    _cowork_msg = (
-                        "Cowork: no OneDrive path detected.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
+                    _cowork_msg = f"Cowork: no OneDrive path detected.\n{_cowork_fix}"
                 if ctx.logger:
                     ctx.logger.error(_cowork_msg, symbol="cross")
                 raise SystemExit(1)
@@ -303,9 +278,11 @@ def _gate_cowork_target(
         _cowork_in_set = any(t.name == "copilot-cowork" for t in targets)
         if _cowork_in_set:
             if ctx.logger:
+                from apm_cli.core.remediation import COWORK_TARGET_USER_SCOPE
+
                 ctx.logger.error(
                     "The 'copilot-cowork' target requires --global (user scope). "
-                    "Run: apm install --target copilot-cowork --global"
+                    + COWORK_TARGET_USER_SCOPE.sentence()
                 )
             raise SystemExit(1)
 
@@ -395,7 +372,9 @@ def _resolve_targets_by_scope(
                     "No global targets resolved -- nothing will be "
                     "deployed. Check 'target:' in apm.yml or use --target."
                 )
-        _create_target_dirs(targets, ctx.project_root, explicit, ctx.logger)
+        ctx.created_target_roots.extend(
+            _create_target_dirs(targets, ctx.project_root, explicit, ctx.logger)
+        )
         return targets
 
     # Project scope: v2 resolution.
@@ -443,18 +422,23 @@ def _resolve_targets_by_scope(
         )
     except _click.UsageError as exc:
         if ctx.logger:
-            ctx.logger.error(str(exc), symbol="")
+            ctx.logger.error(str(exc), symbol="error")
         raise SystemExit(2) from exc
 
-    from apm_cli.utils.console import _rich_info
-
     _provenance_msg = format_provenance(_resolved)
-    _rich_info(_provenance_msg, symbol="info")
+    if ctx.logger:
+        ctx.logger.announce_targets(_provenance_msg)
+    else:
+        from apm_cli.utils.console import _rich_info
+
+        _rich_info(_provenance_msg, symbol="info")
 
     from apm_cli.integration.targets import materialize_project_target_profiles
 
     try:
-        _v2_targets = materialize_project_target_profiles(ctx.project_root, _resolved.targets)
+        _v2_targets = materialize_project_target_profiles(
+            ctx.project_root, _resolved.targets, ctx.created_target_roots
+        )
     except PermissionError as exc:
         if ctx.logger:
             ctx.logger.error(
@@ -529,11 +513,7 @@ def run(ctx: InstallContext) -> None:
 
     if agents_alias_was_detected():
         if ctx.logger:
-            ctx.logger.warning(
-                "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
-                "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
-                "(.agents/skills/). Removal in v1.0."
-            )
+            ctx.logger.warning(deprecation_message("target-agents"))
 
     _is_user = ctx.scope is InstallScope.USER
 
@@ -557,6 +537,11 @@ def run(ctx: InstallContext) -> None:
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.
     _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)
+    if _is_user and ctx.logger:
+        from apm_cli.core.scope import warn_unsupported_user_scope
+
+        if scope_warning := warn_unsupported_user_scope(t.name for t in _targets):
+            ctx.logger.warning(scope_warning)
 
     # Legacy detect_target call -- return values are not consumed by any
     # downstream code but the call is preserved for behaviour parity with
@@ -574,9 +559,9 @@ def run(ctx: InstallContext) -> None:
     # per-client root_dir instead of the converged .agents/ directory.
     # ------------------------------------------------------------------
     if ctx.legacy_skill_paths:
-        from apm_cli.integration.targets import apply_legacy_skill_paths
+        from apm_cli.integration.skill_layout import resolve_skill_layout
 
-        _targets = apply_legacy_skill_paths(_targets)
+        _targets = resolve_skill_layout(_targets, legacy_skill_paths=True)
 
     # ------------------------------------------------------------------
     # Initialize integrators

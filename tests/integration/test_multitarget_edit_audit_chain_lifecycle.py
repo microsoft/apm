@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.base_integrator import kept_edit_message
 from tests.integration._target_compile_kit import (
     ALL_TARGETS,
     Scenario,
@@ -21,7 +22,7 @@ from tests.integration._target_compile_kit import (
     write_project,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _USER_FILES = {
     ".cursor/rules/mine.mdc": "---\nalwaysApply: true\n---\nMine.\n",
@@ -88,7 +89,28 @@ def test_multi_target_edit_compile_audit_narrow_uninstall_chain(
         assert (project / name).read_bytes() == data, name
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
 
-    # 5. documented: plain reinstall re-deploys edited managed files from the cache.
+    # 5. #4360 + RA-012: the receipts prove the hand edits and nothing new comes
+    #    upstream, so a plain reinstall keeps the files, names each with the true
+    #    reason and exits 0; the printed remedy (move aside, then install)
+    #    restores them.
+    edited = {".kiro/steering/py.md": edited_rule, ".codex/agents/rev.toml": edited_agent}
+    edited_bytes = {relative: path.read_bytes() for relative, path in edited.items()}
+    kept = scenario.run("install", "--no-policy", cwd=project)
+    text = output(kept)
+    assert "no local deployment receipt" not in text, text
+    for relative, path in edited.items():
+        assert kept_edit_message(relative, user_scope=False, proven_edit=True) in text, text
+        assert path.read_bytes() == edited_bytes[relative]
+    # Step 4's compile made AGENTS.md (imported by CLAUDE.md) carry the always-on
+    # instruction, so this install retires its Claude rule and names it (#5343).
+    assert "Retired .claude/rules/global.md: AGENTS.md now carries it" in " ".join(text.split())
+    assert not (project / ".claude/rules/global.md").exists()
+    assert ".claude/rules/global.md" not in deployed_files(project)
+    lock_bytes = (project / "apm.lock.yaml").read_bytes()
+    aside = scenario.isolated.work_root / "aside"
+    aside.mkdir()
+    for index, path in enumerate(edited.values()):
+        path.rename(aside / f"{index}-{path.name}")
     scenario.run("install", "--no-policy", cwd=project)
     assert "EDIT" not in edited_rule.read_text("ascii")
     assert "EDIT" not in edited_agent.read_text("ascii")

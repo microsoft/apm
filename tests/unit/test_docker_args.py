@@ -2,7 +2,11 @@
 
 import unittest
 
+import pytest
+
 from apm_cli.core.docker_args import DockerArgsProcessor
+
+pytestmark = pytest.mark.unit
 
 
 class TestDockerArgsDeduplication(unittest.TestCase):

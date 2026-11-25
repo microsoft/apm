@@ -6,7 +6,7 @@ what the lockfile recorded, nothing more.
 
 purl scheme (per design D3):
 
-* git deps          -> ``pkg:<host>/<owner>/<repo>@<resolved_commit>``
+* git deps          -> ``pkg:<host>/<owner>/<repo>@<resolved_commit>[#<subpath>]``
 * OCI registry deps -> ``pkg:oci/<name>@<digest>``
 * local / generic   -> ``pkg:generic/<name>@<content_hash>`` (version omitted
                        when no hash was recorded)
@@ -17,9 +17,10 @@ SBOM output -- a token must never leak through provenance metadata.
 
 from __future__ import annotations
 
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote
 
 from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.utils.credential_rendering import redact_url_userinfo
 
 # host_type values that have a dedicated purl type. Anything else falls back to
 # ``generic`` -- honest about identity rather than asserting a forge we can't
@@ -53,11 +54,18 @@ def _host_segment(repo_url: str) -> str:
 
 
 def _purl_type_for(dep: LockedDependency) -> str | None:
-    """Resolve the forge purl type from host_type, else the repo_url domain."""
+    """Resolve the forge purl type from host_type, the repo_url domain, or host.
+
+    Lockfiles record default-host GitHub deps as a host-less ``owner/repo``
+    with ``host: github.com``, so the recorded host decides those.
+    """
     explicit = _HOST_TYPE_TO_PURL.get((dep.host_type or "").lower())
     if explicit:
         return explicit
-    return _HOST_DOMAIN_TO_PURL.get(_host_segment(dep.repo_url))
+    from_url = _HOST_DOMAIN_TO_PURL.get(_host_segment(dep.repo_url))
+    if from_url:
+        return from_url
+    return _HOST_DOMAIN_TO_PURL.get((dep.host or "").lower())
 
 
 def _owner_repo(repo_url: str) -> str:
@@ -85,22 +93,10 @@ def scrub_url(url: str) -> str:
     parameters carry no provenance value for an inventory export and are a known
     credential-leak vector (``?access_token=``, ``?token=``, SAS ``?sig=``...),
     so they are dropped wholesale rather than allow-listed. Scheme, host, port,
-    path, and fragment are preserved verbatim. Returns the URL unchanged when it
-    carries neither userinfo nor a query string.
+    path, and fragment are preserved, except ``key=value`` fragment values,
+    which are masked. Returns the URL unchanged when it carries none of these.
     """
-    if not url:
-        return url
-    parts = urlsplit(url)
-    has_userinfo = "@" in parts.netloc
-    if not has_userinfo and not parts.query:
-        return url
-    if has_userinfo:
-        netloc = parts.hostname or ""
-        if parts.port is not None:
-            netloc = f"{netloc}:{parts.port}"
-    else:
-        netloc = parts.netloc
-    return urlunsplit((parts.scheme, netloc, parts.path, "", parts.fragment))
+    return redact_url_userinfo(url, drop_query=True)
 
 
 def _is_oci(dep: LockedDependency) -> bool:
@@ -128,6 +124,15 @@ def _encode_path(owner_repo: str) -> str:
     return "/".join(_encode_segment(p) for p in owner_repo.split("/"))
 
 
+def _subpath(dep: LockedDependency) -> str:
+    """Return the ``#subpath`` naming a package inside its repository, if any.
+
+    Two packages from one repository at one commit stay distinct components.
+    """
+    parts = [part for part in (dep.virtual_path or "").split("/") if part not in ("", ".", "..")]
+    return f"#{'/'.join(_encode_segment(part) for part in parts)}" if parts else ""
+
+
 def build_purl(dep: LockedDependency) -> str:
     """Build the Package URL identity for *dep* from lockfile fields only."""
     if _is_oci(dep):
@@ -137,12 +142,16 @@ def build_purl(dep: LockedDependency) -> str:
 
     if not _is_local(dep) and dep.resolved_commit:
         purl_type = _purl_type_for(dep)
+        subpath = _subpath(dep)
         if purl_type:
             return (
-                f"pkg:{purl_type}/{_encode_path(_owner_repo(dep.repo_url))}@{dep.resolved_commit}"
+                f"pkg:{purl_type}/{_encode_path(_owner_repo(dep.repo_url))}"
+                f"@{dep.resolved_commit}{subpath}"
             )
         # Unknown forge: stay honest with a generic identity keyed on the commit.
-        return f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}@{dep.resolved_commit}"
+        return (
+            f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}@{dep.resolved_commit}{subpath}"
+        )
 
     # Local / primitive / hash-only identity.
     name = _encode_segment(_basename(dep.repo_url))

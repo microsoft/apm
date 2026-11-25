@@ -44,6 +44,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -51,7 +54,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "allow-list-policy",
     "registry_source": {
@@ -118,6 +121,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -125,7 +131,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "block-mode-policy",
     "registry_source": {
@@ -194,6 +200,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -201,7 +210,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "deny-list-policy",
     "registry_source": {
@@ -268,6 +277,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -275,7 +287,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "extends-missing-parent-policy",
     "registry_source": {
@@ -342,6 +354,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -349,7 +364,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "cycle-policy-b",
     "registry_source": {
@@ -418,6 +433,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -425,7 +443,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "cycle-policy-a",
     "registry_source": {
@@ -494,6 +512,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -501,7 +522,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "depth-leaf-policy",
     "registry_source": {
@@ -568,6 +589,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -575,7 +599,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "fail-on-drift-off-policy",
     "registry_source": {
@@ -642,6 +666,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -649,7 +676,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "fail-on-drift-on-policy",
     "registry_source": {
@@ -716,6 +743,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -723,7 +753,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "integrity-combined-policy",
     "registry_source": {
@@ -790,6 +820,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": [
         "io.github.github/*",
@@ -802,7 +835,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false
@@ -872,6 +905,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -879,7 +915,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "enforcement-off-policy",
     "registry_source": {
@@ -946,6 +982,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -953,7 +992,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "require-hashes-off-policy",
     "registry_source": {
@@ -1020,6 +1059,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1027,7 +1069,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "require-hashes-on-policy",
     "registry_source": {
@@ -1096,6 +1138,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1103,7 +1148,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "required-version-pin-policy",
     "registry_source": {
@@ -1172,6 +1217,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1179,7 +1227,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "required-deps-policy",
     "registry_source": {
@@ -1219,7 +1267,7 @@
       },
       "target": {
         "allow": [
-          "vscode"
+          "copilot"
         ],
         "enforce": null
       }
@@ -1248,6 +1296,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1255,7 +1306,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "target-restriction-policy",
     "registry_source": {
@@ -1322,6 +1373,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1329,7 +1383,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "warn-mode-policy",
     "registry_source": {
@@ -1405,6 +1459,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1412,7 +1469,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "contoso-enterprise-policy",
     "registry_source": {
@@ -1479,6 +1536,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1486,7 +1546,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "minimal",
     "registry_source": {
@@ -1525,11 +1585,7 @@
         "enforce": "distributed"
       },
       "target": {
-        "allow": [
-          "vscode",
-          "claude",
-          "all"
-        ],
+        "allow": null,
         "enforce": null
       }
     },
@@ -1575,6 +1631,9 @@
       ],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": [
         "io.github.github/*",
@@ -1585,7 +1644,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false
@@ -1657,6 +1716,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1664,7 +1726,7 @@
       "transport": {
         "allow": null
       },
-      "trust_transitive": false
+      "trust_transitive": null
     },
     "name": "repo-specific-policy",
     "registry_source": {

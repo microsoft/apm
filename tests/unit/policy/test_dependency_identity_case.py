@@ -8,6 +8,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.dependency.identity import normalize_package_policy_identity
 from apm_cli.policy.matcher import check_mcp_allowed, matches_pattern
+from apm_cli.policy.models import PolicyRemedy
 from apm_cli.policy.policy_checks import (
     _check_dependency_allowlist,
     _check_dependency_denylist,
@@ -23,6 +24,8 @@ from apm_cli.policy.schema import (
     McpPolicy,
     RegistrySourcePolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _lock_dependency(
@@ -153,16 +156,21 @@ def test_host_qualified_pattern_matches_effective_host_case_insensitively(
 
 
 @pytest.mark.parametrize(
-    "options",
+    ("options", "require"),
     [
-        {"host": "ghe.enterprise.test"},
-        {"host": "contoso.ghe.com"},
-        {"host": "artifacts.example.test", "source": "registry", "artifactory_prefix": "apm"},
+        ({"host": "ghe.enterprise.test"}, "CONTOSO/WIDGET"),
+        ({"host": "contoso.ghe.com"}, "contoso.ghe.com/CONTOSO/WIDGET"),
+        (
+            {"host": "artifacts.example.test", "source": "registry", "artifactory_prefix": "apm"},
+            "artifacts.example.test/CONTOSO/WIDGET",
+        ),
     ],
 )
 def test_enterprise_and_registry_policy_subjects_are_host_blind(
-    options: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    options: dict[str, str], require: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Allow/deny hostless patterns match any host; an exact require entry
+    names the dependency's written host, else the default host (#3993)."""
     monkeypatch.setenv("GITHUB_HOST", "ghe.enterprise.test")
     dependency = DependencyReference(repo_url="Contoso/Widget", **options)
     assert dependency.get_canonical_dependency_string() == "contoso/widget"
@@ -173,9 +181,7 @@ def test_enterprise_and_registry_policy_subjects_are_host_blind(
     assert not _check_dependency_denylist(
         [dependency], DependencyPolicy(deny=("CONTOSO/WIDGET",))
     ).passed
-    assert _check_required_packages(
-        [dependency], DependencyPolicy(require=("CONTOSO/WIDGET",))
-    ).passed
+    assert _check_required_packages([dependency], DependencyPolicy(require=(require,))).passed
 
 
 @pytest.mark.parametrize(
@@ -388,3 +394,18 @@ def test_required_version_retains_locked_only_mismatch_detail() -> None:
 
     assert not result.passed
     assert result.details == ["devexpgbb/secure-baseline: expected ref 'v1.0.0', got 'v2.0.0'"]
+
+
+def test_deny_judges_bundled_packages_once_without_an_apm_yml_edit() -> None:
+    declared = DependencyReference.parse("acme/tool")
+    bundled = [
+        DependencyReference.parse("acme/tool"),
+        DependencyReference(repo_url="_local/tool", is_local=True, source="local"),
+    ]
+
+    result = _check_dependency_denylist([declared], DependencyPolicy(deny=("**/tool",)), bundled)
+
+    assert [(s.ref, s.remedy) for s in result.subjects] == [
+        ("github.com/acme/tool", PolicyRemedy.REMOVE),
+        ("_local/tool", None),
+    ]

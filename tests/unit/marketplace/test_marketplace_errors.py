@@ -1,13 +1,22 @@
 """Tests for marketplace error hierarchy."""
 
-import pytest  # noqa: F401
+import re
+from urllib.parse import urlparse
 
+import pytest
+
+from apm_cli.core.remediation import (
+    MARKETPLACE_UNREGISTERED_SHORTHAND,
+    MARKETPLACE_UNREGISTERED_URL,
+)
 from apm_cli.marketplace.errors import (
     MarketplaceError,
     MarketplaceFetchError,
     MarketplaceNotFoundError,
     PluginNotFoundError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestMarketplaceErrors:
@@ -25,9 +34,10 @@ class TestMarketplaceErrors:
         assert "apm marketplace add" in str(err)
         # Round 3 panel (devx-ux): copy-paste-friendly URL form must appear on
         # the first line of the recovery hint, not buried in a parenthetical.
-        assert "https://github.com/OWNER/REPO" in str(err)
-        idx_url = str(err).index("https://github.com/OWNER/REPO")
-        idx_short = str(err).index("apm marketplace add OWNER/REPO")
+        url = MARKETPLACE_UNREGISTERED_URL.bind(host="github.com").command
+        assert url == "apm marketplace add https://github.com/<owner>/<repo>"
+        idx_url = str(err).index(f"'{url}'")
+        idx_short = str(err).index(f"'{MARKETPLACE_UNREGISTERED_SHORTHAND.command}'")
         assert idx_url < idx_short, "URL form must precede shorthand form in the recovery hint"
         assert err.name == "acme"
 
@@ -35,8 +45,11 @@ class TestMarketplaceErrors:
         # Round 4 panel (devx-ux required): GHES users copying the URL must
         # land on a host that works for them, not the public-cloud default.
         err = MarketplaceNotFoundError("acme", host="github.example.corp")
-        assert "https://github.example.corp/OWNER/REPO" in str(err)
-        assert "https://github.com/" not in str(err)
+        urls = [urlparse(u) for u in re.findall(r"https?://[^\s']+", str(err))]
+        assert [(u.scheme, u.hostname, u.path) for u in urls] == [
+            ("https", "github.example.corp", "/<owner>/<repo>")
+        ]
+        assert all(u.hostname != "github.com" for u in urls)
         assert err.host == "github.example.corp"
 
     def test_plugin_not_found_message(self):

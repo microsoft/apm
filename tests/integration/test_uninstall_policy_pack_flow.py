@@ -1078,7 +1078,7 @@ class TestFetchFromUrl:
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/policy.yml", tmp_path, no_cache=True)
 
         assert result.outcome == "absent"
@@ -1091,7 +1091,7 @@ class TestFetchFromUrl:
         mock_resp.status_code = 200
         mock_resp.text = _POLICY_WITH_DENY
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/policy.yml", tmp_path, no_cache=True)
 
         assert result.outcome == "found"
@@ -1105,7 +1105,7 @@ class TestFetchFromUrl:
         mock_resp.status_code = 301
         mock_resp.headers = {"Location": "https://evil.example.com/"}
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/policy.yml", tmp_path, no_cache=True)
 
         assert result.outcome == "cache_miss_fetch_fail"
@@ -1116,7 +1116,9 @@ class TestFetchFromUrl:
 
         from apm_cli.policy.discovery import _fetch_from_url
 
-        with patch("requests.get", side_effect=requests.exceptions.Timeout()):
+        with patch(
+            "apm_cli.policy.discovery.policy_get", side_effect=requests.exceptions.Timeout()
+        ):
             result = _fetch_from_url("https://example.com/policy.yml", tmp_path, no_cache=True)
 
         assert result.outcome == "cache_miss_fetch_fail"
@@ -1127,7 +1129,9 @@ class TestFetchFromUrl:
 
         from apm_cli.policy.discovery import _fetch_from_url
 
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError()):
+        with patch(
+            "apm_cli.policy.discovery.policy_get", side_effect=requests.exceptions.ConnectionError()
+        ):
             result = _fetch_from_url("https://example.com/policy.yml", tmp_path, no_cache=True)
 
         assert result.outcome == "cache_miss_fetch_fail"
@@ -1140,7 +1144,7 @@ class TestFetchFromUrl:
         mock_resp.status_code = 200
         mock_resp.text = "<html>captive portal</html>"
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/policy.yml", tmp_path, no_cache=True)
 
         assert result.outcome == "garbage_response"
@@ -1169,7 +1173,10 @@ class TestFetchFromRepo:
         """GitHub API returns valid policy → found outcome."""
         from apm_cli.policy.discovery import _fetch_from_repo
 
-        with patch("requests.get", return_value=self._make_github_response(_POLICY_WITH_DENY)):
+        with patch(
+            "apm_cli.policy.discovery.policy_get",
+            return_value=self._make_github_response(_POLICY_WITH_DENY),
+        ):
             result = _fetch_from_repo("contoso/.github", tmp_path, no_cache=True)
 
         assert result.outcome == "found"
@@ -1182,7 +1189,7 @@ class TestFetchFromRepo:
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_repo("contoso/.github", tmp_path, no_cache=True)
 
         assert result.outcome == "absent"
@@ -1194,7 +1201,7 @@ class TestFetchFromRepo:
         mock_resp = MagicMock()
         mock_resp.status_code = 403
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_repo("contoso/.github", tmp_path, no_cache=True)
 
         assert result.outcome == "cache_miss_fetch_fail"

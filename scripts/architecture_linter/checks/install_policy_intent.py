@@ -24,11 +24,16 @@ from scripts.architecture_linter.checks.install_policy_deployment_and_ref import
     check_registry_dependency_intent,
     check_resolver_queue_dedup,
 )
+from scripts.architecture_linter.checks.install_policy_explicit_source import (
+    RULE_EXPLICIT_POLICY_SOURCE,
+    check_explicit_policy_source_owner,
+)
 from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import (
     RULE_GITLAB_ADAPTER,
     RULE_GITLAB_FACADE,
     RULE_LOCAL_BUNDLE_PREFLIGHT,
     RULE_REMOTE_ORIGIN_OWNER,
+    RULE_REMOTE_READ_REUSE,
     RULE_REQUIRE_HASHES,
     RULE_WINNER_SELECTION,
     check_dependency_winner_selection,
@@ -36,7 +41,12 @@ from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import 
     check_gitlab_policy_adapter,
     check_local_bundle_preflight,
     check_policy_remote_origin_owner,
+    check_remote_read_reuse,
     check_require_hashes_enforcement,
+)
+from scripts.architecture_linter.checks.install_policy_mcp_transport import (
+    RULE_POLICY_MCP_TRANSPORT,
+    check_policy_mcp_transport_projection,
 )
 from scripts.architecture_linter.checks.install_policy_plugin_and_approval import (
     RULE_APPROVAL_OUTCOME,
@@ -66,6 +76,10 @@ from scripts.architecture_linter.checks.install_policy_skill_and_lock import (
     check_marketplace_mutation_lock,
     check_skill_subset_tokens,
     check_update_plan_ref_annotation,
+)
+from scripts.architecture_linter.checks.install_policy_violation_subjects import (
+    RULE_POLICY_VIOLATION_SUBJECTS,
+    check_policy_violation_subjects,
 )
 from scripts.architecture_linter.models import Rule
 
@@ -115,6 +129,34 @@ EXTRA_RULES: tuple[Rule, ...] = (
         check=check_policy_remote_origin_owner,
     ),
     Rule(
+        id=RULE_REMOTE_READ_REUSE,
+        group=GROUP,
+        guard_ids=(RULE_REMOTE_READ_REUSE,),
+        description=(
+            "Only the verified-state record reuses a remote read, dropped once user code ran."
+        ),
+        check=check_remote_read_reuse,
+    ),
+    Rule(
+        id=RULE_POLICY_MCP_TRANSPORT,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_MCP_TRANSPORT,),
+        description=(
+            "Policy mcp.transport.allow judges canonical effective transports from the owner."
+        ),
+        check=check_policy_mcp_transport_projection,
+    ),
+    Rule(
+        id=RULE_POLICY_VIOLATION_SUBJECTS,
+        group=GROUP,
+        guard_ids=(RULE_POLICY_VIOLATION_SUBJECTS,),
+        description=(
+            "Install policy violations name their subject via policy/install_preflight.py"
+            "::emit_check_violations."
+        ),
+        check=check_policy_violation_subjects,
+    ),
+    Rule(
         id=RULE_POLICY_DISABLE_SWITCH,
         group=GROUP,
         guard_ids=(RULE_POLICY_DISABLE_SWITCH,),
@@ -122,6 +164,16 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "APM_POLICY_DISABLE is read only by policy/discovery.py::policy_disabled_by_env."
         ),
         check=check_policy_disable_switch_owner,
+    ),
+    Rule(
+        id=RULE_EXPLICIT_POLICY_SOURCE,
+        group=GROUP,
+        guard_ids=(RULE_EXPLICIT_POLICY_SOURCE,),
+        description=(
+            "Explicit --policy sources compose with discovery only through "
+            "policy/explicit_source.py."
+        ),
+        check=check_explicit_policy_source_owner,
     ),
     _semantic_rule(
         RULE_LOCAL_BUNDLE_PREFLIGHT,

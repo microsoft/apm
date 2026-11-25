@@ -46,9 +46,28 @@ class LinkResolutionContext:
     # stay inside this subtree already resolve after copy and should remain
     # portable bundle-local links.
     preserved_source_root: Path | None = None
-    # Source package projected into the deployment output frame. Audit replay
-    # points this at scratch while package_root remains the real source tree.
+    # Source package in the deployment output frame; package_root remains the
+    # real source tree. Audit replay sets the live install path for dependencies
+    # (with deployment_frame) and scratch for the project self-entry (without).
     deployment_package_root: Path | None = None
+    # (replay output root, live deploy root). Audit replay writes under the
+    # first but renders asset links as if the target lived under the second,
+    # matching install wherever apm_modules sits (#3901).
+    deployment_frame: tuple[Path, Path] | None = None
+
+
+def is_external_url(path: str) -> bool:
+    """Whether a link target is an external URL the resolver never rewrites.
+
+    Security: only http/https URLs with a host are external. Every other
+    scheme (javascript:, data:, file:, ...) and ``http:relative/path`` is an
+    internal path.
+    """
+    try:
+        parsed = urlparse(path.strip())
+    except Exception:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
 class UnifiedLinkResolver:
@@ -80,6 +99,7 @@ class UnifiedLinkResolver:
         # the generalization safely.
         self.package_root: Path | None = None
         self.deployment_package_root: Path | None = None
+        self.deployment_frame: tuple[Path, Path] | None = None
 
     def register_contexts(self, primitives) -> None:
         """Build registry of all available context files.
@@ -143,6 +163,7 @@ class UnifiedLinkResolver:
             enable_asset_rewrite=self.package_root is not None,
             preserved_source_root=preserved_source_root,
             deployment_package_root=self.deployment_package_root,
+            deployment_frame=self.deployment_frame,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -311,8 +332,51 @@ class UnifiedLinkResolver:
             return None
 
         # Calculate relative path from target location to actual source file
-        # The shared helper owns ../ handling and cross-drive refusal.
-        return portable_link_relpath(actual_file, ctx.target_location)
+        # The shared helper owns ../ handling and cross-drive refusal. Audit
+        # replay renders in the live deployment coordinates install used (#4832).
+        return portable_link_relpath(
+            self._live_context_source(actual_file, ctx), self._live_target_location(ctx)
+        )
+
+    @staticmethod
+    def _live_context_source(actual_file: Path, ctx: LinkResolutionContext) -> Path:
+        """Map a replay-materialized context file to where install deployed it.
+
+        A dependency replay may read its package from scratch; its context
+        file projects through ``deployment_package_root`` like asset links,
+        other scratch paths map through the frame, and live or external
+        sources stay as they are. Projected roots are resolved because
+        discovery registers physical paths (a symlinked ``APM_HOME``).
+        Only link text changes.
+        """
+        if ctx.deployment_frame is None:
+            return actual_file
+        if ctx.package_root is not None and ctx.deployment_package_root is not None:
+            try:
+                package_relative = actual_file.resolve().relative_to(ctx.package_root.resolve())
+                return ctx.deployment_package_root.resolve() / package_relative
+            except (OSError, ValueError):
+                pass
+        replay_root, live_root = ctx.deployment_frame
+        try:
+            return live_root.resolve() / actual_file.resolve().relative_to(replay_root.resolve())
+        except (OSError, ValueError):
+            return actual_file
+
+    @staticmethod
+    def _live_target_location(ctx: LinkResolutionContext) -> Path:
+        """Map a replay target directory to where install deployed it.
+
+        Audit replay writes under ``deployment_frame[0]`` (scratch) but must
+        emit the link text install wrote under ``deployment_frame[1]``; the
+        frame only shapes link text, nothing is read or written through it.
+        """
+        target_location = ctx.target_location
+        if ctx.deployment_frame is not None:
+            replay_root, live_root = ctx.deployment_frame
+            if target_location.is_relative_to(replay_root):
+                target_location = live_root / target_location.relative_to(replay_root)
+        return target_location
 
     def _resolve_to_actual_file(self, link_path: str, source_file: Path) -> Path | None:
         """Resolve a link path to the actual file on disk.
@@ -349,37 +413,8 @@ class UnifiedLinkResolver:
         return None
 
     def _is_external_url(self, path: str) -> bool:
-        """Check if path is an external URL.
-
-        Security: Only http/https URLs with valid netloc are considered external.
-        All other schemes (javascript:, data:, file:, etc.) are treated as internal
-        paths to prevent potential security issues.
-
-        Args:
-            path: Path to check
-
-        Returns:
-            True if external URL (http/https with valid netloc)
-        """
-        try:
-            # Strip whitespace to prevent bypass attempts
-            path = path.strip()
-
-            # Parse the URL
-            parsed = urlparse(path)
-
-            # Only allow http/https schemes
-            if parsed.scheme not in ("http", "https"):
-                return False
-
-            # Must have a netloc (domain) to be a valid external URL
-            # This prevents URLs like "http:relative/path" from being treated as external
-            if not parsed.netloc:  # noqa: SIM103
-                return False
-
-            return True
-        except Exception:
-            return False
+        """Check if path is an external URL (see :func:`is_external_url`)."""
+        return is_external_url(path)
 
     def _is_context_file(self, path: str) -> bool:
         """Check if path is a context or memory file.
@@ -536,7 +571,7 @@ class UnifiedLinkResolver:
         try:
             relative_path = portable_link_relpath(
                 candidate_in_deployment,
-                ctx.target_location,
+                self._live_target_location(ctx),
             )
         except (OSError, ValueError):
             return None
@@ -616,13 +651,21 @@ def validate_link_targets(content: str, base_path: Path) -> builtins.list[str]:
         if path.startswith(("http://", "https://", "ftp://", "mailto:")) or path.startswith("#"):
             continue
 
+        # A markdown target may carry a ``#fragment``, ``?query``, or both.
+        # Those address part of the target; they are not part of the filename.
+        # Reuse the resolver's existing split so validation agrees with the
+        # rewriting path instead of looking for ``file.md#fragment``.
+        path_part, _suffix = UnifiedLinkResolver._split_link_target(path)
+        if not path_part:
+            continue
+
         # Resolve and check path
-        full_path = _resolve_path(path, base_path)
+        full_path = _resolve_path(path_part, base_path)
         if not full_path or not full_path.exists():
-            errors.append(f"Referenced file not found: {path} (in link '{text}')")
+            errors.append(f"Referenced file not found: {path_part} (in link '{text}')")
         elif not full_path.is_file() and not full_path.is_dir():
             errors.append(
-                f"Referenced path is neither a file nor directory: {path} (in link '{text}')"
+                f"Referenced path is neither a file nor directory: {path_part} (in link '{text}')"
             )
 
     return errors
@@ -729,3 +772,92 @@ def _detect_circular_references(
                     continue
 
     return errors
+
+
+def _markdown_link_destination(raw: str) -> str:
+    """Return the destination of a Markdown link body, without a title or ``<>``."""
+    body = raw.strip()
+    if body.startswith("<") and ">" in body:
+        return body[1 : body.index(">")]
+    return body.split()[0] if body else body
+
+
+def _deployed_link_text(path: Path) -> str | None:
+    """Return the linkable text of a deployed Markdown file or Codex TOML agent."""
+    content = path.read_text(encoding="utf-8")
+    if path.suffix == ".md":
+        return content
+    import tomllib
+
+    instructions = tomllib.loads(content).get("developer_instructions")
+    return instructions if isinstance(instructions, str) else None
+
+
+def missing_module_link_targets(
+    project_root: Path, package: str | None = None
+) -> builtins.list[tuple[str, str]]:
+    """Return ``(deployed file, target)`` for each link into apm_modules that is missing.
+
+    Installation rewrites a dependency's context links to point under
+    ``apm_modules``, so a committed deployed file is incomplete until
+    ``apm install`` materializes them, for example after a fresh clone
+    (#3143). Scans the Markdown files and Codex TOML agents apm.lock.yaml
+    records as deployed (workspace files included), or only *package*'s;
+    each claim passes the deploy-path safety gate before it is read. Both
+    returned paths are project-relative.
+    """
+    import os
+    import tomllib
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.integration.base_integrator import BaseIntegrator
+
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is None:
+        return []
+    if package is None:
+        deployed = builtins.set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
+    else:
+        dependency = lockfile.dependencies.get(package)
+        deployed = builtins.set(dependency.deployed_files if dependency else ())
+    root = os.path.normpath(str(project_root))
+    missing: builtins.list[tuple[str, str]] = []
+    for relative in sorted(path for path in deployed if path.endswith((".md", ".toml"))):
+        source = project_root / relative
+        try:
+            if not BaseIntegrator.validate_deploy_path(relative, project_root):
+                continue
+            if source.is_symlink() or not source.is_file():
+                continue
+            content = _deployed_link_text(source)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        for match in UnifiedLinkResolver.LINK_PATTERN.finditer(content or ""):
+            destination = _markdown_link_destination(match.group(2))
+            target, _suffix = UnifiedLinkResolver._split_link_target(destination)
+            if "://" in target or target.startswith("//"):
+                continue
+            if "apm_modules" not in target.replace("\\", "/").split("/"):
+                continue
+            resolved = os.path.normpath(os.path.join(os.path.dirname(str(source)), target))
+            if os.path.exists(resolved):
+                continue
+            try:
+                shown = os.path.relpath(resolved, root).replace(os.sep, "/")
+            except ValueError:  # another drive (Windows)
+                shown = target
+            if (relative, shown) not in missing:
+                missing.append((relative, shown))
+    return missing
+
+
+def warn_missing_module_links(project_root: Path, logger, package: str | None = None) -> None:
+    """Warn once per deployed file link into apm_modules whose target is missing (#3143)."""
+    from apm_cli.core.remediation import DEPENDENCIES_NOT_INSTALLED
+
+    for deployed, target in missing_module_link_targets(project_root, package):
+        logger.warning(
+            f"{deployed} links to {target}, which is missing. "
+            f"{DEPENDENCIES_NOT_INSTALLED.sentence()}"
+        )

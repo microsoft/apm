@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.claude_plugins.admission import ClaudeNativePlugin
     from apm_cli.codex_plugins.admission import CodexNativeDeployment
     from apm_cli.core.deployment_state import CompletedReintegration
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -73,7 +74,29 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
+    # MCP servers the command integrates after this pipeline: the commit gate
+    # enforces their policy before any deploy (install/commit_gate.py).
+    install_mcp: bool = True
+    mcp_runtime: str | None = None
+    mcp_policy_enforced: bool = False
+    # --dry-run: what this pipeline could not resolve, and the merged MCP set
+    # the commit gate collected (install/dry_run_plan.py renders both).
+    preview_errors: list[str] = field(default_factory=list)
+    preview_declaration_errors: list[str] = field(default_factory=list)
+    preview_mcp_dependencies: tuple[Any, ...] | None = None
     transaction: Any = None  # InstallTransaction
+    claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
+    # Dependency keys routed to native Claude this run, admitted or parked.
+    claude_native_keys: set[str] = field(default_factory=set)
+    # Plugin names this run evaluated for Copilot and refused (parked or withheld).
+    native_rejected_names: set[str] = field(default_factory=set)
+    # Native plugins this run's targets never reach: deployed nothing, rows kept whole.
+    native_carried_keys: set[str] = field(default_factory=set)
+    lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
+    # The caller's MCP/LSP reconciliation, run before native Claude
+    # registration commits the lockfile (install/phases/services.py, #4329).
+    reconcile_services: Any = None
+    service_failure: Exception | None = None
 
     dry_run: bool = False
     lockfile_only: bool = False
@@ -97,6 +120,9 @@ class InstallContext:
     all_apm_deps: list[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: list[Any] = field(default_factory=list)  # resolve
+    # Partial installs: declared local deps added only so the lock claims them
+    # (#4198). The invocation's CLI --skill overlay never applies to them.
+    implicit_local_keys: frozenset[str] = frozenset()  # resolve
     update_plan_complete_dep_keys: set[str] = field(default_factory=set)  # resolve
     # Partial installs: the selected packages' previously locked descendants
     # that the complete graph no longer needs (dropped) or reaches elsewhere
@@ -120,6 +146,7 @@ class InstallContext:
     # Targets phase outputs
     # ------------------------------------------------------------------
     targets: list[Any] = field(default_factory=list)  # targets
+    created_target_roots: list[Path] = field(default_factory=list)  # targets
     integrators: dict[str, Any] = field(default_factory=dict)  # targets
 
     # ------------------------------------------------------------------
@@ -127,6 +154,8 @@ class InstallContext:
     # ------------------------------------------------------------------
     pre_download_results: dict[str, Any] = field(default_factory=dict)  # download
     pre_downloaded_keys: set[str] = field(default_factory=set)  # download
+    # Packages whose cache/lock content-hash mismatch was already reported (#4351).
+    cache_mismatch_reported: set[str] = field(default_factory=set)  # download
 
     # ------------------------------------------------------------------
     # Pre-integrate inputs (populated by caller before integrate phase)
@@ -166,9 +195,28 @@ class InstallContext:
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Receipted files and hashes standing in for a package the prior lock does not record.
+    receipted_prior_deployments: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Managed files install kept without deployment evidence: (owner, entry) (#4360).
+    kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    # Kept entries a pre-0.37 lock proves edited: "drift" or "blocked" (#4398).
+    kept_overwrite_kinds: dict[str, str] = field(default_factory=dict)
+    # Unedited pre-0.37 renders a frozen replay kept as committed (#4398).
+    legacy_adopted: int = 0
+    kept_overwrite_written: list[str] = field(default_factory=list)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Declared members integration left on disk unwritten; cleanup retains them.
+    kept_deployed_values: frozenset[str] = frozenset()
+    # Loose values a parked native replacement leaves installed (#5036).
+    parked_native_kept_values: frozenset[str] = frozenset()
     package_types: dict[str, str] = field(default_factory=dict)
+    # A package's own ``targets:`` restriction, recorded for pack (#4850).
+    package_targets: dict[str, list[str]] = field(default_factory=dict)
+    # Package content hashes in the stream the existing lockfile records
+    # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed
+    # digest of the same bytes for the one-time promotion to version 4.
     package_hashes: dict[str, str] = field(default_factory=dict)
+    package_framed_hashes: dict[str, str] = field(default_factory=dict)
     # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX
     # expression the dependency's manifest DECLARED at resolve time (apm.yml
     # ``license:`` or plugin.json ``license``). Populated next to
@@ -207,12 +255,18 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
     skill_baseline_refused: bool = False  # integrate -- preflight refused before any write
+    overwrite_preflight_refused: bool = False  # commit gate -- unproven overwrite (#4381)
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.
     exec_trust_ctx: ExecTrustContext | None = None  # lazily built in template
-    exec_allow_map: dict[str, dict[str, bool]] | None = None  # None means gate disabled
+    # Unresolved until effective_allow_map(); a disabled gate is an explicit map.
+    exec_allow_map: dict[str, dict[str, bool]] | None = None
     package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
+    # dep_key -> types a partially gated package deployed (#3991)
+    package_exec_allowed_types: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # dep_key -> exec types a deny layer refuses (not approvable), for skip wording.
+    package_denied_exec_types: dict[str, frozenset[str]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # copilot_plugins (#2703)
@@ -228,6 +282,8 @@ class InstallContext:
     # ------------------------------------------------------------------
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
     policy_enforcement_active: bool = False
+    # Dependencies a blocking org policy refused by identity before any fetch.
+    prefetch_policy_denials: list[Any] = field(default_factory=list)
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
     audit_override: str | None = None  # --audit/--no-audit CLI override (off|warn|block)
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
@@ -241,6 +297,7 @@ class InstallContext:
     # ------------------------------------------------------------------
     old_local_deployed: list[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: list[str] = field(default_factory=list)  # integrate (root)
+    local_hooks_merged: bool = False  # integrate (root merged hook entries, #4033)
     local_content_errors_before: int = 0  # integrate (pre-root)
 
     # ------------------------------------------------------------------

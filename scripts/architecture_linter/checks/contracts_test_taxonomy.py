@@ -17,10 +17,14 @@ import ast
 import re
 from collections.abc import Sequence
 
+from scripts.architecture_linter.checks.agent_plugin_scan_primitives import _call_name
 from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
 from scripts.architecture_linter.checks.contracts_legacy import LEGACY_CHECKS
+from scripts.architecture_linter.checks.contracts_strip_charset import (
+    check_strip_charset_literals,
+)
 from scripts.architecture_linter.checks.contracts_structural_authorities import (
     find_binary_selection_violations,
     find_ratchet_authority_violations,
@@ -32,6 +36,7 @@ from scripts.architecture_linter.checks.contracts_test_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.frontmatter_boundary import frontmatter_fence_uses
 from scripts.architecture_linter.checks.lexical_shared import (
     body_has as _body_has,
 )
@@ -85,6 +90,7 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
+_GUARD_STRIP_CHARSET = "contracts-tooling-strip-charset"
 
 _GUARD_LOCKFILE_SYMLINK_WRITE = "contracts-tooling-lockfile-symlink-write-guard"
 
@@ -101,7 +107,9 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/agent_plugin_exporter.py",
     "src/apm_cli/commands/outdated.py",
     "src/apm_cli/commands/lock.py",
+    "src/apm_cli/install/bundle_admission.py",
 )
+_LOCKFILE_READ_SCOPES = {"lock.py": "lock_export", "bundle_admission.py": "_recorded_lockfile"}
 
 
 def _facts_for(provider: FactsProvider, path: str, rule_id: str):
@@ -265,10 +273,10 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
         if consumer_failures or consumer.tree_index is None:
             continue
         nodes = consumer.tree_index.nodes
-        if consumer_path == "src/apm_cli/commands/lock.py":
-            export = consumer.tree_index.function("lock_export")
+        if (scope := _LOCKFILE_READ_SCOPES.get(consumer_path.rsplit("/", 1)[-1])) is not None:
+            export = consumer.tree_index.function(scope)
             if export is None:
-                findings.append(_summary(rule_id, consumer_path, "Lockfile export must exist"))
+                findings.append(_summary(rule_id, consumer_path, f"{scope} must exist"))
                 continue
             nodes = consumer.tree_index.own_scope(export)
         imported = {
@@ -285,7 +293,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 and keyword.value.value is True
                 for keyword in calls[0].keywords
             )
-            if consumer_path in {"src/apm_cli/commands/outdated.py", "src/apm_cli/commands/lock.py"}
+            if scope is not None or consumer_path == "src/apm_cli/commands/outdated.py"
             else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
@@ -690,6 +698,36 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Nested root package directories must be rejected via nested_materialization_pairs",
             )
         )
+    # #3696: distinct packages sharing one host-blind directory are rejected by
+    # the materialization owner before the resolver fetches or stages them.
+    replacement_path = "src/apm_cli/models/dependency/replacement.py"
+    replacement, replacement_errors = _facts_for(provider, replacement_path, rule_id)
+    findings.extend(replacement_errors)
+    if not replacement_errors and _present_re(
+        replacement, re.compile(r"\.get_install_path\(|_slots\b")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                replacement_path,
+                "Replacement binding must not keep its own apm_modules slot occupancy; "
+                "MaterializationSlots owns shared-directory rejection",
+            )
+        )
+    if not errors and (
+        not _present_re(materialization, re.compile(r"^class MaterializationSlots\b"))
+        or not _present(resolver, "slots = MaterializationSlots(modules_dir)")
+        or not _present(resolver, "collision = slots.claim(dep_ref, parent)")
+        or not _present(resolver, "if self._reject_shared_slots(tree, slots,")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _MATERIALIZATION_OWNER,
+                "Packages sharing one apm_modules directory must be rejected via "
+                "MaterializationSlots before fetch",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )
@@ -729,6 +767,35 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 rule_id,
                 _IDENTITY_OWNER,
                 "Package identity casing must route through is_github_hostname",
+            )
+        )
+    # #3927: a non-default port names another server, so both identity models
+    # hand it to the one key builder and the builder qualifies the host with it.
+    lockfile, lockfile_errors = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    executables, executables_errors = _facts_for(
+        provider, "src/apm_cli/security/executables.py", rule_id
+    )
+    findings.extend(lockfile_errors)
+    findings.extend(executables_errors)
+    key_method = re.compile(r"^    def get_unique_key\(")
+    method_boundary = re.compile(r"^    def ")
+    deny_body = _awk_body(
+        executables, re.compile(r"^def canonical_exec_identity\("), re.compile(r"^def ")
+    )
+    if not (lockfile_errors or executables_errors) and (
+        not _body_has(unique_key_body, "if port:")
+        or not _body_has(_awk_body(reference, key_method, method_boundary), "port=self.port,")
+        or not _body_has(_awk_body(lockfile, key_method, method_boundary), "port=self.port,")
+        or not _present(identity, "return replace(dependency, port=None).get_unique_key()")
+        or not _body_has(deny_body, "canonical = build_port_blind_dependency_key(reference)")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _IDENTITY_OWNER,
+                "Dependency unique keys must carry the non-default port through "
+                "build_dependency_unique_key; deny identity must drop it via "
+                "build_port_blind_dependency_key",
             )
         )
     embedded_subpath_body = _awk_body(
@@ -1317,6 +1384,7 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 )
             )
 
+    findings.extend(frontmatter_fence_uses(provider, rule_id, _FRONTMATTER_OWNER))
     for path in _python_paths(provider, _SRC_PREFIX):
         facts, facts_fail = _facts_for(provider, path, rule_id)
         findings.extend(facts_fail)
@@ -1406,29 +1474,25 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                     )
                 )
             prepare_function = facts.tree_index.function(
-                "InstructionIntegrator._prepare_instruction"
+                "InstructionIntegrator.decoded_frontmatter_blocked"
             )
             prepare_scope = (
                 facts.tree_index.own_scope(prepare_function) if prepare_function is not None else ()
             )
+            # One decoded-frontmatter scan owner, called with force=force (#3686).
+            caller = facts.tree_index.function("InstructionIntegrator._prepare_instruction")
+            owner_calls = [
+                node
+                for node in (facts.tree_index.own_scope(caller) if caller is not None else ())
+                if isinstance(node, ast.Call)
+                and _call_name(node) == "self.decoded_frontmatter_blocked"
+                and _keyword_is_name(node, "force", "force")
+            ]
+            calls = [node for node in prepare_scope if isinstance(node, ast.Call)]
             security_calls = [
-                node
-                for node in prepare_scope
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "SecurityGate"
-                and node.func.attr == "scan_text"
+                node for node in calls if _call_name(node) == "SecurityGate.scan_text"
             ]
-            json_calls = [
-                node
-                for node in prepare_scope
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "json"
-                and node.func.attr == "dumps"
-            ]
+            json_calls = [node for node in calls if _call_name(node) == "json.dumps"]
             force_value = (
                 next(
                     (item.value for item in security_calls[0].keywords if item.arg == "force"),
@@ -1448,11 +1512,11 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
             block_checks = [
                 node
                 for node in prepare_scope
-                if isinstance(node, ast.If)
-                and isinstance(node.test, ast.Attribute)
-                and isinstance(node.test.value, ast.Name)
-                and node.test.value.id == "verdict"
-                and node.test.attr == "should_block"
+                if isinstance(node, ast.Return)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "verdict"
+                and node.value.attr == "should_block"
             ]
             if (
                 len(security_calls) != 1
@@ -1462,6 +1526,7 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 or not isinstance(ensure_ascii, ast.Constant)
                 or ensure_ascii.value is not False
                 or len(block_checks) != 1
+                or len(owner_calls) != 1
             ):
                 findings.append(
                     _summary(
@@ -2009,6 +2074,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_GENERATION_FOOTER,
         "Generated-content footer wording stays owned by compilation/footer.py.",
         lambda provider: check_generation_footer_authority(provider, _GUARD_GENERATION_FOOTER),
+    ),
+    _owner_rule(
+        _GUARD_STRIP_CHARSET,
+        "Prefix/suffix removal uses removeprefix/removesuffix, never a strip character set.",
+        lambda provider: check_strip_charset_literals(provider, _GUARD_STRIP_CHARSET),
     ),
     _structural_rule(
         _CONTRACT_RULE_ID,

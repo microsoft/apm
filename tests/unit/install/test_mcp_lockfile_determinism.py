@@ -21,6 +21,8 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage, DependencyReference, clear_apm_yml_cache
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
+pytestmark = pytest.mark.component
+
 
 class _FixedDatetime:
     instant = datetime(2026, 1, 1, tzinfo=UTC)
@@ -513,7 +515,7 @@ def test_lockfile_write_failure_preserves_original_and_reports_error(tmp_path: P
     lock_path = get_lockfile_path(tmp_path)
     original_bytes = lock_path.read_bytes()
 
-    with patch("apm_cli.utils.atomic_io.os.replace", side_effect=OSError("replace blocked")):
+    with patch("os.replace", side_effect=OSError("replace blocked")):
         context = _run_lockfile_phase_and_mcp_persist(
             tmp_path,
             package,
@@ -741,7 +743,7 @@ def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
 def test_explicit_empty_mcp_target_servers_survives_round_trip(tmp_path: Path) -> None:
     """An explicit empty ownership map must not become legacy-absent."""
     lock_path = tmp_path / "apm.lock.yaml"
-    lockfile = LockFile()
+    lockfile = LockFile(mcp_servers=["managed"])
     lockfile._mcp_target_servers_present = True
 
     lockfile.write(lock_path)
@@ -752,6 +754,35 @@ def test_explicit_empty_mcp_target_servers_survives_round_trip(tmp_path: Path) -
     assert restored is not None
     assert restored._mcp_target_servers_present is True
     assert restored.mcp_target_servers == {}
+
+
+def test_empty_mcp_target_servers_is_omitted_without_mcp_servers(tmp_path: Path) -> None:
+    """With no MCP server left there is nothing to own: the lock omits the field (#4852)."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile()
+    lockfile._mcp_target_servers_present = True
+
+    lockfile.write(lock_path)
+
+    assert "mcp_target_servers" not in lock_path.read_text(encoding="utf-8")
+    restored = LockFile.read(lock_path)
+    assert restored is not None
+    assert restored.is_semantically_equivalent(lockfile)
+
+
+def test_constructed_target_servers_equal_their_read_back(tmp_path: Path) -> None:
+    """A non-empty map compares equal whether or not its presence flag was set."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile(mcp_servers=["managed"], mcp_target_servers={"copilot": ["managed"]})
+
+    lockfile.write(lock_path)
+
+    assert "mcp_target_servers:" in lock_path.read_text(encoding="utf-8")
+    restored = LockFile.read(lock_path)
+    assert restored is not None
+    assert restored._mcp_target_servers_present is True
+    assert lockfile.is_semantically_equivalent(restored)
+    assert restored.is_semantically_equivalent(lockfile)
 
 
 def test_canonical_update_persists_explicit_empty_ownership(tmp_path: Path) -> None:
@@ -779,3 +810,57 @@ def test_canonical_update_persists_explicit_empty_ownership(tmp_path: Path) -> N
     assert restored is not None
     assert restored._mcp_target_servers_present is True
     assert restored.mcp_target_servers == {}
+
+
+@pytest.mark.parametrize(
+    ("target_servers", "after_package_phase"),
+    [({"copilot": ["atlassian"]}, "0.35.0"), ({"claude": ["atlassian"]}, "0.37.0")],
+    ids=["copilot-claim-held", "claude-claim-restamped"],
+)
+def test_package_phase_keeps_a_pre_root_version_until_the_mcp_phase_stamps_it(
+    tmp_path: Path, target_servers: dict[str, list[str]], after_package_phase: str
+) -> None:
+    """Under a 0.37 APM, only the MCP phase may restamp a lock holding 0.36 copilot claims."""
+    package = _write_manifest_with_mcp(tmp_path)
+    lock_path = get_lockfile_path(tmp_path)
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.35.0",
+            "dependencies": [],
+            "mcp_servers": ["atlassian"],
+            "mcp_target_servers": target_servers,
+        },
+        lock_path,
+    )
+
+    with (
+        patch("apm_cli.deps.lockfile.installed_apm_version", return_value="0.37.0"),
+        patch("apm_cli.integration.mcp_integrator.installed_apm_version", return_value="0.37.0"),
+    ):
+        dep_ref = package.get_apm_dependencies()[0]
+        ctx = InstallContext(
+            project_root=tmp_path,
+            apm_dir=tmp_path,
+            apm_package=package,
+            existing_lockfile=LockFile.read(lock_path),
+            logger=MagicMock(),
+            diagnostics=MagicMock(),
+        )
+        ctx.installed_packages = [
+            InstalledPackage(dep_ref=dep_ref, resolved_commit=None, depth=1, resolved_by=None)
+        ]
+        LockfileBuilder(ctx).build_and_save()
+        packaged = LockFile.read(lock_path)
+        assert packaged is not None and packaged.dependencies
+        assert packaged.apm_version == after_package_phase
+
+        # A semantically unchanged MCP write still records the translation.
+        MCPIntegrator.update_lockfile(
+            {"atlassian"},
+            lock_path,
+            mcp_target_servers=target_servers,
+            stamp_version=True,
+        )
+    stamped = LockFile.read(lock_path)
+    assert stamped is not None and stamped.apm_version == "0.37.0"

@@ -197,11 +197,22 @@ class TestGlobalScopeOutput:
             f"Missing scope info in output: {combined}"
         )
 
-    def test_warns_about_unsupported_targets(self, apm_binary_path, fake_home):
-        """Install --global should warn about targets that lack user-scope support."""
-        result = _run_apm(apm_binary_path, ["install", "--global"], fake_home, fake_home)
+    def test_warns_about_unsupported_targets(self, apm_binary_path, fake_home, local_package):
+        """Install --global names only primitives the selected targets skip."""
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--global", "--target", "windsurf", str(local_package)],
+            fake_home,
+            fake_home,
+        )
         combined = result.stdout + result.stderr
-        assert "cursor" in combined.lower(), f"Missing cursor warning in output: {combined}"
+        normalized = " ".join(combined.split())
+        assert result.returncode == 0, combined
+        assert "User scope does not deploy these primitives: windsurf (instructions)" in (
+            normalized
+        ), combined
+        # Unselected targets are never named in the warning.
+        assert "cursor" not in combined.lower(), combined
 
     def test_uninstall_global_shows_scope_info(self, apm_binary_path, fake_home):
         """Uninstall --global should mention user scope in output."""
@@ -512,33 +523,45 @@ class TestCrossPlatformPaths:
 class TestGlobalGeminiScope:
     """Verify user-scope install/uninstall deploys to ~/.gemini/."""
 
-    def test_global_install_creates_gemini_dirs(self, apm_binary_path, fake_home, local_package):
-        """--global should deploy primitives to ~/.gemini/ when .gemini/ exists."""
+    def test_global_install_creates_gemini_dirs(self, apm_binary_path, fake_home, tmp_path):
+        """--global --target gemini deploys commands under ~/.gemini/."""
+        gemini_dir = fake_home / ".gemini"
+        gemini_dir.mkdir()
+        package = _write_targeted_package(
+            tmp_path,
+            "gemini-pkg",
+            ".apm/prompts",
+            "review.prompt.md",
+            "---\ndescription: Review code\n---\nReview the code.\n",
+        )
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--global", "--target", "gemini", str(package)],
+            fake_home,
+            fake_home,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert (gemini_dir / "commands" / "review.toml").is_file(), combined
+
+    def test_global_install_mentions_gemini_full_support(
+        self, apm_binary_path, fake_home, local_package
+    ):
+        """Gemini deploys every user-scope primitive, so no scope warning appears."""
         gemini_dir = fake_home / ".gemini"
         gemini_dir.mkdir()
 
         result = _run_apm(
             apm_binary_path,
-            ["install", "--global", str(local_package)],
+            ["install", "--global", "--target", "gemini", str(local_package)],
             fake_home,
             fake_home,
         )
         combined = result.stdout + result.stderr
-        assert "gemini" in combined.lower(), f"Gemini not mentioned in output: {combined}"
-
-    def test_global_install_mentions_gemini_full_support(self, apm_binary_path, fake_home):
-        """--global output should list gemini as fully supported."""
-        gemini_dir = fake_home / ".gemini"
-        gemini_dir.mkdir()
-
-        result = _run_apm(
-            apm_binary_path,
-            ["install", "--global"],
-            fake_home,
-            fake_home,
-        )
-        combined = result.stdout + result.stderr
-        assert "gemini" in combined.lower(), f"Gemini not in scope support message: {combined}"
+        assert result.returncode == 0, combined
+        assert "Targets set: gemini" in combined, combined
+        assert "User scope does not deploy" not in combined, combined
 
     def test_global_uninstall_runs_in_user_scope(self, apm_binary_path, fake_home, local_package):
         """Uninstall --global with .gemini/ present operates in user scope."""
@@ -827,15 +850,15 @@ class TestGlobalUninstallLifecycle:
         assert result.returncode != 0, combined
         assert "Uninstall complete" not in combined
         assert ".config/opencode/agents/orphan.md" in combined
-        assert "retry uninstall" in combined
+        assert "rerun 'apm uninstall -g'" in " ".join(combined.split())
         assert removed_file.read_bytes() == edited_bytes
         assert survivor_file.read_bytes() == survivor_before
         assert manifest_path.read_bytes() == manifest_before
         assert lockfile_path.read_bytes() == lockfile_before
         assert survivor_materialized.is_dir()
         assert survivor_source.read_bytes() == survivor_source_before
-        # Package deletion precedes target cleanup; ownership, not content, survives.
-        assert not removed_materialized.exists()
+        # The evidence preflight refuses before package deletion (#3701).
+        assert removed_materialized.exists()
 
         if resolution == "restore":
             removed_file.write_bytes(managed_bytes)

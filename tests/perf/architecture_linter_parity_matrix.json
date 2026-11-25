@@ -5176,7 +5176,7 @@
       ],
       "legacy_output_sha256": "5cb1ace396c6557f64d3427f29cdff5d95653da091844abea4c8526b931d2b9b",
       "legacy_wall_seconds": 97.920245,
-      "path": "docs/src/content/docs/concepts/lifecycle.md",
+      "path": "docs/src/content/docs/concepts/how-apm-works.md",
       "rule_id": "registry_delegation.lifecycle_docs_aggregate"
     },
     {

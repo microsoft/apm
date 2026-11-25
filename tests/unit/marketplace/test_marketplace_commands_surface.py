@@ -29,6 +29,8 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -74,40 +76,31 @@ def _make_manifest(
 
 
 class TestIsValidAlias:
-    def test_valid_simple(self) -> None:
+    @pytest.mark.parametrize(
+        ("alias", "expected"),
+        [
+            ("my-market", True),
+            ("market.v2", True),
+            ("abc123", True),
+            ("has space", False),
+            ("", False),
+            ("owner/repo", False),
+            ("name@host", False),
+        ],
+        ids=[
+            "valid-simple",
+            "valid-with-dot",
+            "valid-alphanumeric",
+            "invalid-with-space",
+            "invalid-empty-string",
+            "invalid-with-slash",
+            "invalid-with-at",
+        ],
+    )
+    def test_alias_validity(self, alias, expected) -> None:
         from apm_cli.commands.marketplace import _is_valid_alias
 
-        assert _is_valid_alias("my-market") is True
-
-    def test_valid_with_dot(self) -> None:
-        from apm_cli.commands.marketplace import _is_valid_alias
-
-        assert _is_valid_alias("market.v2") is True
-
-    def test_valid_alphanumeric(self) -> None:
-        from apm_cli.commands.marketplace import _is_valid_alias
-
-        assert _is_valid_alias("abc123") is True
-
-    def test_invalid_with_space(self) -> None:
-        from apm_cli.commands.marketplace import _is_valid_alias
-
-        assert _is_valid_alias("has space") is False
-
-    def test_invalid_empty_string(self) -> None:
-        from apm_cli.commands.marketplace import _is_valid_alias
-
-        assert _is_valid_alias("") is False
-
-    def test_invalid_with_slash(self) -> None:
-        from apm_cli.commands.marketplace import _is_valid_alias
-
-        assert _is_valid_alias("owner/repo") is False
-
-    def test_invalid_with_at(self) -> None:
-        from apm_cli.commands.marketplace import _is_valid_alias
-
-        assert _is_valid_alias("name@host") is False
+        assert _is_valid_alias(alias) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -258,29 +251,21 @@ class TestCheckGitignoreForMarketplaceJson:
 
 
 class TestParseMarketplaceRepo:
-    def test_empty_raises(self) -> None:
+    @pytest.mark.parametrize(
+        ("raw", "match"),
+        [
+            ("", "Empty"),
+            ("acme\x00/repo", "control characters"),
+            ("http://github.com/acme/repo", "Insecure HTTP"),
+            ("https:///owner/repo", "missing a host"),
+        ],
+        ids=["empty", "control-characters", "http-url", "https-without-host"],
+    )
+    def test_invalid_repo_raises(self, raw, match) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        with pytest.raises(ValueError, match="Empty"):
-            _parse_marketplace_repo("", None)
-
-    def test_control_characters_raises(self) -> None:
-        from apm_cli.commands.marketplace import _parse_marketplace_repo
-
-        with pytest.raises(ValueError, match="control characters"):
-            _parse_marketplace_repo("acme\x00/repo", None)
-
-    def test_http_url_rejected(self) -> None:
-        from apm_cli.commands.marketplace import _parse_marketplace_repo
-
-        with pytest.raises(ValueError, match="Insecure HTTP"):
-            _parse_marketplace_repo("http://github.com/acme/repo", None)
-
-    def test_https_without_host_raises(self) -> None:
-        from apm_cli.commands.marketplace import _parse_marketplace_repo
-
-        with pytest.raises(ValueError, match="missing a host"):
-            _parse_marketplace_repo("https:///owner/repo", None)
+        with pytest.raises(ValueError, match=match):
+            _parse_marketplace_repo(raw, None)
 
     def test_owner_repo_simple(self) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
@@ -527,19 +512,18 @@ class TestBrowseCmd:
         assert result.exit_code == 0
         assert "my-plugin" in result.output
 
-    def test_plugins_rendered_with_rich(self, runner: CliRunner) -> None:
+    def test_plugins_listed_with_full_install_names(self, runner: CliRunner) -> None:
         from apm_cli.commands.marketplace import marketplace
 
         source = _make_source()
         plugin = MarketplacePlugin(name="my-plugin")
         manifest = _make_manifest(plugins=(plugin,))
-        mock_console = MagicMock()
         with patch("apm_cli.marketplace.registry.get_marketplace_by_name", return_value=source):
             with patch("apm_cli.marketplace.client.fetch_marketplace", return_value=manifest):
-                with patch("apm_cli.commands.marketplace._get_console", return_value=mock_console):
-                    result = runner.invoke(marketplace, ["browse", "my-market"])
+                result = runner.invoke(marketplace, ["browse", "my-market"])
         assert result.exit_code == 0
-        mock_console.print.assert_called()
+        # A list keeps install names whole; a table truncated them (#3994).
+        assert "my-plugin@my-market" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -582,15 +566,16 @@ class TestUpdateCmd:
         with patch(
             "apm_cli.marketplace.registry.get_registered_marketplaces", return_value=sources
         ):
-            with patch("apm_cli.marketplace.client.clear_marketplace_cache"):
-                with patch(
-                    "apm_cli.marketplace.client.fetch_marketplace",
-                    side_effect=fetch_side_effect,
-                ):
-                    result = runner.invoke(marketplace, ["update"])
-        assert result.exit_code == 0
-        # bad marketplace warning should appear in output
-        assert "bad" in result.output
+            with patch(
+                "apm_cli.marketplace.client.fetch_marketplace",
+                side_effect=fetch_side_effect,
+            ):
+                result = runner.invoke(marketplace, ["update"])
+        # Partial refresh failure is reported and returns nonzero (#3279).
+        assert result.exit_code == 1
+        assert "good (1 plugin)" in result.output
+        assert "failed: bad" in result.output
+        assert "Marketplace cache refreshed" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -866,7 +851,7 @@ class TestRenderCheckTable:
         from apm_cli.commands.marketplace import _render_check_table
 
         logger = MagicMock()
-        mock_console = MagicMock()
+        mock_console = MagicMock(width=120)
         with patch("apm_cli.commands.marketplace._get_console", return_value=mock_console):
             _render_check_table(logger, [self._make_result()])
         mock_console.print.assert_called()
@@ -981,7 +966,7 @@ class TestSearchCmd:
 
         result = runner.invoke(search, ["just-a-query"])
         assert result.exit_code != 0
-        assert "QUERY@MARKETPLACE" in result.output
+        assert "<query>@<marketplace>" in result.output
 
     def test_empty_query_exits_1(self, runner: CliRunner) -> None:
         from apm_cli.commands.marketplace import search

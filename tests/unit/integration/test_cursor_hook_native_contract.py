@@ -24,6 +24,7 @@ from apm_cli.integration.hook_native_formats import (
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
@@ -495,11 +496,13 @@ def test_install_service_preflight_prevents_partial_multi_target_deployment(
         integrate_package_primitives(
             package,
             project,
+            skill_subset=None,
             targets=[KNOWN_TARGETS[name] for name in names],
             integrators=bundle,
             diagnostics=DiagnosticCollector(),
             force=False,
             managed_files=None,
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert not list(project.rglob("*.json"))
@@ -520,6 +523,7 @@ def test_unapproved_hooks_do_not_enter_cursor_preflight(tmp_path: Path) -> None:
     integrate_package_primitives(
         package,
         project,
+        skill_subset=None,
         targets=[replace(target, primitives={"hooks": target.primitives["hooks"]})],
         integrators=bundle,
         diagnostics=DiagnosticCollector(),
@@ -555,6 +559,7 @@ def test_explicit_target_contraction_can_choose_one_import_route(
     integrate_package_primitives(
         package,
         project,
+        skill_subset=None,
         targets=targets,
         force=False,
         managed_files=None,
@@ -568,11 +573,12 @@ def test_explicit_target_contraction_can_choose_one_import_route(
         ),
         diagnostics=DiagnosticCollector(),
         scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     first_path = project / f".{first}" / ("settings.json" if first == "claude" else "hooks.json")
     second_path = project / f".{second}" / ("settings.json" if second == "claude" else "hooks.json")
-    assert not json.loads(first_path.read_text()).get("hooks")
+    assert not first_path.exists(), "the emptied hook file APM created must go (#4852)"
     assert json.loads(second_path.read_text())["hooks"]
     assert not first_path.with_name("apm-hooks.json").exists()
 
@@ -646,6 +652,7 @@ def test_retirement_does_not_ignore_user_or_global_hooks(
         integrate_package_primitives(
             package,
             project,
+            skill_subset=None,
             targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["cursor"]],
             force=False,
             managed_files=None,
@@ -658,6 +665,7 @@ def test_retirement_does_not_ignore_user_or_global_hooks(
                 hook=hook,
             ),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
     assert {
         p: p.read_bytes() for root in (project, home) for p in root.rglob("*") if p.is_file()
@@ -906,6 +914,7 @@ def _run_pipeline_with_late_claude_import(
             integrate_package_primitives(
                 package,
                 project,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["cursor"]],
                 force=False,
                 managed_files=None,
@@ -918,6 +927,7 @@ def _run_pipeline_with_late_claude_import(
                     hook=hook,
                 ),
                 diagnostics=DiagnosticCollector(),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         except HookContractError as exc:
             raised = exc

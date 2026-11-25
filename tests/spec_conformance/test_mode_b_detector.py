@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DETECTOR = REPO_ROOT / "tests" / "spec_conformance" / "mode_b_detector.sh"
 PATHS_FILE = REPO_ROOT / "tests" / "spec_conformance" / "critical_paths.txt"

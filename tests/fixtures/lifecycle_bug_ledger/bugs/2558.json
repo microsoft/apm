@@ -1,0 +1,16 @@
+{
+  "issue": 2558,
+  "fixed_in": "Unreleased",
+  "summary": "Global uninstall left managed Copilot hook files behind.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "filesystem.open_world_observation"
+  ],
+  "regression_tests": [
+    "tests/integration/test_ownership_invariant_lifecycle.py::test_apm_only_touches_owned_state_across_lifecycle"
+  ]
+}

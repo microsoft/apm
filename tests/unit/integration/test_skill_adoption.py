@@ -8,8 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.integration.skill_adoption import adoptable_skill_members, adoption_baselines
+from apm_cli.integration.skill_adoption import (
+    adoptable_skill_members,
+    adoption_baselines,
+    kept_copy_is_stale,
+)
 from apm_cli.utils.content_hash import compute_file_hash
+
+pytestmark = pytest.mark.component
 
 
 def _walk(source: Path):
@@ -92,6 +98,35 @@ def test_destination_symlink_blocks_adoption(tmp_path: Path) -> None:
     assert _members(source, destination) == frozenset()
 
 
+@pytest.mark.parametrize(
+    ("anchor_on_disk", "adoptable"),
+    [("receipted", True), ("render", True), ("neither", False)],
+)
+def test_member_matches_its_own_trusted_receipt_or_the_render(
+    tmp_path: Path, anchor_on_disk: str, adoptable: bool
+) -> None:
+    """#4230 R5: a receipted edit plus a git-restored sibling still form one APM tree."""
+    source, destination = _tree(tmp_path)
+    anchor = destination / "SKILL.md"
+    (source / "SKILL.md").write_text("---\nname: s\n---\nEdited source.\n", encoding="ascii")
+    receipted = anchor.read_bytes() if anchor_on_disk == "receipted" else b"Earlier write.\n"
+    if anchor_on_disk == "render":
+        anchor.write_bytes((source / "SKILL.md").read_bytes())
+    elif anchor_on_disk == "neither":
+        anchor.write_bytes(b"User edit.\n")
+    witness = tmp_path / "receipted.md"
+    witness.write_bytes(receipted)
+    receipt = compute_file_hash(witness)
+
+    def trusted(path: Path) -> str | None:
+        return receipt if path == anchor else None
+
+    on_disk = anchor.read_bytes()
+    members = _members(source, destination, trusted=trusted)
+    assert bool(members) is adoptable
+    assert anchor.read_bytes() == on_disk
+
+
 def test_missing_destination_is_not_adoptable(tmp_path: Path) -> None:
     source, destination = _tree(tmp_path)
     shutil.rmtree(destination)
@@ -150,7 +185,9 @@ def _locked_update(tmp_path: Path, old_body: bytes = b"v1\n", new_body: bytes = 
 
     integrator = SkillIntegrator()
     integrator._materialization_session = SimpleNamespace(
-        has_receipt=lambda _path: False, locked_sources=LockedSkillSources(fetch)
+        baseline=lambda _path, _targets: None,
+        receipt_held=lambda _path: False,
+        locked_sources=LockedSkillSources(fetch),
     )
     return SimpleNamespace(
         new=new,
@@ -203,7 +240,8 @@ def test_update_never_adopts_a_differing_or_owned_elsewhere_tree(
     elif change == "unclaimed":
         overrides["owned"] = lambda _path: False
     elif change == "receipt":
-        update.integrator._materialization_session.has_receipt = lambda _path: True
+        # Files that all still hold their receipted bytes need no adoption.
+        update.integrator._materialization_session.receipt_held = lambda _path: True
     else:
         overrides["force"] = True
     assert _locked_baselines(update, **overrides) == {}
@@ -258,3 +296,84 @@ def test_locked_links_render_into_the_current_deployment_frame(tmp_path: Path) -
     assert count == 1
     anchor.write_bytes(rendered.encode("utf-8"))
     assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
+
+
+def test_locked_sources_skip_the_download_when_installing_the_locked_commit(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    update = _locked_update(tmp_path)
+    fetched: list[str] = []
+    locked = "a" * 40
+
+    def fetch(owner: str, _scratch: Path):
+        fetched.append(owner)
+
+    sources = LockedSkillSources(fetch, lambda _owner: locked)
+    assert sources.plan("org/pkg", update.plan, update.targets, locked) is None
+    assert fetched == []
+    sources = LockedSkillSources(fetch, lambda _owner: locked)
+    sources.plan("org/pkg", update.plan, update.targets, "b" * 40)
+    assert fetched == ["org/pkg"]
+    sources.close()
+
+
+@pytest.mark.windows_compat
+def test_receipt_from_another_checkout_falls_through_to_the_render(tmp_path: Path) -> None:
+    """#4229: a receipt the file no longer holds never blocks a render match."""
+    update = _locked_update(tmp_path)
+    anchor = update.destination / "SKILL.md"
+    update.integrator._materialization_session.baseline = lambda _path, _targets: (
+        "sha256:" + "b" * 64
+    )
+    on_disk = anchor.read_bytes()
+    assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
+    assert anchor.read_bytes() == on_disk
+
+
+def _depth_links(content: str, _source: Path, target: Path, **_kwargs) -> tuple[str, int]:
+    """Render a destination-relative link, as the skill link resolver does."""
+    rendered = content.replace("](sibling.md)", f"]({'../' * len(target.parts)}sibling.md)")
+    return rendered, int(rendered != content)
+
+
+def _stale(source: Path, destination: Path, recorded=(), **overrides) -> bool:
+    options = {"walk_source": _walk, "ignore": _no_ignore, "resolve_links": _no_links}
+    options.update(overrides)
+    return kept_copy_is_stale(source, destination, recorded=recorded, **options)
+
+
+def test_kept_copy_is_rendered_for_its_own_destination(tmp_path: Path) -> None:
+    """#4692: a current copy at another depth is not stale; another root's bytes are."""
+    source, destination = _tree(tmp_path)
+    deep = tmp_path / "deeper/root/s"
+    shutil.copytree(destination, deep)
+    for copy in (destination, deep):
+        rendered, _ = _depth_links(
+            (source / "SKILL.md").read_text(encoding="ascii"), source, copy / "SKILL.md"
+        )
+        (copy / "SKILL.md").write_bytes(rendered.encode("ascii"))
+    assert not _stale(source, deep, resolve_links=_depth_links)
+    shallow = (destination / "SKILL.md").read_bytes()
+    (deep / "SKILL.md").write_bytes(shallow)
+    assert _stale(source, deep, resolve_links=_depth_links)
+    # The probe is read-only: the kept copy keeps its bytes.
+    assert (deep / "SKILL.md").read_bytes() == shallow
+
+
+def test_kept_copy_missing_an_added_member_is_stale(tmp_path: Path) -> None:
+    source, destination = _tree(tmp_path)
+    assert not _stale(source, destination)
+    (source / "references/new.md").write_text("New.\n", encoding="ascii")
+    assert _stale(source, destination)
+    assert not (destination / "references/new.md").exists()
+
+
+def test_kept_copy_with_a_dropped_recorded_member_is_stale(tmp_path: Path) -> None:
+    source, destination = _tree(tmp_path)
+    user_file = destination / "notes.md"
+    user_file.write_text("Mine.\n", encoding="ascii")
+    assert not _stale(source, destination)
+    assert _stale(source, destination, recorded=[user_file])
+    assert user_file.read_text(encoding="ascii") == "Mine.\n"

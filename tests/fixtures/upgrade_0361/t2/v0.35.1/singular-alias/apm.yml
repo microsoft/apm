@@ -1,0 +1,11 @@
+name: singular-alias
+version: 1.0.0
+target: vscode
+dependencies:
+  apm:
+  - path: ../pkg
+  mcp:
+  - name: srv
+    registry: false
+    transport: http
+    url: https://mcp.example.com/mcp

@@ -6,6 +6,8 @@ restrict-only ``allow_args`` floor.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.policy.inheritance import merge_policies
 from apm_cli.policy.parser import _build_policy, validate_policy
 from apm_cli.policy.schema import (
@@ -14,6 +16,8 @@ from apm_cli.policy.schema import (
     ScannerGovernance,
     SecurityPolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _build(scanners_block: dict) -> AuditPolicy:

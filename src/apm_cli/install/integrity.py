@@ -15,9 +15,9 @@ package ``content_hash``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ..deps.lockfile import LockedDependency
+from ..deps.lockfile import LockedDependency, LockFile
 
 if TYPE_CHECKING:
     from ..policy.schema import IntegrityPolicy
@@ -47,6 +47,38 @@ def unhashed_dependencies(
     return flagged
 
 
+def unhashed_dependency_names(deps: list[LockedDependency]) -> str:
+    """Name unhashed entries by their dependency key, as apm.yml and the lockfile do.
+
+    A key such as ``owner/repo`` is shown as is: the URL redactor would render
+    it as an invalid registry URL. A key that is itself a URL (a repo_url that
+    may carry ``user:token@`` credentials) is redacted first.
+    """
+    from .mcp.registry import _redact_url_credentials
+
+    keys = (dep.get_unique_key() for dep in deps)
+    return ", ".join(sorted(_redact_url_credentials(key) if "://" in key else key for key in keys))
+
+
+def unhashed_dependencies_advisory(
+    deps: list[LockedDependency], policy: IntegrityPolicy | None
+) -> str | None:
+    """Return one advisory naming unhashed entries when hashes are not required.
+
+    With ``require_hashes`` enabled the fail-closed check names them instead.
+    """
+    if require_hashes_enabled(policy):
+        return None
+    missing = unhashed_dependencies(deps)
+    if not missing:
+        return None
+    names = unhashed_dependency_names(missing)
+    return (
+        f"Locked dependencies without a content hash, verified by commit only: {names}. "
+        "Set security.integrity.require_hashes: true in org policy to require hashes."
+    )
+
+
 def enforce_require_hashes(deps: list[LockedDependency], *, enabled: bool) -> None:
     """Fail closed when ``require_hashes`` is on and any entry lacks a hash.
 
@@ -60,9 +92,7 @@ def enforce_require_hashes(deps: list[LockedDependency], *, enabled: bool) -> No
     missing = unhashed_dependencies(deps)
     if not missing:
         return
-    from .mcp.registry import _redact_url_credentials
-
-    names = ", ".join(sorted(_redact_url_credentials(d.repo_url) for d in missing))
+    names = unhashed_dependency_names(missing)
     raise RuntimeError(
         "security.integrity.require_hashes is enabled but these locked "
         f"dependencies have no content hash (fail-closed): {names}. "
@@ -70,25 +100,31 @@ def enforce_require_hashes(deps: list[LockedDependency], *, enabled: bool) -> No
     )
 
 
-def enforce_installed_hash_policy(ctx: InstallContext) -> None:
-    """Enforce ``require_hashes`` against the freshly written lockfile."""
-    if ctx.no_policy:
+def enforce_installed_hash_policy(ctx: InstallContext, lockfile: LockFile | None) -> None:
+    """Enforce ``require_hashes`` against the lockfile this install would commit."""
+    if getattr(ctx, "no_policy", False):
         return
     policy_fetch = getattr(ctx, "policy_fetch", None)
     policy = getattr(policy_fetch, "policy", None) if policy_fetch else None
+    from ..deps.lockfile import get_lockfile_path
+
+    enforce_policy_hashes(policy, lockfile, get_lockfile_path(ctx.apm_dir))
+
+
+def enforce_policy_hashes(policy: Any, lockfile: LockFile | None, lockfile_path: Any) -> None:
+    """Enforce *policy*'s ``require_hashes`` against *lockfile* (read at *lockfile_path*)."""
     if policy is None or not require_hashes_enabled(policy.security.integrity):
         return
 
-    from ..deps.lockfile import LockFile, get_lockfile_path
     from .phases.policy_gate import PolicyViolationError
 
-    lockfile_path = get_lockfile_path(ctx.apm_dir)
-    lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
+        from ..core.remediation import CONTENT_HASH_LOCK_RESTORE
+
         raise PolicyViolationError(
             "security.integrity.require_hashes is enabled but the lockfile at "
-            f"{lockfile_path} could not be read (missing or corrupt); "
-            "failing closed. Re-run 'apm install' to regenerate it."
+            f"{lockfile_path} could not be read (missing or corrupt); failing closed. "
+            f"{CONTENT_HASH_LOCK_RESTORE.bind(lockfile=lockfile_path).sentence()}"
         )
     try:
         enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)

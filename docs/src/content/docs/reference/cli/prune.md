@@ -7,7 +7,8 @@ sidebar:
 
 Remove installed packages from `apm_modules/` that are neither declared in
 `apm.yml` nor retained as transitive nodes in `apm.lock.yaml`. The command also
-removes their deployed integration files and updates the lockfile.
+removes their deployed integration files, listing each removed path, and
+updates the lockfile.
 
 ## Synopsis
 
@@ -19,7 +20,7 @@ apm prune [--dry-run]
 `apm prune` mirrors `npm prune`: it removes installed packages that are not in
 the manifest's resolved dependency graph. Unlike npm, it also removes the
 harness-deployed files those packages produced (prompts, agents, hooks, MCP
-wiring) and rewrites the lockfile.
+and LSP wiring) and rewrites the lockfile.
 :::
 
 ## Description
@@ -37,9 +38,11 @@ dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
 A package removed from `apm.yml` by hand that another installed package still
-declares is kept; the next `apm install` records it as transitive. If a
-retained package's manifest cannot be read, prune keeps such packages rather
-than guess.
+declares is kept; the next `apm install` records it as transitive. A
+transitive local package that no remaining package declares is orphaned: its
+lock entry goes, and its deployed files go only where APM can prove it wrote
+them. If a retained package's manifest cannot be read, prune keeps such
+packages rather than guess, and names each one it kept.
 
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or
@@ -63,7 +66,15 @@ Neither a surviving lock entry nor an `.apm-pin` cache marker is required.
 
 `apm prune` removes the orphan's directory under `apm_modules/`, cleans up its
 owned harness deployments using the protections below, removes its entry from
-`apm.lock.yaml`, and cleans up empty parent directories.
+`apm.lock.yaml`, and cleans up empty parent directories. A deployed file is
+deleted only with evidence that APM wrote its current bytes: a local deployment
+receipt, or byte equality with the locked version's render, taken before the
+package directory is removed. Files without evidence are kept with a warning.
+The orphan's MCP and LSP server entries go in the same run, through the same
+cleanup `apm uninstall` uses: only entries the lockfile records as APM-owned
+are removed, and user-authored entries stay. If an LSP config cannot be
+updated, it is left as is, its lockfile records stay, and prune exits 1; fix
+the config, then run `apm install`.
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
@@ -74,11 +85,19 @@ source content does not preserve an undeclared package's deployment ownership.
 A stale dependency or owner reference is not
 "nothing to prune." If `apm.yml` is missing, the command exits with an error.
 
+Before it changes anything, prune checks that the lockfile it would write is
+valid. Removing the only package that declares a dependency redirected by a
+`replace` entry would leave that dependency without its parent, so prune (and
+`apm prune --dry-run`) exits 1, names the package and the dependency, and
+changes nothing. To prune it, remove the `replace` entry from `apm.yml` (or
+keep the declaring package), run `apm install` to rebuild the lockfile, then
+run `apm prune` again.
+
 ## Options
 
 | Option      | Description                                       |
 |-------------|---------------------------------------------------|
-| `--dry-run` | List orphaned packages without removing anything. |
+| `--dry-run` | List orphaned packages, ownership repairs and native plugins that would be removed, without changing anything. |
 
 ## Examples
 
@@ -152,6 +171,14 @@ To clean up hooks left by a target removed from `targets:` in `apm.yml`,
 run `apm install` (or `apm compile` / `apm update`); `apm prune` only
 reconciles hooks for packages and targets still declared.
 
+A native plugin under `.agents/plugins/` that the current approvals or policy
+no longer allow (for example, after its `executables.allow` entry is removed)
+is retired as one unit: prune removes its root and its declarations in the
+harness settings files; a root edited since deploy is kept for you to remove.
+`--dry-run` lists each such plugin with its root and settings files and
+changes nothing, including your personal approvals. If prune cannot evaluate approvals and policy for locked native
+plugins, it exits `1` with an error before removing packages or native plugins.
+
 Notes:
 
 - Manifestless installs containing `SKILL.md` are detected even after `apm install`
@@ -171,7 +198,7 @@ Notes:
 | Code | Meaning                                                                       |
 |------|--------------------------------------------------------------------------------|
 | 0    | Prune completed with no orphan deletion failures (including "nothing to prune"). |
-| 1    | An orphan deletion failed, `apm.yml` is missing, parsing or lockfile writing failed, or an unhandled error occurred. |
+| 1    | An orphan deletion failed, the native plugin approval check could not run, `apm.yml` is missing, `apm.lock.yaml` was written by a newer APM (refused before any change), parsing or lockfile writing failed, or an unhandled error occurred. |
 
 Orphan deletion failures are logged without stopping the remaining packages.
 The final error reports how many packages were removed and how many failed.
@@ -188,6 +215,6 @@ confirm the resulting state.
 
 - [`apm install`](../install/) -- install declared dependencies
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
-- [`apm list`](../list/) -- inspect what is installed
+- [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
-- [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where
+- [Package anatomy](../../../producer/create-a-package/) -- what gets deployed where

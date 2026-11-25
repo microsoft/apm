@@ -18,12 +18,20 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import os
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+from apm_cli.core.scope import manifest_file
+
+from ..core.remediation import (
+    EXECUTABLES_IDENTITY_UNLOCKED,
+    EXECUTABLES_PIN_MALFORMED,
+    MCP_EXECUTABLES_UNTRUSTED,
+)
 
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
@@ -62,6 +70,9 @@ class ExecutableDeclaration:
         is_transitive: Whether this package is a transitive dependency.
         parent_name: Name of the direct dependency that pulled this in
             (only set when *is_transitive* is True).
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            so commands can find the package by its declared name while the
+            grant names the selected source.
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
         lsp_count: Number of LSP server entries discovered.
@@ -78,6 +89,7 @@ class ExecutableDeclaration:
     package_name: str
     is_transitive: bool = False
     parent_name: str | None = None
+    original_identity: str | None = None
     hook_count: int = 0
     mcp_count: int = 0
     lsp_count: int = 0
@@ -88,16 +100,27 @@ class ExecutableDeclaration:
     lsp_details: list[str] = field(default_factory=list)
     bin_details: list[str] = field(default_factory=list)
     canvas_details: list[str] = field(default_factory=list)
+    # Where the package is installed and whether its bytes still match the
+    # lock; ``apm approve`` pins only verified content (#3902).
+    install_path: str | None = None
+    depth: int = 1
+    content_verified: bool = True
+    # A natively loaded plugin is approved as one item over its whole root.
+    native_plugin: bool = False
+    # The native gate's type set (trust owner), which the counts above miss
+    # for native layouts such as an Agent Plugin's root mcp.json.
+    native_exec_types: tuple[str, ...] = ()
 
     @property
     def has_executables(self) -> bool:
         """Return True if this package declares enforced executable primitives."""
-        return (
+        return bool(
             self.hook_count > 0
             or self.bin_count > 0
             or self.mcp_count > 0
             or self.canvas_count > 0
             or self.lsp_count > 0
+            or self.native_exec_types
         )
 
     @property
@@ -114,6 +137,7 @@ class ExecutableDeclaration:
             types.append(EXEC_TYPE_CANVAS)
         if self.lsp_count > 0:
             types.append(EXEC_TYPE_LSP)
+        types.extend(t for t in self.native_exec_types if t not in types)
         return types
 
     def summary_line(self) -> str:
@@ -129,7 +153,21 @@ class ExecutableDeclaration:
             parts.append(f"{self.canvas_count} canvas extension(s)")
         if self.lsp_count:
             parts.append(f"{self.lsp_count} LSP server(s)")
+        native_only = self._native_only_types()
+        if native_only:
+            parts.append(f"native plugin ({', '.join(native_only)})")
         return ", ".join(parts)
+
+    def _native_only_types(self) -> list[str]:
+        """Native gate types no count above reports."""
+        counted = {
+            EXEC_TYPE_HOOKS: self.hook_count,
+            EXEC_TYPE_MCP: self.mcp_count,
+            EXEC_TYPE_BIN: self.bin_count,
+            EXEC_TYPE_CANVAS: self.canvas_count,
+            EXEC_TYPE_LSP: self.lsp_count,
+        }
+        return [t for t in self.native_exec_types if not counted.get(t)]
 
 
 # -------------------------------------------------------------------
@@ -160,7 +198,8 @@ def is_package_approved(
     entry = allow_executables.get(package_key)
     if not entry or not isinstance(entry, dict):
         return False
-    return bool(entry.get(exec_type, False))
+    # Only a literal ``true`` is a type-level grant; a pinned item map never is.
+    return entry.get(exec_type, False) is True
 
 
 def is_any_type_approved(
@@ -173,7 +212,7 @@ def is_any_type_approved(
     entry = allow_executables.get(package_key)
     if not entry or not isinstance(entry, dict):
         return False
-    return any(entry.get(t, False) for t in ALL_EXEC_TYPES)
+    return any(entry.get(t, False) is True for t in ALL_EXEC_TYPES)
 
 
 # -------------------------------------------------------------------
@@ -283,6 +322,11 @@ class ExecTrustContext:
     project_deny: dict[str, dict[str, bool]]
     user_allow: dict[str, dict[str, bool]]
     user_deny: dict[str, dict[str, bool]]
+    # Content-pinned item grants ``{package: {exec_type: {item: fingerprint}}}``
+    # (#3902). Kept apart from the bool maps so no type-level lookup can read a
+    # pinned grant as "any content"; only security/trust.py consumes them.
+    project_items: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    user_items: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
 
 
 def _strip_version(package_key: str) -> str:
@@ -305,9 +349,10 @@ def canonical_exec_identity(package_key: object) -> str:
 
     Shorthand, host-qualified, and URL spellings of one package map to its
     lockfile identity; GitHub-family and Azure DevOps identities are
-    case-folded because those hosts resolve owner/repo case-insensitively. Glob
-    wildcards survive normalization; content-bound keys and spellings that do
-    not parse are returned unchanged.
+    case-folded because those hosts resolve owner/repo case-insensitively. The
+    port is dropped (``build_port_blind_dependency_key``), so a deny cannot be
+    bypassed by naming another port. Glob wildcards survive normalization;
+    content-bound keys and spellings that do not parse are returned unchanged.
     """
     name = _strip_version(str(package_key or "").strip())
     if not name or _is_content_bound_key(name):
@@ -317,10 +362,11 @@ def canonical_exec_identity(package_key: object) -> str:
         probe = probe.replace(char, token)
     try:
         from apm_cli.models.apm_package import DependencyReference
+        from apm_cli.models.dependency.identity import build_port_blind_dependency_key
         from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
         reference = DependencyReference.parse(probe)
-        canonical = reference.get_unique_key()
+        canonical = build_port_blind_dependency_key(reference)
     except ValueError:
         return name
     if is_github_hostname(reference.host) or is_azure_devops_hostname(reference.host):
@@ -367,7 +413,7 @@ def _map_grants(
             if content_bound
             else stored_key in (package_key, name) or _strip_version(stored_key) == name
         )
-        if matches and bool(entry.get(exec_type, False)):
+        if matches and entry.get(exec_type, False) is True:
             return True
     return False
 
@@ -385,7 +431,7 @@ def _map_denies(
     identity = canonical_exec_identity(package_key)
     return any(
         isinstance(entry, dict)
-        and bool(entry.get(exec_type, False))
+        and entry.get(exec_type, False) is True
         and not _is_content_bound_key(stored_key)
         and canonical_exec_identity(stored_key) == identity
         for stored_key, entry in deny_map.items()
@@ -522,11 +568,150 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
+@dataclass(frozen=True)
+class LockedApproval:
+    """The trust principal a locked dependency is granted under.
+
+    Attributes:
+        identity: Approval name the install gate checks.
+        version: Version bound into the grant key; empty for a replaced row,
+            whose identity already carries the selected ``with:`` ref.
+        original_identity: Locked identity a ``replace:`` rule redirected,
+            or None for a row that was not replaced.
+    """
+
+    identity: str
+    version: str
+    original_identity: str | None = None
+
+    @property
+    def key(self) -> str:
+        """Return the full approval key (``identity#version``)."""
+        return build_approval_key(self.identity, self.version)
+
+
+def locked_dependency_approval(dependency: Any, version: str | None = None) -> LockedApproval:
+    """Return the trust principal for a locked dependency.
+
+    A replaced row is keyed by its selected source, exactly as the install
+    gate keys the resolved reference, so an upstream grant never unlocks the
+    replacement and ``apm approve`` writes the key the gate checks. *version*
+    overrides the locked version for a row that was not replaced; ``apm
+    approve`` passes the package's ``apm.yml`` version there, as it always has.
+    """
+    if getattr(dependency, "replacement", None) is not None:
+        return LockedApproval(
+            identity=dependency_approval_key(dependency.to_dependency_ref()),
+            version="",
+            original_identity=dependency.get_unique_key(),
+        )
+    if version is None:
+        version = dependency.version or ""
+    return LockedApproval(identity=dependency.get_unique_key(), version=version)
+
+
 def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     """Return trust keys derived only from a locked package identity."""
-    identity = dependency.get_unique_key()
-    versioned = build_approval_key(identity, dependency.version or "")
-    return tuple(dict.fromkeys((identity, versioned)))
+    approval = locked_dependency_approval(dependency)
+    if approval.original_identity is not None:
+        return tuple(dict.fromkeys((approval.key, _strip_version(approval.key))))
+    return tuple(dict.fromkeys((approval.identity, approval.key)))
+
+
+class ApprovalSpecError(ValueError):
+    """A CLI spec names no single installed package, so no store key is derived."""
+
+
+def canonical_approval_spec(spec: str, lockfile: Any, *, selected_key: str | None = None) -> str:
+    """Return the approval-store identity a spec names (#4189, #4245).
+
+    The single owner shared by ``apm approve``, ``apm deny``, ``apm policy
+    explain`` and the store reader. *selected_key* is the ``apm.lock.yaml``
+    row the dependency selector (``select_installed_lock_key``, the owner
+    ``apm uninstall`` and ``apm audit PACKAGE`` use) matched; its locked
+    approval identity is the store key. Without a selection, a marketplace
+    spec (``plugin@marketplace[#ref]``) resolves through the lock's recorded
+    provenance, and any other spec is already an identity spelling.
+
+    Raises:
+        ApprovalSpecError: A marketplace spec names no installed package or
+            more than one, so no store key may be derived from it.
+    """
+    from apm_cli.marketplace.resolver import parse_marketplace_ref
+
+    rows = lockfile.dependencies if lockfile is not None else {}
+    if selected_key is not None and selected_key in rows:
+        return _strip_version(locked_dependency_approval(rows[selected_key]).identity)
+    try:
+        parsed = parse_marketplace_ref(spec)
+    except ValueError as exc:
+        raise ApprovalSpecError(f"{spec}: {exc}") from exc
+    if parsed is None:
+        return spec
+    plugin, marketplace, _ref = parsed
+    matches = lockfile.marketplace_rows(marketplace, plugin) if lockfile is not None else []
+    if len(matches) != 1:
+        why = (
+            "no installed package came from" if not matches else "several installed packages match"
+        )
+        raise ApprovalSpecError(
+            f"{spec}: {why} {plugin}@{marketplace}. Name the package as "
+            "'apm approve --pending' lists it."
+        )
+    return _strip_version(locked_dependency_approval(matches[0]).identity)
+
+
+_CANONICALIZED_KEYS_NOTED: set[tuple[str, str]] = set()
+
+
+def _readable_lockfile(root: Path) -> Any:
+    """The scope's lockfile for store-key migration, or None when unreadable.
+
+    The lockfile's own reader reports a malformed or conflicted file to the
+    command that needs it; migration simply does not apply then.
+    """
+    from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+
+    try:
+        return LockFile.read(get_lockfile_path(root))
+    except (LockfileFormatError, OSError):
+        return None
+
+
+def canonicalize_store_keys(
+    grants: dict[str, Any], lockfile: Any, *, store: str, drop_raw: bool = False
+) -> dict[str, Any]:
+    """Fold store keys written as an install spec onto the package identity (#4189).
+
+    A store key spelled as an install spec (``plugin@marketplace``) applies to
+    the identity :func:`canonical_approval_spec` resolves: a deny merges its
+    types, an allow never overrides an identity grant. Each mapping is
+    announced once.
+    """
+    result = dict(grants)
+    for key, value in grants.items():
+        try:
+            canonical = canonical_approval_spec(key, lockfile)
+        except ApprovalSpecError:
+            continue
+        if canonical == key:
+            continue
+        existing = result.get(canonical)
+        if isinstance(existing, dict) and isinstance(value, dict) and store.endswith("deny"):
+            result[canonical] = {**value, **existing}
+        else:
+            result.setdefault(canonical, value)
+        if drop_raw:
+            result.pop(key, None)
+        if (key, canonical) not in _CANONICALIZED_KEYS_NOTED:
+            _CANONICALIZED_KEYS_NOTED.add((key, canonical))
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"{store} entry '{key}' names an install spec; it applies to {canonical}. "
+                "The next apm approve or apm deny rewrites it under that identity."
+            )
+    return result
 
 
 def dependency_approval_key(dependency_ref: Any) -> str:
@@ -551,41 +736,41 @@ def local_bundle_approval_key(
     lockfile: dict[str, Any] | None = None,
 ) -> str:
     """Bind local-bundle executable consent to every deployable content byte."""
-    hasher = hashlib.sha256()
-    pack = lockfile.get("pack") if isinstance(lockfile, dict) else None
-    bundle_files = pack.get("bundle_files") if isinstance(pack, dict) else None
-    if isinstance(bundle_files, dict):
-        for rel_path in sorted(bundle_files, key=str):
-            digest = bundle_files[rel_path]
-            encoded_path = str(rel_path).encode("utf-8")
-            encoded_digest = str(digest).encode("utf-8")
-            hasher.update(len(encoded_path).to_bytes(8, "big"))
-            hasher.update(encoded_path)
-            hasher.update(len(encoded_digest).to_bytes(8, "big"))
-            hasher.update(encoded_digest)
-    else:
-        files: list[tuple[str, Path]] = []
-        for item in source_dir.rglob("*"):
-            rel_path = item.relative_to(source_dir).as_posix()
-            if item.is_symlink():
-                raise ValueError(f"Local bundle contains a symlink: {rel_path}")
-            if item.is_dir():
-                continue
-            if not item.is_file():
-                raise ValueError(f"Local bundle contains a special file: {rel_path}")
-            files.append((rel_path, item))
-        for rel_path, item in sorted(files):
-            encoded_path = rel_path.encode("utf-8")
-            content_length = item.stat().st_size
-            hasher.update(len(encoded_path).to_bytes(8, "big"))
-            hasher.update(encoded_path)
-            hasher.update(content_length.to_bytes(8, "big"))
-            with item.open("rb") as handle:
-                while chunk := handle.read(1024 * 1024):
-                    hasher.update(chunk)
+    from .trust_fingerprint import local_bundle_digest
+
+    digest = local_bundle_digest(source_dir, lockfile)
     artifact_version = version or "local"
-    digest = f"sha256:{hasher.hexdigest()}"
     return f"{package_id}#{artifact_version}@{digest}"
+
+
+def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the ``apm approve`` command that grants *approval_key*, then its manifest entry.
+
+    Grants live in the scope's manifest: the project ``apm.yml``, or the user
+    manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads. The command
+    and its next step come from the remediation catalog (#4436); the entry is
+    the same grant written by hand.
+    """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
+    from apm_cli.core.scope import InstallScope, get_manifest_path
+    from apm_cli.security.trust import approve_command
+
+    target = (
+        f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
+    )
+    install = "apm install -g <bundle-path>" if user_scope else "apm install <bundle-path>"
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(
+        key=approval_key, exec_type=exec_type, install=install
+    ).with_command(approve_command(approval_key, user_scope=user_scope))
+    return (
+        f"To {remedy.fixes_promise}, run:\n"
+        f"    {remedy.command}\n"
+        f"then {remedy.then}. The same grant as this entry in {target}:\n"
+        "executables:\n"
+        "  allow:\n"
+        f'    "{approval_key}":\n'
+        f"      {exec_type}: true"
+    )
 
 
 # -------------------------------------------------------------------
@@ -602,6 +787,7 @@ def scan_package_executables(
     manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
+    original_identity: str | None = None,
 ) -> ExecutableDeclaration:
     """Scan a materialised package directory for executable primitives.
 
@@ -653,7 +839,7 @@ def scan_package_executables(
     mcp_details: list[str] = []
     lsp_count = 0
     lsp_details: list[str] = []
-    apm_yml = install_path / "apm.yml"
+    apm_yml = manifest_file(install_path)
     data = manifest_data
     if data is None and apm_yml.is_file():
         try:
@@ -699,6 +885,7 @@ def scan_package_executables(
         package_name=package_name,
         is_transitive=is_transitive,
         parent_name=parent_name,
+        original_identity=original_identity,
         hook_count=len(hook_files),
         mcp_count=mcp_count,
         lsp_count=lsp_count,
@@ -724,12 +911,33 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def trust_remedy(package: str, recommend: Collection[str] = (), *, user_scope: bool = False) -> str:
+    """One remediation line for parked executables.
+
+    Offers ``apm approve --recommended`` only when the org policy declares an
+    ``executables.recommend`` set; otherwise that command finds nothing. A
+    user-scope install names the ``-g`` commands (#4154).
+    """
+    from apm_cli.security.trust import approve_command, explain_command
+
+    bulk = (
+        f"Trust the org-vetted set: {approve_command('--recommended', user_scope=user_scope)}  |  "
+        if recommend
+        else ""
+    )
+    return (
+        f"{bulk}Trust one: {approve_command(package, user_scope=user_scope)}  |  "
+        f"Inspect: {explain_command(package, user_scope=user_scope)}"
+    )
+
+
 def prompt_executable_approval(
     declarations: list[ExecutableDeclaration],
     *,
     allow_executables: dict[str, dict[str, bool]] | None = None,
     trust_all: bool = False,
     no_executables: bool = False,
+    recommend: Collection[str] = (),
 ) -> dict[str, dict[str, bool]]:
     """Run the interactive approval flow for packages with executables.
 
@@ -771,7 +979,7 @@ def prompt_executable_approval(
     # --trust-all: approve everything
     if trust_all:
         for decl in pending:
-            result[decl.package_key] = {t: True for t in decl.exec_types}
+            _record_prompt_approval(result, decl)
         return result
 
     # Non-interactive (CI): hard error
@@ -781,12 +989,7 @@ def prompt_executable_approval(
             provenance = "(transitive)" if decl.is_transitive else "(direct)"
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
-        _rich_info(
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            "Trust one: apm approve <package>  |  "
-            "Inspect: apm policy explain <package>",
-            symbol="info",
-        )
+        _rich_info(trust_remedy("<package>", recommend), symbol="info")
         sys.exit(1)
 
     # Interactive: prompt per-package
@@ -799,6 +1002,11 @@ def prompt_executable_approval(
             provenance = f"transitive via {decl.parent_name}"
         _rich_echo(f"  {decl.package_key} ({provenance})")
         _rich_echo(f"    {decl.summary_line()}")
+        for pin in _prompt_pins(decl):
+            from .trust_fingerprint import short_fingerprint
+
+            digest = short_fingerprint(pin.fingerprint) if pin.fingerprint else "--------"
+            _rich_echo(f"      {pin.exec_type:<6} {pin.item}  {pin.summary}  {digest}")
         _rich_echo("")
 
     _rich_echo("  These will execute code on your machine when triggered by")
@@ -811,10 +1019,30 @@ def prompt_executable_approval(
             default=False,
         )
         if approved:
-            result[decl.package_key] = {t: True for t in decl.exec_types}
+            _record_prompt_approval(result, decl)
         _rich_echo("")
 
     return result
+
+
+def _prompt_pins(decl: ExecutableDeclaration) -> list:
+    """Pins for one prompted package (empty when its install path is unknown)."""
+    if decl.install_path is None:
+        return []
+    from .trust import package_pins
+
+    return package_pins(Path(decl.install_path), transitive=decl.is_transitive)
+
+
+def _record_prompt_approval(result: dict, decl: ExecutableDeclaration) -> None:
+    """Record a prompt approval pinned to the definitions just listed (#3902)."""
+    from .trust import record_pins
+
+    if decl.install_path is None:
+        result[decl.package_key] = {t: True for t in decl.exec_types}
+        return
+    pins = [pin for pin in _prompt_pins(decl) if pin.fingerprint is not None]
+    record_pins(result, _strip_version(decl.package_key), decl.exec_types, pins)
 
 
 def _is_fully_approved(
@@ -825,7 +1053,7 @@ def _is_fully_approved(
     entry = allow_executables.get(decl.package_key)
     if not entry or not isinstance(entry, dict):
         return False
-    return all(entry.get(t, False) for t in decl.exec_types)
+    return all(entry.get(t, False) is True for t in decl.exec_types)
 
 
 # -------------------------------------------------------------------
@@ -908,16 +1136,115 @@ def write_allow_executables(
     dump_yaml_roundtrip(data, manifest_path)
 
 
-def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
+class EffectiveExecMap(dict):
+    """The materialised type-level allow-map, carrying its trust context.
+
+    The dict holds ONLY type-level grants, so a caller that knows nothing of
+    pinned items sees "not granted" and fails closed. Callers that admit
+    pinned items ask :mod:`apm_cli.security.trust` with ``trust_context``.
+    """
+
+    trust_context: ExecTrustContext | None = None
+    # Why this map authorizes every executable type of every package, when it
+    # does. Set only by :func:`authorized_exec_map`; never inferred from None.
+    authorized_by: str | None = None
+
+
+# The project's own content (``_local``) is first-party and always trusted.
+FIRST_PARTY_PACKAGE = "_local"
+# Explicit blanket authorizations. A missing or omitted map is never one.
+AUTHORIZED_GATE_DISABLED = LAYER_GATE_DISABLED
+AUTHORIZED_REPLAY = "replay-already-authorized"
+AUTHORIZED_FIRST_PARTY = "first-party"
+_BLANKET_AUTHORIZATIONS = frozenset(
+    {AUTHORIZED_GATE_DISABLED, AUTHORIZED_REPLAY, AUTHORIZED_FIRST_PARTY}
+)
+
+
+def authorized_exec_map(reason: str) -> EffectiveExecMap:
+    """Return a map that explicitly authorizes every executable for *reason*.
+
+    ``AUTHORIZED_GATE_DISABLED``: no layer opted into the gate (no policy
+    signals), so every executable deploys. ``AUTHORIZED_REPLAY``: audit replay
+    re-derives content the install gate already authorized.
+    ``AUTHORIZED_FIRST_PARTY``: the project's own content (``_local``).
+    """
+    if reason not in _BLANKET_AUTHORIZATIONS:
+        raise ValueError(f"Unknown executable authorization: {reason!r}")
+    allow_map = EffectiveExecMap()
+    allow_map.authorized_by = reason
+    return allow_map
+
+
+def exec_map_authorizes_all(allow_map: object) -> bool:
+    """Return whether *allow_map* explicitly authorizes every executable.
+
+    ``None``, a plain dict, and an omitted map authorize nothing beyond their
+    own literal grants.
+    """
+    return isinstance(allow_map, EffectiveExecMap) and allow_map.authorized_by is not None
+
+
+def closed_exec_map(allow_map: object) -> object:
+    """Return *allow_map*, or an empty grant map when it is missing.
+
+    Item admission reads ``None`` as "gate off"; a missing map handed to it
+    becomes a gate-on map with no grants, so it admits nothing.
+    """
+    return EffectiveExecMap() if allow_map is None else allow_map
+
+
+def package_type_approved(allow_map: object, package_keys: Any, exec_type: str) -> bool:
+    """Return the package-level approval of *exec_type* for any of *package_keys*.
+
+    Pinned items are not read here; ``security/trust.py`` admits them.
+    """
+    if exec_map_authorizes_all(allow_map):
+        return True
+    if not isinstance(allow_map, dict):
+        return False
+    return any(is_package_approved(allow_map, key, exec_type) for key in package_keys)
+
+
+def package_type_approvals(allow_map: object, package_keys: Any) -> dict[str, bool]:
+    """Return :func:`package_type_approved` for every executable type."""
+    keys = tuple(package_keys)
+    return {
+        exec_type: package_type_approved(allow_map, keys, exec_type) for exec_type in ALL_EXEC_TYPES
+    }
+
+
+def compose_trust_bin(
+    bin_approved: bool,
+    trust_bin: bool | None,
+    *,
+    non_interactive: bool,
+) -> tuple[bool, str | None]:
+    """Compose the bin approval with the ``--trust-bin`` posture.
+
+    Returns ``(skip_bin, reason)``. Without the flag a non-interactive run
+    does not trust bin/ executables.
+    """
+    if not bin_approved:
+        return True, "not_approved"
+    if trust_bin is False:
+        return True, "not_trusted"
+    if trust_bin is None and non_interactive:
+        return True, "not_trusted"
+    return False, None
+
+
+def materialize_exec_map(ctx: ExecTrustContext) -> EffectiveExecMap:
     """Materialise the deny-wins effective allow-map from a trust context.
 
-    Returns ``None`` when the gate is disabled; otherwise every candidate
-    package key is run through :func:`resolve_exec_decision` and only ALLOWED
-    ``(key, exec_type)`` pairs are emitted, each also under its version-blind
-    name so the gate's exact-membership lookup matches any installed version.
+    Returns an explicit :data:`AUTHORIZED_GATE_DISABLED` map when the gate is
+    disabled; otherwise every candidate package key is run through
+    :func:`resolve_exec_decision` and only ALLOWED ``(key, exec_type)`` pairs
+    are emitted, each also under its version-blind name so the gate's
+    exact-membership lookup matches any installed version.
     """
     if not ctx.gate_enabled:
-        return None
+        return authorized_exec_map(AUTHORIZED_GATE_DISABLED)
 
     candidate_keys: set[str] = set()
     candidate_keys |= set(ctx.project_allow) | set(ctx.project_deny)
@@ -925,7 +1252,8 @@ def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | 
     candidate_keys |= set(ctx.org_recommend) | set(ctx.org_deny) | set(ctx.org_enforce)
     candidate_keys |= set(ctx.org_bin_deny)
 
-    result: dict[str, dict[str, bool]] = {}
+    result = EffectiveExecMap()
+    result.trust_context = ctx
     for key in candidate_keys:
         for exec_type in ALL_EXEC_TYPES:
             if not resolve_exec_decision(ctx, key, exec_type).allowed:
@@ -977,19 +1305,40 @@ def exec_status_for_declaration(
     return worst
 
 
+def denied_exec_types(
+    ctx: ExecTrustContext,
+    candidate_keys: list[str],
+    exec_types: tuple[str, ...] | list[str],
+) -> frozenset[str]:
+    """Return the exec types a deny layer refuses for every candidate key.
+
+    A type counts as denied only when no candidate key allows it and at least
+    one resolves to ``denied``; a default-deny (approvable) gate is not a deny.
+    """
+    denied: set[str] = set()
+    for exec_type in exec_types:
+        decisions = [resolve_exec_decision(ctx, key, exec_type) for key in candidate_keys]
+        if any(d.allowed for d in decisions):
+            continue
+        if any(d.trust_state == TRUST_DENIED for d in decisions):
+            denied.add(exec_type)
+    return frozenset(denied)
+
+
 def build_effective_exec_map(
     *,
     policy: Any | None,
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Materialise the deny-wins effective allow-map consumed by the install gate.
 
     This is the #1873 replacement for the legacy ``{**project, **user}``
     user-wins merge. See :func:`materialize_exec_map` for the emission rules.
 
-    Returns ``None`` when the gate is disabled (backward-compatible: every
-    executable deploys), mirroring :attr:`ExecTrustContext.gate_enabled`.
+    Returns an explicit :data:`AUTHORIZED_GATE_DISABLED` map when the gate is
+    disabled (backward-compatible: every executable deploys), mirroring
+    :attr:`ExecTrustContext.gate_enabled`.
     """
     ctx = build_exec_trust_context(
         policy=policy,
@@ -1000,18 +1349,23 @@ def build_effective_exec_map(
 
 
 def exec_trust_context_for_project(
-    project_root: Path,
+    manifest_path: Path,
     *,
     policy: Any | None,
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
+    include_user: bool = True,
 ) -> ExecTrustContext:
-    """Resolve project, user, and policy executable trust through one owner."""
+    """Resolve project, user, and policy executable trust through one owner.
+
+    *manifest_path* is the scope's ``apm.yml`` itself, never a directory the
+    caller picked: under ``-g`` it is ``APM_HOME/apm.yml``, which the home
+    directory (the user-scope source and deploy root) does not hold (#3954).
+    """
     from apm_cli.models.manifest_io import load_manifest
 
     project_data: dict[str, Any] | None = None
-    manifest_path = project_root / "apm.yml"
     if manifest_path.is_file():
         data = load_manifest(manifest_path)
         if isinstance(data, dict):
@@ -1020,11 +1374,18 @@ def exec_trust_context_for_project(
                 warn_allow_executables_alias_once(logger)
     if project_data is None and isinstance(fallback_allow_executables, dict):
         project_data = {"allowExecutables": fallback_allow_executables}
-    return build_exec_trust_context(
+    ctx = build_exec_trust_context(
         policy=policy,
         project_data=project_data,
         migrate_user_legacy=migrate_user_legacy,
+        include_user=include_user,
+        lockfile=_readable_lockfile(manifest_path.parent),
     )
+    if logger is not None:
+        from .trust import warn_content_blind_grants_once
+
+        warn_content_blind_grants_once(ctx, logger)
+    return ctx
 
 
 def effective_exec_map_for_project(
@@ -1034,11 +1395,14 @@ def effective_exec_map_for_project(
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+    user_scope: bool = False,
+) -> EffectiveExecMap:
     """Materialize the canonical trust context for one project."""
+    from apm_cli.core.scope import scope_manifest_path
+
     return materialize_exec_map(
         exec_trust_context_for_project(
-            project_root,
+            scope_manifest_path(project_root, user_scope=user_scope),
             policy=policy,
             fallback_allow_executables=fallback_allow_executables,
             logger=logger,
@@ -1051,49 +1415,35 @@ def resolve_project_exec_allow_map(
     project_root: Path,
     apm_package: Any,
     *,
+    user_scope: bool,
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
     logger: Any | None = None,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Return the deny-wins executables map for one project command.
 
     Reuses a map the caller already resolved (``executable_context`` is
     ``(map, resolved)``); otherwise resolves org policy (unless disabled),
     project, and user layers through :func:`effective_exec_map_for_project`.
+    Org policy and the grants both come from the scope's manifest root
+    (``$APM_HOME`` at user scope, which has no git remote).
     """
     allow_map, resolved = executable_context
     if resolved:
         return allow_map
-    policy = None
-    if not no_policy:
-        from apm_cli.policy.discovery import discover_policy_with_chain
+    from apm_cli.core.scope import manifest_root
+    from apm_cli.policy.outcome_routing import resolve_trust_policy
 
-        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+    policy = resolve_trust_policy(
+        manifest_root(project_root, user_scope=user_scope), no_policy=no_policy, logger=logger
+    )
+
     return effective_exec_map_for_project(
         project_root,
+        user_scope=user_scope,
         policy=policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,
-    )
-
-
-def filter_mcp_by_allow_executables(
-    mcp_deps: list,
-    effective_allow_execs: dict | None,
-    logger: Any,
-) -> list:
-    """Filter package-declared self-defined MCP servers by their package's decision.
-
-    Root-declared servers and registry servers pass; a self-defined server
-    from a dependency passes only when its declaring package is approved.
-    """
-    return _filter_declared_services(
-        mcp_deps,
-        effective_allow_execs,
-        logger,
-        exec_type=EXEC_TYPE_MCP,
-        service_label="MCP",
-        gated=lambda dependency: bool(getattr(dependency, "is_self_defined", False)),
     )
 
 
@@ -1122,42 +1472,77 @@ def _filter_declared_services(
     gated: Any = None,
 ) -> list:
     """Keep root-declared services and services whose declaring package is approved."""
-    if effective_allow_execs is None or not dependencies:
+    if exec_map_authorizes_all(effective_allow_execs) or not dependencies:
         return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
+    denied_owners: set[str] = set()
     for dependency in dependencies:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
         if (
             owner is None
             or (gated is not None and not gated(dependency))
-            or any(
-                is_package_approved(effective_allow_execs, key, exec_type) for key in approval_keys
-            )
+            or package_type_approved(effective_allow_execs, approval_keys, exec_type)
         ):
             filtered.append(dependency)
             continue
         skipped[owner] = bool(approval_keys)
         dependency_name = getattr(dependency, "name", "(unnamed)")
-        if approval_keys:
+        trust_ctx = getattr(effective_allow_execs, "trust_context", None)
+        if (
+            approval_keys
+            and trust_ctx is not None
+            and denied_exec_types(trust_ctx, list(approval_keys), (exec_type,))
+        ):
+            denied_owners.add(owner)
+        if owner in denied_owners:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
-                f"executables not trusted. Run 'apm policy explain {owner}'; "
-                f"if policy permits, run 'apm approve {owner}'."
+                f"denied. Run 'apm policy explain {owner}' to see which deny applies."
+            )
+        elif approval_keys:
+            logger.verbose_detail(
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
+                f"executables not trusted. {MCP_EXECUTABLES_UNTRUSTED.bind(package=owner).sentence()}"
             )
         else:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
-                "identity cannot be verified without lock state. Run 'apm install' "
-                "to regenerate apm.lock.yaml, then approve the package."
+                "identity cannot be verified without lock state. "
+                f"{EXECUTABLES_IDENTITY_UNLOCKED.bind(subject='the package').sentence()}"
             )
     if len(filtered) < len(dependencies):
         skipped_count = len(dependencies) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
-        known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
+        known_owners = sorted(
+            owner for owner, has_keys in skipped.items() if has_keys and owner not in denied_owners
+        )
         unlocked_owners = sorted(owner for owner, has_keys in skipped.items() if not has_keys)
+        if denied_owners:
+            # A denied package is named as denied; approving cannot lift it (#4237).
+            denied_names = ", ".join(f"'{owner}'" for owner in sorted(denied_owners))
+            denied_count = sum(
+                1
+                for dependency in dependencies
+                if getattr(dependency, "resolved_by", None) in denied_owners
+            )
+            denied_noun = "server" if denied_count == 1 else "servers"
+            explain = (
+                f"Run 'apm policy explain {sorted(denied_owners)[0]}' to see which deny applies."
+                if len(denied_owners) == 1
+                else "Run 'apm policy explain <package>' to see which deny applies."
+            )
+            logger.warning(
+                f"Filtered {denied_count} {service_label} {denied_noun} from {denied_names}: "
+                f"declaring package {'is' if len(denied_owners) == 1 else 'are'} denied. "
+                f"{explain}",
+                symbol="warning",
+            )
+            skipped = {o: k for o, k in skipped.items() if o not in denied_owners}
+            skipped_count -= denied_count
+            owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         remediation_parts = []
         if known_owners:
             remediation_parts.append(
@@ -1171,47 +1556,18 @@ def _filter_declared_services(
         if unlocked_owners:
             package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
             remediation_parts.append(
-                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+                EXECUTABLES_IDENTITY_UNLOCKED.bind(subject=package_noun).sentence()
             )
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
-        logger.warning(
-            f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
-            f"{package_clause} not trusted yet.{remediation}",
-            symbol="warning",
-        )
-    return filtered
-
-
-def read_bundle_allow_executables(
-    apm_yml_path: Path,
-    logger: Any,
-    *,
-    migrate_user_legacy: bool = True,
-) -> dict | None:
-    """Read executable trust settings from apm.yml for bundle install."""
-    try:
-        from ..utils.yaml_io import load_yaml  # local import avoids circular at module init
-
-        if not apm_yml_path.is_file():
-            return None
-        data = load_yaml(apm_yml_path)
-        if isinstance(data, dict):
-            if data.get("allowExecutables") is not None:
-                warn_allow_executables_alias_once(logger)
-            return build_effective_exec_map(
-                policy=None,
-                project_data=data,
-                migrate_user_legacy=migrate_user_legacy,
+        if skipped:
+            noun = "server" if skipped_count == 1 else "servers"
+            logger.warning(
+                f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
+                f"{package_clause} not trusted yet.{remediation}",
+                symbol="warning",
             )
-        return None
-    except Exception as exc:
-        logger.warning(
-            f"Could not read executable trust settings from apm.yml: {exc}. "
-            "Treating as fully enforced with no approvals.",
-            symbol="warning",
-        )
-        return {}
+    return filtered
 
 
 # -------------------------------------------------------------------
@@ -1225,12 +1581,44 @@ def read_bundle_allow_executables(
 # first read and DELETED -- net-new control-surface files = 0.
 
 
+# Executable types whose grants may pin individual items to a fingerprint.
+ITEM_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP)
+# A natively loaded plugin is approved as ONE item over its whole root:
+# ``executables.allow.<pkg>.plugin: sha256:<64 hex>`` (#3902).
+PLUGIN_GRANT_KEY = "plugin"
+PLUGIN_ITEM = "."
+
+
+def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
+    return ValueError(
+        f"apm.yml {where}.{pkg_key}.{exec_type}.{item}: expected 'sha256:<64 hex>'. "
+        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
+    )
+
+
+def _parse_item_map(raw: dict, *, where: str, pkg_key: str, exec_type: str) -> dict[str, str]:
+    """Validate one ``{item: sha256:<64 hex>}`` map; item-level ``true`` is rejected."""
+    from .trust_fingerprint import is_fingerprint
+
+    items: dict[str, str] = {}
+    for item, value in raw.items():
+        if not isinstance(item, str) or not item.strip() or not is_fingerprint(value):
+            raise _item_error(where, pkg_key, exec_type, item)
+        items[item] = value
+    return items
+
+
 def _parse_grant_block(
     raw: Any,
     *,
     where: str,
-) -> dict[str, dict[str, bool]]:
-    """Validate and normalise a ``{package_key: {exec_type: bool}}`` map."""
+    allow_items: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Validate and normalise a ``{package_key: {exec_type: bool | items}}`` map.
+
+    With *allow_items*, ``hooks`` and ``mcp`` may hold a pinned
+    ``{item: sha256:<64 hex>}`` map instead of a boolean (#3902).
+    """
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -1238,7 +1626,7 @@ def _parse_grant_block(
             f"{where} must be a mapping of package keys to "
             "{hooks: bool, mcp: bool, lsp: bool, bin: bool, canvas: bool}"
         )
-    result: dict[str, dict[str, bool]] = {}
+    result: dict[str, dict[str, Any]] = {}
     for pkg_key, entry in raw.items():
         if not isinstance(pkg_key, str):
             raise ValueError(f"{where} key must be a string, got {type(pkg_key).__name__}")
@@ -1247,14 +1635,30 @@ def _parse_grant_block(
                 f"{where}[{pkg_key!r}] must be a mapping of exec types to "
                 f"booleans, got {type(entry).__name__}"
             )
-        parsed: dict[str, bool] = {}
+        parsed: dict[str, Any] = {}
         for exec_type, value in entry.items():
             exec_type_str = str(exec_type)
+            if allow_items and exec_type_str == PLUGIN_GRANT_KEY:
+                from .trust_fingerprint import is_fingerprint
+
+                if not where.endswith(".allow") or not is_fingerprint(value):
+                    raise ValueError(
+                        f"apm.yml {where}.{pkg_key}.plugin: expected 'sha256:<64 hex>' under "
+                        "executables.allow. "
+                        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
+                    )
+                parsed[exec_type_str] = value
+                continue
             if exec_type_str not in ALL_EXEC_TYPES:
                 raise ValueError(
                     f"{where}[{pkg_key!r}]: unknown exec type {exec_type_str!r} "
                     f"(valid: {', '.join(ALL_EXEC_TYPES)})"
                 )
+            if allow_items and exec_type_str in ITEM_EXEC_TYPES and isinstance(value, dict):
+                parsed[exec_type_str] = _parse_item_map(
+                    value, where=where, pkg_key=pkg_key, exec_type=exec_type_str
+                )
+                continue
             if not isinstance(value, bool):
                 raise ValueError(
                     f"{where}[{pkg_key!r}][{exec_type_str!r}] must be a boolean, "
@@ -1262,6 +1666,66 @@ def _parse_grant_block(
                 )
             parsed[exec_type_str] = value
         result[pkg_key] = parsed
+    return result
+
+
+def split_item_grants(
+    raw: dict[str, dict[str, Any]] | None,
+) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, dict[str, str]]]]:
+    """Split a stored grant map into type-level booleans and pinned item maps.
+
+    Only well-formed entries survive: anything else is dropped, so a damaged
+    user store fails closed instead of widening trust.
+    """
+    from .trust_fingerprint import is_fingerprint
+
+    types: dict[str, dict[str, bool]] = {}
+    items: dict[str, dict[str, dict[str, str]]] = {}
+    for pkg_key, entry in (raw or {}).items():
+        if not isinstance(pkg_key, str) or not isinstance(entry, dict):
+            continue
+        for exec_type, value in entry.items():
+            if exec_type == PLUGIN_GRANT_KEY:
+                if is_fingerprint(value):
+                    items.setdefault(pkg_key, {})[PLUGIN_GRANT_KEY] = {PLUGIN_ITEM: value}
+                continue
+            if isinstance(value, bool):
+                types.setdefault(pkg_key, {})[str(exec_type)] = value
+            elif isinstance(value, dict) and exec_type in ITEM_EXEC_TYPES:
+                pinned = {
+                    item: fingerprint
+                    for item, fingerprint in value.items()
+                    if isinstance(item, str) and is_fingerprint(fingerprint)
+                }
+                # An empty map is meaningful: nothing of this type is approved.
+                items.setdefault(pkg_key, {})[exec_type] = pinned
+    return types, items
+
+
+def _deny_types(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, bool]]:
+    """A pinned deny map denies the whole type: deny stays content-blind."""
+    return {
+        pkg_key: {
+            exec_type: (value is True or isinstance(value, dict))
+            for exec_type, value in entry.items()
+            if exec_type != PLUGIN_GRANT_KEY
+        }
+        for pkg_key, entry in raw.items()
+        if isinstance(entry, dict)
+    }
+
+
+def sorted_grant_map(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return *raw* with packages, types and items sorted for a stable diff."""
+    result: dict[str, dict[str, Any]] = {}
+    for pkg_key in sorted(raw):
+        entry = raw[pkg_key]
+        if not isinstance(entry, dict):
+            continue
+        result[pkg_key] = {
+            exec_type: (dict(sorted(value.items())) if isinstance(value, dict) else value)
+            for exec_type, value in sorted(entry.items())
+        }
     return result
 
 
@@ -1288,8 +1752,10 @@ def parse_project_executables(
     if block is not None:
         if not isinstance(block, dict):
             raise ValueError("executables must be a mapping with 'allow' and/or 'deny' keys")
-        allow.update(_parse_grant_block(block.get("allow"), where="executables.allow"))
-        deny = _parse_grant_block(block.get("deny"), where="executables.deny")
+        allow.update(
+            _parse_grant_block(block.get("allow"), where="executables.allow", allow_items=True)
+        )
+        deny = _parse_grant_block(block.get("deny"), where="executables.deny", allow_items=True)
 
     return allow, deny, used_alias
 
@@ -1309,11 +1775,9 @@ def warn_allow_executables_alias_once(logger: Any | None = None) -> None:
     if _ALIAS_DEPRECATION_WARNED:
         return
     _ALIAS_DEPRECATION_WARNED = True
-    msg = (
-        "'allowExecutables' in apm.yml is deprecated; it now maps to "
-        "'executables.allow'. It will migrate automatically on your next "
-        "'apm approve'/'apm deny'."
-    )
+    from ..core.deprecations import deprecation_message
+
+    msg = deprecation_message("allow-executables")
     if logger is not None:
         logger.warning(msg, symbol="warning")
         return
@@ -1439,6 +1903,8 @@ def build_exec_trust_context(
     policy: Any | None,
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
+    include_user: bool = True,
+    lockfile: Any | None = None,
 ) -> ExecTrustContext:
     """Assemble an :class:`ExecTrustContext` from org / project / user inputs.
 
@@ -1453,8 +1919,25 @@ def build_exec_trust_context(
     block, or a legacy ``bin_deploy`` deny.
     """
     data = project_data or {}
-    project_allow, project_deny, _alias = parse_project_executables(data)
-    user_allow, user_deny = load_user_executables(migrate_legacy=migrate_user_legacy)
+    project_raw_allow, project_raw_deny, _alias = parse_project_executables(data)
+    # ``apm audit`` never reads personal consent: CI and laptops must agree.
+    user_raw_allow, user_raw_deny = (
+        load_user_executables(migrate_legacy=migrate_user_legacy) if include_user else ({}, {})
+    )
+    if lockfile is not None:
+        project_raw_allow, project_raw_deny, user_raw_allow, user_raw_deny = (
+            canonicalize_store_keys(grants, lockfile, store=store)
+            for grants, store in (
+                (project_raw_allow, "executables.allow"),
+                (project_raw_deny, "executables.deny"),
+                (user_raw_allow, "user executables.allow"),
+                (user_raw_deny, "user executables.deny"),
+            )
+        )
+    project_allow, project_items = split_item_grants(project_raw_allow)
+    project_deny = _deny_types(project_raw_deny)
+    user_allow, user_items = split_item_grants(user_raw_allow)
+    user_deny = _deny_types(user_raw_deny)
 
     org_deny_all = False
     org_deny: frozenset[str] = frozenset()
@@ -1503,6 +1986,8 @@ def build_exec_trust_context(
         project_deny=project_deny,
         user_allow=user_allow,
         user_deny=user_deny,
+        project_items=project_items,
+        user_items=user_items,
     )
 
 
@@ -1543,9 +2028,9 @@ def write_project_executables(
     had_alias = data.pop("allowExecutables", None) is not None
     block: dict[str, Any] = {}
     if allow:
-        block["allow"] = allow
+        block["allow"] = sorted_grant_map(allow)
     if deny:
-        block["deny"] = deny
+        block["deny"] = sorted_grant_map(deny)
 
     if block or had_alias or "executables" in data:
         data["executables"] = block

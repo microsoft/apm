@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import AGENT_SOURCE_SYMLINKED
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import printable_ascii_text
@@ -22,7 +23,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within_resolved,
     has_symlink_component,
 )
-from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.paths import portable_relpath, portable_relpaths, relative_to
 
 if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -35,7 +36,7 @@ def _is_safe_source_path(
 ) -> bool:
     """Check containment; notify on_symlink only for symlink-component rejection."""
     try:
-        path.relative_to(source_root)
+        relative_to(path, source_root)
     except ValueError:
         return False
     if has_symlink_component(source_root, path):
@@ -55,6 +56,26 @@ def _optional_source_directory(root: Path) -> bool | None:
         return stat.S_ISDIR(root.stat().st_mode)
     except FileNotFoundError:
         return None
+
+
+def _select_admitted_hook_sources(
+    source_root: Path,
+    target_names: list[str],
+    hook_file_admitted: Callable[[Path], bool] | None,
+):
+    """Select hook sources, admitting each hook file on its own pin when pinned."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    hook_files = None
+    if hook_file_admitted is not None:
+        hook_files = [
+            hook_file
+            for hook_file in HookIntegrator().find_hook_files(source_root)
+            if hook_file_admitted(hook_file)
+        ]
+    return HookIntegrator.select_deployable_hook_sources(
+        source_root, target_names, hook_files=hook_files
+    )
 
 
 @dataclass(frozen=True)
@@ -98,6 +119,7 @@ class DeployableSourcePlan:
         hooks_approved: bool,
         canvas_approved: bool,
         skip_bin: bool,
+        hook_file_admitted: Callable[[Path], bool] | None = None,
         plugin_bin_deployable: bool = False,
         native_plugin_root: Path | None = None,
         diagnostics: DiagnosticCollector | None = None,
@@ -136,8 +158,7 @@ class DeployableSourcePlan:
                         "Skipped symlinked agent source: "
                         f"{printable_ascii_text(relative)}. "
                         "Symlinked agent sources are not deployed. "
-                        "Use real files and directories in .apm/agents/ "
-                        "(or real *.agent.md files at the package root), then rerun apm install."
+                        f"{AGENT_SOURCE_SYMLINKED.sentence()}"
                     ),
                     package=printable_ascii_text(package_name),
                 )
@@ -213,16 +234,13 @@ class DeployableSourcePlan:
             add_matching_files(source_root / ".apm" / "instructions", "*.instructions.md")
 
         if hooks_approved and "hooks" in target_primitives:
-            from apm_cli.integration.hook_integrator import HookIntegrator
-
             hook_target_names = [
                 target.name
                 for target in targets
                 if "hooks" in target.primitives and hasattr(target, "name")
             ]
-            hook_source_selection = HookIntegrator.select_deployable_hook_sources(
-                source_root,
-                hook_target_names,
+            hook_source_selection = _select_admitted_hook_sources(
+                source_root, hook_target_names, hook_file_admitted
             )
             for path in hook_source_selection.files:
                 add_file(path)
@@ -361,14 +379,20 @@ class DeployableSourcePlan:
     def copy_ignore(self, directory: str, contents: list[str]) -> list[str]:
         """Return source entries excluded from a skill copy by this plan."""
         current = Path(directory)
+        admitted = [n for n in contents if _is_safe_source_path(current / n, self.source_root)]
+        relatives = dict(
+            zip(
+                admitted,
+                portable_relpaths([current / n for n in admitted], self.source_root),
+                strict=True,
+            )
+        )
         ignored: list[str] = []
         for name in contents:
-            candidate = current / name
-            if not _is_safe_source_path(candidate, self.source_root):
-                ignored.append(name)
-                continue
-            relative = portable_relpath(candidate, self.source_root)
-            if self.includes(relative) or relative in self.authorized_parent_prefixes:
+            relative = relatives.get(name)
+            if relative is not None and (
+                self.includes(relative) or relative in self.authorized_parent_prefixes
+            ):
                 continue
             ignored.append(name)
         return ignored

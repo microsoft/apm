@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 import apm_cli.commands.publish as publish_mod
 from apm_cli.commands.publish import publish_cmd
+
+pytestmark = pytest.mark.component
 
 
 def _enable_registry(monkeypatch) -> None:

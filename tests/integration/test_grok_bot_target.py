@@ -23,6 +23,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from tests.utils.deployment_evidence import seed_receipts
 
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
@@ -332,6 +333,8 @@ def test_uninstall_grok_bot_cleans_agent_data_workflows(
 
     # Stub the modules dir so uninstall's apm_modules cleanup is a no-op.
     (project / "apm_modules").mkdir()
+    # The deploying machine's receipt is the deletion evidence (#3701).
+    seed_receipts(project, [deployed], target="grok-bot", owner=pkg)
 
     monkeypatch.chdir(project)
     runner = CliRunner()

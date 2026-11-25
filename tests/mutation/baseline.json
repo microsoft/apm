@@ -1,14 +1,111 @@
 {
   "owners": {
+    "apm-home-resolution": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.core.scope.get_manifest_path__mutmut_5": "The project branch runs only for a non-user scope, and get_source_root treats None exactly like any non-user scope."
+      },
+      "functions": [
+        "get_apm_home",
+        "is_user_scope",
+        "set_source_root_override",
+        "get_source_root",
+        "get_deploy_root",
+        "get_workspace_deploy_root",
+        "get_apm_dir",
+        "manifest_file",
+        "manifest_root",
+        "scope_manifest_path",
+        "is_user_scope_root",
+        "policy_discovery_uses_git_remote",
+        "get_modules_dir",
+        "get_manifest_path",
+        "get_lockfile_dir"
+      ],
+      "kill_rate_floor": 0.98,
+      "source": "src/apm_cli/core/scope.py",
+      "test_seams": [
+        "tests/unit/core/test_apm_home_resolution.py"
+      ]
+    },
+    "egress-route-policy": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "route_for",
+        "is_direct_exception",
+        "is_refused",
+        "is_proxy_only"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/deps/egress_route.py",
+      "test_seams": [
+        "tests/unit/deps/test_egress_route.py"
+      ]
+    },
+    "executable-trust-context": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "resolve_exec_decision",
+        "authorized_exec_map",
+        "package_type_approved",
+        "compose_trust_bin",
+        "exec_trust_context_for_project",
+        "effective_exec_map_for_project",
+        "resolve_project_exec_allow_map"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/security/executables.py",
+      "test_seams": [
+        "tests/unit/security/test_resolve_exec_decision.py",
+        "tests/unit/security/test_exec_trust_context.py"
+      ]
+    },
+    "install-commit-order": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "policy_subject_mcp_deps",
+        "enforce_mcp_policy",
+        "refuse_blocked_mcp",
+        "_resolved_rows",
+        "prospective_lockfile",
+        "_check_merged_mcp_policy",
+        "check_before_resolve",
+        "check_before_deploy",
+        "check_before_lockfile"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/install/commit_gate.py",
+      "test_seams": [
+        "tests/unit/install/test_commit_gate.py"
+      ]
+    },
+    "install-entry-routing": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "record_preview_resolution",
+        "pipeline_preview",
+        "install_pipeline_options"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/install/pipeline_entry.py",
+      "test_seams": [
+        "tests/unit/install/test_pipeline_entry.py"
+      ]
+    },
     "link-projection": {
       "accepted_survivors": [],
+      "equivalent_survivors": {},
       "functions": [
         "UnifiedLinkResolver._resolve_in_package_asset_link"
       ],
+      "kill_rate_floor": 1.0,
       "source": "src/apm_cli/compilation/link_resolver.py",
       "test_seams": [
         "tests/unit/compilation/test_link_resolver.py",
-        "tests/unit/compilation/test_link_resolver_phase3.py",
         "tests/unit/compilation/test_link_resolver_resolution.py"
       ]
     },
@@ -17,25 +114,97 @@
         "apm_cli.deps.lockfile._normalize_exec_status__mutmut_12",
         "apm_cli.deps.lockfile._normalize_lockfile_host_type__mutmut_13"
       ],
+      "equivalent_survivors": {},
       "functions": [
         "_normalize_lockfile_host_type",
         "_normalize_exec_status"
       ],
+      "kill_rate_floor": 0.9259,
       "source": "src/apm_cli/deps/lockfile.py",
       "test_seams": [
         "tests/unit/deps/test_lockfile_field_properties.py"
       ]
     },
+    "lockfile-write-authority": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.deps.lockfile_write_authority._refused__mutmut_11": "getattr default None vs False: both are falsy, so a class without refuses_commit is never a refusal.",
+        "apm_cli.deps.lockfile_write_authority._scope__mutmut_7": "_WriteScope.writer is stored but never read; observers record the _Writer's own writer.",
+        "apm_cli.deps.lockfile_write_authority.remove_lockfile__mutmut_7": "Only reorders a removal marker among pending writes; _commit writes nothing for a removal, so commit order and bytes are unchanged.",
+        "apm_cli.deps.lockfile_write_authority.restore_lockfile_bytes__mutmut_15": "Codec names are case-insensitive: 'UTF-8' and 'utf-8' decode identically.",
+        "apm_cli.deps.lockfile_write_authority.restore_lockfile_bytes__mutmut_9": "normalize_line_endings=None vs False: atomic_write_text tests truthiness, so both keep the bytes as given."
+      },
+      "functions": [
+        "_scope",
+        "_refused",
+        "_commits",
+        "stage_lockfile",
+        "staged_lockfile_text",
+        "has_staged_lockfile",
+        "lockfile_exists",
+        "remove_lockfile",
+        "restore_lockfile_bytes",
+        "after_lockfile_commit",
+        "flush_lockfile_writes",
+        "_commit"
+      ],
+      "kill_rate_floor": 0.9593,
+      "source": "src/apm_cli/deps/lockfile_write_authority.py",
+      "test_seams": [
+        "tests/unit/deps/test_lockfile_write_authority.py"
+      ]
+    },
+    "policy-outcome-routing": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.policy.outcome_routing._report_miss_neutrally__mutmut_6": "getattr default None vs False: bool() of both is False.",
+        "apm_cli.policy.outcome_routing.classify_discovery_outcome__mutmut_15": "getattr default None vs '': both are falsy, so 'or \"unknown\"' yields the same source."
+      },
+      "functions": [
+        "classify_discovery_outcome",
+        "outcome_cause",
+        "route_discovery_outcome",
+        "classify_project_policy",
+        "resolve_trust_policy",
+        "discover_trust_policy",
+        "_report_miss_neutrally",
+        "_TrustReaderLog.flush",
+        "_TrustReaderLog.policy_discovery_miss"
+      ],
+      "kill_rate_floor": 0.994,
+      "source": "src/apm_cli/policy/outcome_routing.py",
+      "test_seams": [
+        "tests/unit/policy/test_outcome_routing.py"
+      ]
+    },
     "policy-serialization": {
       "accepted_survivors": [],
+      "equivalent_survivors": {},
       "functions": [
         "_policy_to_dict"
       ],
+      "kill_rate_floor": 1.0,
       "source": "src/apm_cli/policy/discovery.py",
       "test_seams": [
-        "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_covers_every_dataclass_leaf",
-        "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
+        "tests/unit/policy/test_cache_merged_effective_logic.py::test_policy_serializer_covers_every_dataclass_leaf",
+        "tests/unit/policy/test_cache_merged_effective_logic.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
         "tests/unit/policy/test_cache_merged_effective.py::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip"
+      ]
+    },
+    "remediation-advice": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "_sentence",
+        "either",
+        "either_sentence",
+        "kept_note",
+        "kept_file_message"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/core/remediation.py",
+      "test_seams": [
+        "tests/unit/core/test_remediation.py"
       ]
     },
     "subset-selection": {
@@ -58,12 +227,11 @@
         "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_21",
         "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_22",
         "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_3",
-        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_33",
-        "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_36",
         "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_4",
         "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_7",
         "apm_cli.models.dependency.subsets.parse_target_subset__mutmut_9"
       ],
+      "equivalent_survivors": {},
       "functions": [
         "skill_subset_filter_tokens",
         "parse_skill_subset",
@@ -71,6 +239,7 @@
         "_closest_target",
         "_levenshtein_distance"
       ],
+      "kill_rate_floor": 0.8581,
       "source": "src/apm_cli/models/dependency/subsets.py",
       "test_seams": [
         "tests/unit/test_skill_subset_persistence.py",
@@ -79,26 +248,30 @@
     },
     "update-plan": {
       "accepted_survivors": [
-        "apm_cli.install.plan.build_update_plan__mutmut_114",
-        "apm_cli.install.plan.build_update_plan__mutmut_140",
-        "apm_cli.install.plan.build_update_plan__mutmut_168",
-        "apm_cli.install.plan.build_update_plan__mutmut_189",
-        "apm_cli.install.plan.build_update_plan__mutmut_197",
-        "apm_cli.install.plan.build_update_plan__mutmut_199",
-        "apm_cli.install.plan.build_update_plan__mutmut_200",
-        "apm_cli.install.plan.build_update_plan__mutmut_33",
-        "apm_cli.install.plan.build_update_plan__mutmut_53"
+        "apm_cli.install.plan.build_update_plan__mutmut_121",
+        "apm_cli.install.plan.build_update_plan__mutmut_147",
+        "apm_cli.install.plan.build_update_plan__mutmut_175",
+        "apm_cli.install.plan.build_update_plan__mutmut_196",
+        "apm_cli.install.plan.build_update_plan__mutmut_204",
+        "apm_cli.install.plan.build_update_plan__mutmut_206",
+        "apm_cli.install.plan.build_update_plan__mutmut_207",
+        "apm_cli.install.plan.build_update_plan__mutmut_25",
+        "apm_cli.install.plan.build_update_plan__mutmut_26",
+        "apm_cli.install.plan.build_update_plan__mutmut_40",
+        "apm_cli.install.plan.build_update_plan__mutmut_60"
       ],
+      "equivalent_survivors": {},
       "functions": [
         "build_update_plan"
       ],
+      "kill_rate_floor": 0.9476,
       "source": "src/apm_cli/install/plan.py",
       "test_seams": [
         "tests/unit/install/test_plan.py"
       ]
     }
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "tool": {
     "name": "mutmut",
     "version": "3.6.0"

@@ -10,7 +10,6 @@ malformed). Both default to ``"warn"`` for backwards compatibility.
 
 from __future__ import annotations
 
-import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List  # noqa: F401, UP035
@@ -21,8 +20,9 @@ import pytest
 from apm_cli.install.phases.policy_gate import PolicyViolationError, run
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.parser import PolicyValidationError, load_policy
-from apm_cli.policy.project_config import read_project_fetch_failure_default
 from apm_cli.policy.schema import ApmPolicy
+
+pytestmark = pytest.mark.unit
 
 _PATCH_DISCOVER = "apm_cli.install.phases.policy_gate._discover_with_chain"
 
@@ -62,55 +62,6 @@ class TestParserFetchFailure:
 # =====================================================================
 
 
-class TestProjectFetchFailureDefault:
-    def test_missing_apm_yml_returns_warn(self, tmp_path: Path):
-        assert read_project_fetch_failure_default(tmp_path) == "warn"
-
-    def test_apm_yml_without_policy_block_returns_warn(self, tmp_path: Path):
-        (tmp_path / "apm.yml").write_text("name: p\nversion: '1.0'\n", encoding="utf-8")
-        assert read_project_fetch_failure_default(tmp_path) == "warn"
-
-    def test_explicit_block(self, tmp_path: Path):
-        (tmp_path / "apm.yml").write_text(
-            textwrap.dedent("""\
-                name: p
-                version: '1.0'
-                policy:
-                  fetch_failure_default: block
-            """),
-            encoding="utf-8",
-        )
-        assert read_project_fetch_failure_default(tmp_path) == "block"
-
-    def test_explicit_warn(self, tmp_path: Path):
-        (tmp_path / "apm.yml").write_text(
-            textwrap.dedent("""\
-                name: p
-                version: '1.0'
-                policy:
-                  fetch_failure_default: warn
-            """),
-            encoding="utf-8",
-        )
-        assert read_project_fetch_failure_default(tmp_path) == "warn"
-
-    def test_garbage_value_falls_back_to_warn(self, tmp_path: Path):
-        (tmp_path / "apm.yml").write_text(
-            textwrap.dedent("""\
-                name: p
-                version: '1.0'
-                policy:
-                  fetch_failure_default: bogus
-            """),
-            encoding="utf-8",
-        )
-        assert read_project_fetch_failure_default(tmp_path) == "warn"
-
-    def test_malformed_yaml_returns_warn(self, tmp_path: Path):
-        (tmp_path / "apm.yml").write_text(":::not yaml:::\n", encoding="utf-8")
-        assert read_project_fetch_failure_default(tmp_path) == "warn"
-
-
 # =====================================================================
 # policy_gate: fail-closed behaviour
 # =====================================================================
@@ -124,6 +75,12 @@ class _FakeCtx:
     logger: Any = None
     deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
+    # the resolved graph whose depth the gate judges (#4826)
+    dependency_graph: Any = None
+    dry_run: bool = False
+    package_hashes: dict[str, str] = field(default_factory=dict)
+    package_types: dict[str, Any] = field(default_factory=dict)
+    update_plan_complete_dep_keys: set[str] = field(default_factory=set)
     policy_fetch: Any = None
     policy_enforcement_active: bool = False
     no_policy: bool = False
@@ -208,6 +165,19 @@ class TestPolicyGateFailClosed:
         assert "outcome=absent" in str(excinfo.value)
 
     @patch(_PATCH_DISCOVER)
+    def test_absent_block_error_carries_masked_404_hint(self, mock_discover):
+        """#3754: block mode fails closed and names the masked-404 cause."""
+        fetch = _fetch("absent", source="")
+        fetch.discovery_hint = "foo/.github-private returned 404."
+        mock_discover.return_value = fetch
+        ctx = _FakeCtx(logger=MagicMock(), policy_fetch_failure_default="block")
+        with pytest.raises(PolicyViolationError) as excinfo:
+            run(ctx)
+        assert "foo/.github-private returned 404." in str(excinfo.value)
+        # The block is the only report; no "proceeding without" miss (#4180).
+        ctx.logger.policy_discovery_miss.assert_not_called()
+
+    @patch(_PATCH_DISCOVER)
     def test_no_git_remote_block_raises(self, mock_discover):
         """#1159 install parity: no_git_remote now honours block."""
         mock_discover.return_value = _fetch("no_git_remote", source="")
@@ -241,6 +211,22 @@ class TestPolicyGateFailClosed:
         )
         run(ctx)
         assert ctx.policy_enforcement_active is False
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    @patch(_PATCH_DISCOVER)
+    def test_absent_with_hint_is_silent_by_default(self, mock_discover, mock_warning, mock_info):
+        """#3754: default install with no org policy prints nothing, hint included."""
+        from apm_cli.core.command_logger import InstallLogger
+
+        fetch = _fetch("absent", source="")
+        fetch.discovery_hint = "foo/.github-private returned 404."
+        mock_discover.return_value = fetch
+        ctx = _FakeCtx(logger=InstallLogger(verbose=False), policy_fetch_failure_default="warn")
+        run(ctx)
+        assert ctx.policy_enforcement_active is False
+        mock_warning.assert_not_called()
+        mock_info.assert_not_called()
 
 
 class TestPolicyGateCachedStale:
@@ -281,58 +267,3 @@ class TestPolicyGateCachedStale:
 # =====================================================================
 # install_preflight parallel call site
 # =====================================================================
-
-
-class TestPreflightFailClosed:
-    @patch("apm_cli.policy.install_preflight.discover_policy_with_chain")
-    def test_block_raises_PolicyBlockError(self, mock_discover, tmp_path: Path):
-        from apm_cli.policy.install_preflight import (
-            PolicyBlockError,
-            run_policy_preflight,
-        )
-
-        mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
-        (tmp_path / "apm.yml").write_text(
-            "name: p\nversion: '1.0'\npolicy:\n  fetch_failure_default: block\n",
-            encoding="utf-8",
-        )
-        with pytest.raises(PolicyBlockError):
-            run_policy_preflight(
-                project_root=tmp_path,
-                apm_deps=[],
-                no_policy=False,
-                logger=MagicMock(),
-            )
-
-    @patch("apm_cli.policy.install_preflight.discover_policy_with_chain")
-    def test_warn_does_not_raise(self, mock_discover, tmp_path: Path):
-        from apm_cli.policy.install_preflight import run_policy_preflight
-
-        mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
-        # No apm.yml -> default warn.
-        result, active = run_policy_preflight(  # noqa: RUF059
-            project_root=tmp_path,
-            apm_deps=[],
-            no_policy=False,
-            logger=MagicMock(),
-        )
-        assert active is False
-
-    @patch("apm_cli.policy.install_preflight.discover_policy_with_chain")
-    def test_dry_run_block_does_not_raise(self, mock_discover, tmp_path: Path):
-        from apm_cli.policy.install_preflight import run_policy_preflight
-
-        mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
-        (tmp_path / "apm.yml").write_text(
-            "name: p\nversion: '1.0'\npolicy:\n  fetch_failure_default: block\n",
-            encoding="utf-8",
-        )
-        # dry_run never raises.
-        result, active = run_policy_preflight(  # noqa: RUF059
-            project_root=tmp_path,
-            apm_deps=[],
-            no_policy=False,
-            logger=MagicMock(),
-            dry_run=True,
-        )
-        assert active is False

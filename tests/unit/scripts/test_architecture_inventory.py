@@ -59,6 +59,7 @@ def test_excluded_roots_constant_is_exact_and_stable() -> None:
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        ".hypothesis",
         ".tox",
         "build",
         "dist",
@@ -66,6 +67,7 @@ def test_excluded_roots_constant_is_exact_and_stable() -> None:
         "mutants",
         ".idea",
         ".vscode",
+        "apm_modules",
     )
     assert len(set(EXCLUDED_ROOTS)) == len(EXCLUDED_ROOTS)
 
@@ -242,3 +244,108 @@ def test_root_must_exist(tmp_path: Path) -> None:
 
     with pytest.raises(InventoryError, match="root is not a directory"):
         build_inventory(missing)
+
+
+def test_walk_errors_fail_closed_including_missing_directories(tmp_path) -> None:
+    """Every traversal error, a vanished directory included, aborts the inventory."""
+    from scripts.architecture_linter import inventory as inventory_module
+
+    for error in (
+        FileNotFoundError(2, "No such file or directory", str(tmp_path / "gone")),
+        PermissionError(13, "denied", str(tmp_path)),
+    ):
+        with pytest.raises(InventoryError, match="cannot inventory repository"):
+            inventory_module._raise_walk_error(error)
+
+
+def test_source_subtree_vanishing_mid_walk_fails_the_inventory(tmp_path, monkeypatch) -> None:
+    """A source directory removed between listing and descent is never silently omitted."""
+    import os
+
+    _write_minimal_repo(tmp_path)
+    vanishing = tmp_path / "src" / "apm_cli" / "vanishing"
+    vanishing.mkdir(parents=True)
+    (vanishing / "module.py").write_text("", encoding="utf-8")
+    real_scandir = os.scandir
+
+    def _scandir(path=".", *args, **kwargs):
+        if Path(path) == vanishing.resolve():
+            (vanishing / "module.py").unlink()
+            vanishing.rmdir()
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", _scandir)
+    with pytest.raises(InventoryError, match="cannot inventory repository"):
+        build_inventory(tmp_path)
+
+
+def _path_not_found(path: Path) -> OSError:
+    """The error Windows raises for a directory removed mid-walk (WinError 3)."""
+    error = FileNotFoundError(2, "The system cannot find the path specified", str(path))
+    error.winerror = 3  # type: ignore[attr-defined]
+    return error
+
+
+def test_tool_cache_vanishing_mid_walk_is_never_walked(tmp_path, monkeypatch) -> None:
+    """A test-tool cache that disappears mid-walk cannot fail the inventory."""
+    import os
+
+    _write_minimal_repo(tmp_path)
+    cache_tmp = tmp_path / ".hypothesis" / "tmp"
+    cache_tmp.mkdir(parents=True)
+    nested = tmp_path / "tests" / ".hypothesis" / "tmp"
+    nested.mkdir(parents=True)
+    real_scandir = os.scandir
+
+    def _scandir(path=".", *args, **kwargs):
+        if Path(path).name in {".hypothesis", "tmp"}:
+            raise _path_not_found(Path(path))
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", _scandir)
+    inventory = build_inventory(tmp_path)
+    assert not any(".hypothesis" in name for name in inventory.files)
+
+
+def test_windows_path_not_found_in_source_still_fails_closed(tmp_path, monkeypatch) -> None:
+    """WinError 3 on a source directory aborts the inventory like any walk error."""
+    import os
+
+    _write_minimal_repo(tmp_path)
+    source = (tmp_path / "src").resolve()
+    real_scandir = os.scandir
+
+    def _scandir(path=".", *args, **kwargs):
+        if Path(path) == source:
+            raise _path_not_found(source)
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", _scandir)
+    with pytest.raises(InventoryError, match="cannot inventory repository"):
+        build_inventory(tmp_path)
+
+
+def test_root_apm_modules_is_never_walked(tmp_path) -> None:
+    """Install output at the repository root is excluded like other generated roots."""
+    from scripts.architecture_linter.inventory import _is_excluded
+
+    assert _is_excluded(("apm_modules",))
+    assert _is_excluded(("apm_modules", "acme", "pkg", "x.py"))
+    assert not _is_excluded(("src", "apm_cli", "apm_modules.py"))
+
+
+def test_root_coverage_data_files_are_never_inventoried(tmp_path) -> None:
+    """A coverage worker's data file written mid-run must not change the inventory."""
+    _write_minimal_repo(tmp_path)
+    before = build_inventory(tmp_path).files
+    (tmp_path / ".coverage").write_bytes(b"")
+    (tmp_path / ".coverage.runner.4242.Xabc123").write_bytes(b"")
+    (tmp_path / "src" / ".coverage.nested").write_text("kept\n", encoding="utf-8")
+    (tmp_path / ".coveragerc").write_text("[run]\n", encoding="utf-8")
+
+    after = build_inventory(tmp_path)
+
+    assert ".coverage" not in after.files
+    assert ".coverage.runner.4242.Xabc123" not in after.files
+    assert set(after.files) - set(before) == {".coveragerc", "src/.coverage.nested"}
+    assert len(after.excluded_roots) == len(EXCLUDED_ROOTS)

@@ -1,0 +1,26 @@
+# apm journey golden v1: J07 step 3
+$ apm update --yes
+[exit 0]
+--- stdout
+[>] Checking upstream for revision-pin freshness...
+[>] Resolving lifecycle/p-skill...
+[>] Resolving acme/live-kit...
+[i] Revision pin updates for apm.yml
+
+  [~] acme/release-kit
+      ref: 6a2b9bdb -> c9663563 (v1.1.0)
+
+  1 revision pin update
+
+[i] Targets: copilot  (source: apm.yml)
+  [+] acme/live-kit #main @<SHA8>
+  |-- (files unchanged)
+  [+] acme/release-kit #<SHA40> @<SHA8>
+  |-- 2 skill(s) integrated -> .agents/skills/
+  [+] lifecycle/p-skill #v1.0.0 @<SHA8>
+  |-- (files unchanged)
+[i] Cleaned 1 stale deployed path for acme/release-kit:
+  - .agents/skills/legacy/
+[i] New locked content for 1 dependency (see apm.lock.yaml)
+Updated 1 APM dependency and 1 revision pin in apm.yml.
+--- stderr

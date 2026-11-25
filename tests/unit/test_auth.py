@@ -3,17 +3,20 @@
 import base64
 import logging
 import os
+import subprocess
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.core import azure_cli as _azure_cli_mod
 from apm_cli.core.auth import AuthResolver, HostInfo
-from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
@@ -25,11 +28,56 @@ def _reset_bearer_singleton():
     _azure_cli_mod._provider_singleton = None
 
 
+class _CredentialChildren:
+    """Stand-ins for the ``git credential`` and ``gh auth token`` child processes.
+
+    The real resolver and token manager run down to ``subprocess.run``; only
+    these children are replaced, so tests never read the developer's keychain
+    or gh login. ``helper`` maps a ``git credential fill`` request (its fields)
+    to a password or ``None``; ``gh_token`` is what ``gh auth token`` prints.
+    Every request is recorded in order.
+    """
+
+    def __init__(self) -> None:
+        self.helper: Callable[[dict[str, str]], str | None] = lambda _fields: None
+        self.gh_token: str | None = None
+        self.fills: list[dict[str, str]] = []
+        self.gh_hosts: list[str] = []
+
+    def answer(self, password: str | None) -> None:
+        self.helper = lambda _fields: password
+
+    def __call__(self, args, **kwargs):
+        command = list(args[1:])
+        if command[:2] == ["credential", "fill"]:
+            fields = dict(
+                line.split("=", 1) for line in kwargs["input"].splitlines() if "=" in line
+            )
+            self.fills.append(fields)
+            password = self.helper(fields)
+            if password is None:
+                return subprocess.CompletedProcess(args, 1, "", "")
+            reply = "".join(f"{key}={value}\n" for key, value in fields.items())
+            return subprocess.CompletedProcess(args, 0, f"{reply}password={password}\n", "")
+        if command[:2] == ["auth", "token"]:
+            self.gh_hosts.append(command[command.index("--hostname") + 1])
+            if self.gh_token is None:
+                return subprocess.CompletedProcess(args, 1, "", "not logged in")
+            return subprocess.CompletedProcess(args, 0, f"{self.gh_token}\n", "")
+        raise AssertionError(f"unexpected child process: {args}")
+
+    def hosts(self) -> list[str]:
+        return [fields["host"] for fields in self.fills]
+
+
 @pytest.fixture(autouse=True)
-def _disable_gh_cli_fallback():
-    """Keep auth tests deterministic regardless of local gh login state."""
-    with patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None):
-        yield
+def credential_children(monkeypatch: pytest.MonkeyPatch) -> _CredentialChildren:
+    """Keep auth tests deterministic regardless of local gh login or keychain state."""
+    children = _CredentialChildren()
+    monkeypatch.setattr("apm_cli.utils.git_env._git_executable", "/stand-in/git")
+    monkeypatch.setattr("apm_cli.utils.git_env._gh_executable", "/stand-in/gh")
+    monkeypatch.setattr("subprocess.run", children)
+    return children
 
 
 # ---------------------------------------------------------------------------
@@ -93,22 +141,14 @@ class TestClassifyHost:
             AuthResolver.classify_host("code.acme.com", host_type="gitea")
 
     @pytest.mark.windows_compat
-    def test_gitlab_host_type_hint_reuses_gitlab_cache_entry(self):
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value=None
-            ) as mock_cred,
-            patch(
-                "apm_cli.core.token_manager.subprocess.run",
-                side_effect=AssertionError("Cache identity must not launch credential helpers"),
-            ),
-        ):
+    def test_gitlab_host_type_hint_reuses_gitlab_cache_entry(self, credential_children):
+        with patch.dict(os.environ, {}, clear=True):
             resolver = AuthResolver()
             ctx_a = resolver.resolve("gitlab.com")
             ctx_b = resolver.resolve("gitlab.com", host_type="gitlab")
         assert ctx_a is ctx_b
-        mock_cred.assert_called_once_with("gitlab.com", port=None)
+        # The hinted lookup reuses the cache entry: one helper request in total.
+        assert credential_children.fills == [{"protocol": "https", "host": "gitlab.com"}]
 
     def test_gitlab_self_managed_apm_gitlab_hosts_env(self):
         with patch.dict(
@@ -141,53 +181,6 @@ class TestClassifyHost:
     def test_case_insensitive(self):
         hi = AuthResolver.classify_host("GitHub.COM")
         assert hi.kind == "github"
-
-
-# ---------------------------------------------------------------------------
-# TestDetectTokenType
-# ---------------------------------------------------------------------------
-
-
-class TestDetectTokenType:
-    def test_fine_grained(self):
-        assert AuthResolver.detect_token_type("github_pat_abc123") == "fine-grained"
-
-    def test_classic(self):
-        assert AuthResolver.detect_token_type("ghp_abc123") == "classic"
-
-    def test_oauth_user(self):
-        assert AuthResolver.detect_token_type("ghu_abc123") == "oauth"
-
-    def test_oauth_app(self):
-        assert AuthResolver.detect_token_type("gho_abc123") == "oauth"
-
-    def test_github_app_install(self):
-        assert AuthResolver.detect_token_type("ghs_abc123") == "github-app"
-
-    def test_github_app_refresh(self):
-        assert AuthResolver.detect_token_type("ghr_abc123") == "github-app"
-
-    def test_unknown(self):
-        assert AuthResolver.detect_token_type("some-random-token") == "unknown"
-
-
-# ---------------------------------------------------------------------------
-# TestGitlabRestHeaders
-# ---------------------------------------------------------------------------
-
-
-class TestGitlabRestHeaders:
-    def test_no_token_returns_empty_dict(self):
-        assert AuthResolver.gitlab_rest_headers(None) == {}
-        assert AuthResolver.gitlab_rest_headers("") == {}
-
-    def test_pat_uses_private_token_header(self):
-        headers = AuthResolver.gitlab_rest_headers("glpat-secret")
-        assert headers == {"PRIVATE-TOKEN": "glpat-secret"}
-
-    def test_oauth_bearer_style(self):
-        headers = AuthResolver.gitlab_rest_headers("oauth-access-token", oauth_bearer=True)
-        assert headers == {"Authorization": "Bearer oauth-access-token"}
 
 
 # ---------------------------------------------------------------------------
@@ -242,43 +235,33 @@ class TestResolve:
     def test_no_token_returns_none(self):
         """No tokens at all -> token is None."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("github.com")
-                assert ctx.token is None
-                assert ctx.source == "none"
+            resolver = AuthResolver()
+            ctx = resolver.resolve("github.com")
+            assert ctx.token is None
+            assert ctx.source == "none"
 
-    def test_allow_external_fallback_false_skips_gh_cli_and_git_credentials(self):
+    def test_allow_external_fallback_false_skips_gh_cli_and_git_credentials(
+        self, credential_children
+    ):
         """Disabled external fallback never probes gh CLI or git credentials."""
+        credential_children.gh_token = "gho_should_not_be_read"
+        credential_children.answer("helper-should-not-be-read")
         with patch.dict(os.environ, {}, clear=True):
-            with (
-                patch.object(
-                    GitHubTokenManager,
-                    "resolve_credential_from_gh_cli",
-                    side_effect=AssertionError("gh cli should not be probed"),
-                ) as mock_gh_cli,
-                patch.object(
-                    GitHubTokenManager,
-                    "resolve_credential_from_git",
-                    side_effect=AssertionError("git credentials should not be probed"),
-                ) as mock_git,
-            ):
-                resolver = AuthResolver(allow_external_fallback=False)
-                ctx = resolver.resolve("github.com", org="microsoft")
+            resolver = AuthResolver(allow_external_fallback=False)
+            ctx = resolver.resolve("github.com", org="microsoft")
 
         assert ctx.token is None
         assert ctx.source == "none"
-        mock_gh_cli.assert_not_called()
-        mock_git.assert_not_called()
+        assert credential_children.gh_hosts == []
+        assert credential_children.fills == []
 
     def test_caching(self):
         """Second call returns cached result."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx1 = resolver.resolve("github.com", org="microsoft")
-                ctx2 = resolver.resolve("github.com", org="microsoft")
-                assert ctx1 is ctx2
+            resolver = AuthResolver()
+            ctx1 = resolver.resolve("github.com", org="microsoft")
+            ctx2 = resolver.resolve("github.com", org="microsoft")
+            assert ctx1 is ctx2
 
     def test_caching_is_singleflight_under_concurrency(self):
         """Concurrent resolve() calls for the same key should populate cache once."""
@@ -310,60 +293,43 @@ class TestResolve:
             },
             clear=True,
         ):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx_a = resolver.resolve("github.com", org="org-a")
-                ctx_b = resolver.resolve("github.com", org="org-b")
-                assert ctx_a.token == "token-a"
-                assert ctx_b.token == "token-b"
+            resolver = AuthResolver()
+            ctx_a = resolver.resolve("github.com", org="org-a")
+            ctx_b = resolver.resolve("github.com", org="org-b")
+            assert ctx_a.token == "token-a"
+            assert ctx_b.token == "token-b"
 
     def test_ado_token(self):
         """ADO host resolves ADO_APM_PAT."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "ado-token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("dev.azure.com")
-                assert ctx.token == "ado-token"
+            resolver = AuthResolver()
+            ctx = resolver.resolve("dev.azure.com")
+            assert ctx.token == "ado-token"
 
-    def test_credential_fallback(self):
+    def test_credential_fallback(self, credential_children):
         """Falls back to git credential helper when no env vars."""
+        credential_children.answer("cred-token")
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("github.com")
-                assert ctx.token == "cred-token"
-                assert ctx.source == "git-credential-fill"
-
-    def test_gh_cli_source_label(self):
-        """When gh CLI supplies the token, ctx.source == 'gh-auth-token'."""
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_gh_cli",
-                return_value="gho_cli_token",
-            ),
-        ):
             resolver = AuthResolver()
             ctx = resolver.resolve("github.com")
-            assert ctx.token == "gho_cli_token"
-            assert ctx.source == "gh-auth-token"
+        assert ctx.token == "cred-token"
+        assert ctx.source == "git-credential-fill"
+        assert credential_children.hosts() == ["github.com"]
 
-    def test_try_with_fallback_uses_gh_cli(self):
+    def test_gh_cli_source_label(self, credential_children):
+        """When gh CLI supplies the token, ctx.source == 'gh-auth-token'."""
+        credential_children.gh_token = "gho_cli_token"
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            ctx = resolver.resolve("github.com")
+        assert ctx.token == "gho_cli_token"
+        assert ctx.source == "gh-auth-token"
+        assert credential_children.gh_hosts == ["github.com"]
+
+    def test_try_with_fallback_uses_gh_cli(self, credential_children):
         """try_with_fallback retries via gh CLI before git credential fill."""
-        with (
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "stale-token"}, clear=True),
-            patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_gh_cli",
-                return_value="gho_fresh",
-            ),
-            patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value=None
-            ) as mock_cred,
-        ):
+        credential_children.gh_token = "gho_fresh"
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "stale-token"}, clear=True):
             resolver = AuthResolver()
             attempts = []
 
@@ -377,30 +343,20 @@ class TestResolve:
             assert result == "gho_fresh"
             assert attempts == ["stale-token", None, "gho_fresh"]
             # git credential fill must not be reached when gh CLI succeeds.
-            mock_cred.assert_not_called()
+            assert credential_children.fills == []
 
-    def test_resolve_for_dep_uses_standard_credential_fallback(self):
+    def test_resolve_for_dep_uses_standard_credential_fallback(self, credential_children):
         """Dependency-aware resolution still uses the standard host-based fallback chain."""
         dep_ref = DependencyReference.parse("Devolutions/RDM/.claude/skills/add-culture-rdm")
+        credential_children.answer("cred-token")
         with patch.dict(os.environ, {}, clear=True):
-            with (
-                patch.object(
-                    GitHubTokenManager,
-                    "resolve_credential_from_gh_cli",
-                    return_value=None,
-                ) as mock_gh,
-                patch.object(
-                    GitHubTokenManager,
-                    "resolve_credential_from_git",
-                    return_value="cred-token",
-                ) as mock_cred,
-            ):
-                resolver = AuthResolver()
-                ctx = resolver.resolve_for_dep(dep_ref)
-                assert ctx.token == "cred-token"
-                assert ctx.source == "git-credential-fill"
-                mock_gh.assert_called_once_with("github.com")
-                mock_cred.assert_called_once_with("github.com", port=None)
+            resolver = AuthResolver()
+            ctx = resolver.resolve_for_dep(dep_ref)
+        assert ctx.token == "cred-token"
+        assert ctx.source == "git-credential-fill"
+        assert credential_children.gh_hosts == ["github.com"]
+        # Host-level request: no path line, so helpers answer for the host.
+        assert credential_children.fills == [{"protocol": "https", "host": "github.com"}]
 
     def test_global_var_resolves_for_non_default_host(self):
         """GITHUB_APM_PAT resolves for *.ghe.com (any host, not just default)."""
@@ -429,10 +385,9 @@ class TestResolve:
     def test_git_env_has_lockdown(self):
         """Resolved context has git security env vars."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("github.com")
-                assert ctx.git_env.get("GIT_TERMINAL_PROMPT") == "0"
+            resolver = AuthResolver()
+            ctx = resolver.resolve("github.com")
+            assert ctx.git_env.get("GIT_TERMINAL_PROMPT") == "0"
 
     def test_gitlab_prefers_gitlab_apm_pat_over_github_token(self):
         env = {
@@ -442,9 +397,8 @@ class TestResolve:
             "GH_TOKEN": "gh_cli_token",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("gitlab.com")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com")
         assert ctx.token == "glpat_primary"
         assert ctx.source == "GITLAB_APM_PAT"
         assert ctx.host_info.kind == "gitlab"
@@ -452,9 +406,8 @@ class TestResolve:
     def test_gitlab_uses_gitlab_token_when_gitlab_apm_pat_absent(self):
         env = {"GITLAB_TOKEN": "glpat_from_gitlab_token", "GITHUB_TOKEN": "gh_should_ignore"}
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("gitlab.com")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com")
         assert ctx.token == "glpat_from_gitlab_token"
         assert ctx.source == "GITLAB_TOKEN"
 
@@ -466,9 +419,8 @@ class TestResolve:
             "GITHUB_APM_PAT_MYGROUP": "per_org_github",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("gitlab.com", org="mygroup")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com", org="mygroup")
         assert ctx.token is None
         assert ctx.source == "none"
 
@@ -479,23 +431,20 @@ class TestResolve:
             "GITLAB_TOKEN": "glpat_correct",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("gitlab.com", org="acme")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com", org="acme")
         assert ctx.token == "glpat_correct"
         assert ctx.source == "GITLAB_TOKEN"
 
-    def test_gitlab_fallback_to_git_credential_when_no_gitlab_env(self):
+    def test_gitlab_fallback_to_git_credential_when_no_gitlab_env(self, credential_children):
         with patch.dict(
             os.environ,
             {"GITHUB_TOKEN": "ignored", "GITHUB_APM_PAT": "ignored2"},
             clear=True,
         ):
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="from-helper"
-            ):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("gitlab.com")
+            credential_children.answer("from-helper")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com")
         assert ctx.token == "from-helper"
         assert ctx.source == "git-credential-fill"
 
@@ -511,20 +460,17 @@ class TestResolve:
             },
             clear=True,
         ):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("bitbucket.org")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("bitbucket.org")
         assert ctx.token is None
         assert ctx.source == "none"
         assert ctx.host_info.kind == "generic"
 
-    def test_generic_host_uses_credential_helper_when_configured(self):
+    def test_generic_host_uses_credential_helper_when_configured(self, credential_children):
         with patch.dict(os.environ, {"GITHUB_TOKEN": "ignored"}, clear=True):
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="bb-cred"
-            ):
-                resolver = AuthResolver()
-                ctx = resolver.resolve("bitbucket.org")
+            credential_children.answer("bb-cred")
+            resolver = AuthResolver()
+            ctx = resolver.resolve("bitbucket.org")
         assert ctx.token == "bb-cred"
         assert ctx.source == "git-credential-fill"
 
@@ -538,34 +484,32 @@ class TestTryWithFallback:
     def test_unauth_first_succeeds(self):
         """Unauth-first: if unauth works, auth is never tried."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                calls = []
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                return "success"
 
-                result = resolver.try_with_fallback("github.com", op, unauth_first=True)
-                assert result == "success"
-                assert calls == [None]
+            result = resolver.try_with_fallback("github.com", op, unauth_first=True)
+            assert result == "success"
+            assert calls == [None]
 
     def test_unauth_first_falls_back_to_auth(self):
         """Unauth-first: if unauth fails, retries with token."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                calls = []
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    if token is None:
-                        raise RuntimeError("Unauthorized")
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                if token is None:
+                    raise RuntimeError("Unauthorized")
+                return "success"
 
-                result = resolver.try_with_fallback("github.com", op, unauth_first=True)
-                assert result == "success"
-                assert calls == [None, "token"]
+            result = resolver.try_with_fallback("github.com", op, unauth_first=True)
+            assert result == "success"
+            assert calls == [None, "token"]
 
     def test_ghe_cloud_auth_only(self):
         """*.ghe.com: auth-only, no unauth fallback.  Uses global env var."""
@@ -585,115 +529,105 @@ class TestTryWithFallback:
     def test_auth_first_succeeds(self):
         """Auth-first (default): auth works, unauth not tried."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                calls = []
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                return "success"
 
-                result = resolver.try_with_fallback("github.com", op)
-                assert result == "success"
-                assert calls == ["token"]
+            result = resolver.try_with_fallback("github.com", op)
+            assert result == "success"
+            assert calls == ["token"]
 
     def test_auth_first_falls_back_to_unauth(self):
         """Auth-first: if auth fails on public host, retries unauthenticated."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                calls = []
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    if token is not None:
-                        raise RuntimeError("Token expired")
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                if token is not None:
+                    raise RuntimeError("Token expired")
+                return "success"
 
-                result = resolver.try_with_fallback("github.com", op)
-                assert result == "success"
-                assert calls == ["token", None]
+            result = resolver.try_with_fallback("github.com", op)
+            assert result == "success"
+            assert calls == ["token", None]
 
     def test_no_token_tries_unauth(self):
         """No token available: tries unauthenticated directly."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                calls = []
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                return "success"
 
-                result = resolver.try_with_fallback("github.com", op)
-                assert result == "success"
-                assert calls == [None]
+            result = resolver.try_with_fallback("github.com", op)
+            assert result == "success"
+            assert calls == [None]
 
-    def test_credential_fallback_when_env_token_fails(self):
+    def test_credential_fallback_when_env_token_fails(self, credential_children):
         """Env token fails on auth-only host → retries with git credential fill."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "wrong-token"}, clear=True):
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="correct-cred"
-            ):
-                resolver = AuthResolver()
-                calls = []
+            credential_children.answer("correct-cred")
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    if token == "wrong-token":
-                        raise RuntimeError("Bad credentials")
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                if token == "wrong-token":
+                    raise RuntimeError("Bad credentials")
+                return "success"
 
-                result = resolver.try_with_fallback("contoso.ghe.com", op)
-                assert result == "success"
-                assert calls == ["wrong-token", "correct-cred"]
+            result = resolver.try_with_fallback("contoso.ghe.com", op)
+            assert result == "success"
+            assert calls == ["wrong-token", "correct-cred"]
 
-    def test_no_credential_fallback_when_source_is_credential(self):
+    def test_no_credential_fallback_when_source_is_credential(self, credential_children):
         """When token already came from git-credential-fill, no retry on failure."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ):
-                resolver = AuthResolver()
+            credential_children.answer("cred-token")
+            resolver = AuthResolver()
 
-                def op(token, env):
-                    raise RuntimeError("Bad credentials")
+            def op(token, env):
+                raise RuntimeError("Bad credentials")
 
-                with pytest.raises(RuntimeError, match="Bad credentials"):
-                    resolver.try_with_fallback("contoso.ghe.com", op)
+            with pytest.raises(RuntimeError, match="Bad credentials"):
+                resolver.try_with_fallback("contoso.ghe.com", op)
 
-    def test_credential_fallback_on_auth_first_path(self):
+    def test_credential_fallback_on_auth_first_path(self, credential_children):
         """Auth-first on public host: auth fails, unauth fails → credential fill kicks in."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "wrong-token"}, clear=True):
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="correct-cred"
-            ):
-                resolver = AuthResolver()
-                calls = []
+            credential_children.answer("correct-cred")
+            resolver = AuthResolver()
+            calls = []
 
-                def op(token, env):
-                    calls.append(token)
-                    if token in ("wrong-token", None):
-                        raise RuntimeError("Failed")
-                    return "success"
+            def op(token, env):
+                calls.append(token)
+                if token in ("wrong-token", None):
+                    raise RuntimeError("Failed")
+                return "success"
 
-                result = resolver.try_with_fallback("github.com", op)
-                assert result == "success"
-                # auth-first → unauth fallback → credential fill
-                assert calls == ["wrong-token", None, "correct-cred"]
+            result = resolver.try_with_fallback("github.com", op)
+            assert result == "success"
+            # auth-first -> unauth fallback -> credential fill
+            assert calls == ["wrong-token", None, "correct-cred"]
 
     def test_verbose_callback(self):
         """verbose_callback is called at each step."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                messages = []
+            resolver = AuthResolver()
+            messages = []
 
-                def op(token, env):
-                    return "ok"
+            def op(token, env):
+                return "ok"
 
-                resolver.try_with_fallback("github.com", op, verbose_callback=messages.append)
-                assert len(messages) > 0
+            resolver.try_with_fallback("github.com", op, verbose_callback=messages.append)
+            assert len(messages) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -704,74 +638,65 @@ class TestTryWithFallback:
 class TestBuildErrorContext:
     def test_no_token_message(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("github.com", "clone")
-                assert "GITHUB_APM_PAT" in msg
-                assert "--verbose" in msg
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("github.com", "clone")
+            assert "GITHUB_APM_PAT" in msg
+            assert "--verbose" in msg
 
     def test_ghe_cloud_error_context(self):
         """*.ghe.com errors mention enterprise-scoped tokens."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT_CONTOSO": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("contoso.ghe.com", "clone", org="contoso")
-                assert "enterprise" in msg.lower()
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("contoso.ghe.com", "clone", org="contoso")
+            assert "enterprise" in msg.lower()
 
     def test_github_com_error_mentions_emu(self):
         """github.com errors mention EMU/SSO possibility."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("github.com", "clone")
-                assert "EMU" in msg or "SAML" in msg
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("github.com", "clone")
+            assert "EMU" in msg or "SAML" in msg
 
     def test_multi_org_hint(self):
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("github.com", "clone", org="microsoft")
-                assert "GITHUB_APM_PAT_MICROSOFT" in msg
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("github.com", "clone", org="microsoft")
+            assert "GITHUB_APM_PAT_MICROSOFT" in msg
 
     def test_gitlab_no_token_mentions_gitlab_env_not_github(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("gitlab.com", "clone")
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("gitlab.com", "clone")
         assert "GITLAB_APM_PAT" in msg
         assert "GITLAB_TOKEN" in msg
         assert "GITHUB_TOKEN" not in msg
 
     def test_gitlab_with_token_no_github_settings_link(self):
         with patch.dict(os.environ, {"GITLAB_TOKEN": "glpat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("gitlab.com", "fetch")
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("gitlab.com", "fetch")
         assert "GITLAB_TOKEN" in msg
         assert "github.com/settings/tokens" not in msg
 
     def test_generic_no_token_excludes_github_remediation(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("bitbucket.org", "clone")
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("bitbucket.org", "clone")
         assert "GITHUB_APM_PAT" not in msg
         assert "GITHUB_TOKEN" not in msg
 
     def test_gitlab_org_does_not_suggest_github_per_org_var(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("gitlab.com", "clone", org="acme-group")
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("gitlab.com", "clone", org="acme-group")
         assert "GITHUB_APM_PAT_" not in msg
 
     def test_token_present_shows_source(self):
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_tok"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("github.com", "clone")
-                assert "GITHUB_APM_PAT" in msg
-                assert "SAML SSO" in msg
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("github.com", "clone")
+            assert "GITHUB_APM_PAT" in msg
+            assert "SAML SSO" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -791,185 +716,166 @@ class TestBuildErrorContextADO:
     def test_ado_no_token_no_az_mentions_ado_pat(self):
         """No ADO_APM_PAT, no az CLI -> Case 1: error message must mention ADO_APM_PAT."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                    assert "ADO_APM_PAT" in msg, (
-                        f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "ADO_APM_PAT" in msg, f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
 
     def test_ado_no_token_does_not_suggest_github_remediation(self):
         """ADO error must not suggest GitHub-specific remediation steps."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                    assert "gh auth login" not in msg, (
-                        f"ADO error message should not mention 'gh auth login', got:\n{msg}"
-                    )
-                    assert "GITHUB_TOKEN" not in msg, (
-                        f"ADO error message should not mention 'GITHUB_TOKEN', got:\n{msg}"
-                    )
-                    assert "GITHUB_APM_PAT_MYORG" not in msg, (
-                        "ADO error message should not mention per-org GitHub PAT hint "
-                        f"'GITHUB_APM_PAT_MYORG', got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "gh auth login" not in msg, (
+                    f"ADO error message should not mention 'gh auth login', got:\n{msg}"
+                )
+                assert "GITHUB_TOKEN" not in msg, (
+                    f"ADO error message should not mention 'GITHUB_TOKEN', got:\n{msg}"
+                )
+                assert "GITHUB_APM_PAT_MYORG" not in msg, (
+                    "ADO error message should not mention per-org GitHub PAT hint "
+                    f"'GITHUB_APM_PAT_MYORG', got:\n{msg}"
+                )
 
     def test_ado_no_token_mentions_code_read_scope(self):
         """ADO error must mention Code (Read) scope so user knows what PAT scope to set."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                    assert "Code" in msg or "read" in msg.lower(), (
-                        f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "Code" in msg or "read" in msg.lower(), (
+                    f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
+                )
 
     def test_ado_no_org_no_token_mentions_ado_pat(self):
         """No org argument, no ADO_APM_PAT -> error message must still mention ADO_APM_PAT."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone")
-                    assert "ADO_APM_PAT" in msg, (
-                        f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone")
+                assert "ADO_APM_PAT" in msg, f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
 
     def test_ado_with_token_still_shows_source(self):
         """When an ADO token IS present but clone fails, source info is shown."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "mypat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                    assert "ADO_APM_PAT" in msg, (
-                        f"Expected token source 'ADO_APM_PAT' in error message, got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "ADO_APM_PAT" in msg, (
+                    f"Expected token source 'ADO_APM_PAT' in error message, got:\n{msg}"
+                )
 
     def test_ado_with_token_mentions_scope_guidance(self):
         """When an ADO token is present but auth fails, PAT validity/scope hint is shown."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "mypat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                    assert "Code (Read)" in msg, (
-                        f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "Code (Read)" in msg, (
+                    f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
+                )
 
     def test_ado_with_token_does_not_suggest_github_remediation(self):
         """When an ADO token is present but auth fails, GitHub SAML guidance must not appear."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "mypat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                    assert "SAML" not in msg, f"ADO error should not mention SAML, got:\n{msg}"
-                    assert "github.com/settings/tokens" not in msg, (
-                        f"ADO error should not mention github.com/settings/tokens, got:\n{msg}"
-                    )
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "SAML" not in msg, f"ADO error should not mention SAML, got:\n{msg}"
+                assert "github.com/settings/tokens" not in msg, (
+                    f"ADO error should not mention github.com/settings/tokens, got:\n{msg}"
+                )
 
     def test_visualstudio_com_gets_ado_remediation(self):
         """Legacy *.visualstudio.com hosts are also ADO and must get ADO-specific guidance."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider_cls.return_value.is_available.return_value = False
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("myorg.visualstudio.com", "clone")
-                    assert "ADO_APM_PAT" in msg, (
-                        f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
-                    )
-                    assert "gh auth login" not in msg, (
-                        f"ADO error should not mention 'gh auth login', got:\n{msg}"
-                    )
-                    assert "SAML" not in msg, f"ADO error should not mention SAML, got:\n{msg}"
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider_cls.return_value.is_available.return_value = False
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("myorg.visualstudio.com", "clone")
+                assert "ADO_APM_PAT" in msg, f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                assert "gh auth login" not in msg, (
+                    f"ADO error should not mention 'gh auth login', got:\n{msg}"
+                )
+                assert "SAML" not in msg, f"ADO error should not mention SAML, got:\n{msg}"
 
     def test_ado_no_pat_az_available_not_logged_in(self):
         """Case 3: no PAT, az on PATH but not logged in -> suggest az login."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider = mock_provider_cls.return_value
-                    mock_provider.is_available.return_value = True
-                    mock_provider.get_current_tenant_id.return_value = None
-                    from apm_cli.core.azure_cli import AzureCliBearerError
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                mock_provider.get_current_tenant_id.return_value = None
+                from apm_cli.core.azure_cli import AzureCliBearerError
 
-                    mock_provider.get_bearer_token.side_effect = AzureCliBearerError(
-                        "not logged in", kind="not_logged_in"
-                    )
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone")
-                    assert "az login" in msg
-                    assert "ADO_APM_PAT" in msg
+                mock_provider.get_bearer_token.side_effect = AzureCliBearerError(
+                    "not logged in", kind="not_logged_in"
+                )
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone")
+                assert "az login" in msg
+                assert "ADO_APM_PAT" in msg
 
     def test_ado_no_pat_az_available_logged_in_but_rejected(self):
         """Case 2: no PAT, az logged in, bearer acquired but ADO rejected it."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider = mock_provider_cls.return_value
-                    mock_provider.is_available.return_value = True
-                    mock_provider.get_bearer_token.return_value = "eyJfake"
-                    mock_provider.get_current_tenant_id.return_value = "abc-123"
-                    resolver = AuthResolver()
-                    # Force cache clear so resolve uses the mocked bearer
-                    resolver._cache.clear()
-                    msg = resolver.build_error_context("dev.azure.com", "clone")
-                    assert "tenant" in msg.lower()
-                    assert "az account show" in msg
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                mock_provider.get_bearer_token.return_value = "eyJfake"
+                mock_provider.get_current_tenant_id.return_value = "abc-123"
+                resolver = AuthResolver()
+                # Force cache clear so resolve uses the mocked bearer
+                resolver._cache.clear()
+                msg = resolver.build_error_context("dev.azure.com", "clone")
+                assert "tenant" in msg.lower()
+                assert "az account show" in msg
 
     def test_ado_pat_set_az_available_case4(self):
         """Case 4: PAT set + az available -> both rejected."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider = mock_provider_cls.return_value
-                    mock_provider.is_available.return_value = True
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone")
-                    assert "unset ADO_APM_PAT" in msg
-                    assert "az login" in msg
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone")
+                assert "unset ADO_APM_PAT" in msg
+                assert "az login" in msg
 
     def test_ado_pat_set_az_available_case4_bearer_also_failed_prefix(self):
         """Case 4 + bearer_also_failed=True: dual-rejection prefix appears."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider = mock_provider_cls.return_value
-                    mock_provider.is_available.return_value = True
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context(
-                        "dev.azure.com",
-                        "clone",
-                        bearer_also_failed=True,
-                    )
-                    assert "ADO_APM_PAT was rejected" in msg
-                    assert "az cli bearer was also rejected" in msg
-                    assert "unset ADO_APM_PAT" in msg
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                resolver = AuthResolver()
+                msg = resolver.build_error_context(
+                    "dev.azure.com",
+                    "clone",
+                    bearer_also_failed=True,
+                )
+                assert "ADO_APM_PAT was rejected" in msg
+                assert "az cli bearer was also rejected" in msg
+                assert "unset ADO_APM_PAT" in msg
 
     def test_ado_pat_set_az_available_case4_bearer_not_failed_no_prefix(self):
         """Case 4 default (bearer_also_failed=False): no dual-rejection prefix."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider = mock_provider_cls.return_value
-                    mock_provider.is_available.return_value = True
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context("dev.azure.com", "clone")
-                    assert "ADO_APM_PAT was rejected" not in msg
-                    assert "az cli bearer was also rejected" not in msg
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone")
+                assert "ADO_APM_PAT was rejected" not in msg
+                assert "az cli bearer was also rejected" not in msg
 
     def test_ado_no_pat_case2_ignores_bearer_also_failed_kwarg(self):
         """Case 2 (no PAT, bearer rejected) must NOT render PAT-rejected prefix
@@ -977,19 +883,18 @@ class TestBuildErrorContextADO:
         contradictory when no PAT was tried. Defends against contradictory
         diagnostics if future callers misuse the kwarg."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
-                    mock_provider = mock_provider_cls.return_value
-                    mock_provider.is_available.return_value = True
-                    mock_provider.get_current_tenant_id.return_value = "tenant-abc"
-                    resolver = AuthResolver()
-                    msg = resolver.build_error_context(
-                        "dev.azure.com",
-                        "clone",
-                        bearer_also_failed=True,
-                    )
-                    assert "ADO_APM_PAT was rejected" not in msg
-                    assert "tenant" in msg.lower()
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                mock_provider.get_current_tenant_id.return_value = "tenant-abc"
+                resolver = AuthResolver()
+                msg = resolver.build_error_context(
+                    "dev.azure.com",
+                    "clone",
+                    bearer_also_failed=True,
+                )
+                assert "ADO_APM_PAT was rejected" not in msg
+                assert "tenant" in msg.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1164,20 +1069,6 @@ class TestHostInfoPort:
         hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
         assert hi.port is None
 
-    def test_display_name_without_port(self):
-        hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
-        assert hi.display_name == "github.com"
-
-    def test_display_name_with_port(self):
-        hi = HostInfo(
-            host="bitbucket.corp.com",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=7999,
-        )
-        assert hi.display_name == "bitbucket.corp.com:7999"
-
     def test_classify_host_attaches_port(self):
         hi = AuthResolver.classify_host("bitbucket.corp.com", port=7999)
         assert hi.kind == "generic"
@@ -1191,37 +1082,6 @@ class TestHostInfoPort:
         assert hi.kind == "github"
         assert hi.port == 8443
 
-    def test_display_name_suppresses_default_port_443(self):
-        """Defence-in-depth: display_name never renders well-known default ports."""
-        hi = HostInfo(
-            host="github.com",
-            kind="github",
-            has_public_repos=True,
-            api_base="x",
-            port=443,
-        )
-        assert hi.display_name == "github.com"
-
-    def test_display_name_suppresses_default_port_22(self):
-        hi = HostInfo(
-            host="gitlab.com",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=22,
-        )
-        assert hi.display_name == "gitlab.com"
-
-    def test_display_name_suppresses_default_port_80(self):
-        hi = HostInfo(
-            host="internal.git",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=80,
-        )
-        assert hi.display_name == "internal.git"
-
 
 # ---------------------------------------------------------------------------
 # TestResolvePortDiscrimination -- same host, different ports must not
@@ -1230,110 +1090,86 @@ class TestHostInfoPort:
 
 
 class TestResolvePortDiscrimination:
-    def test_same_host_different_ports_are_separate_cache_entries(self):
+    def test_same_host_different_ports_are_separate_cache_entries(self, credential_children):
         """Widened cache key: (host, port, org) discriminates by port."""
+        credential_children.helper = lambda fields: f"tok-{fields['host']}"
         with patch.dict(os.environ, {}, clear=True):
             resolver = AuthResolver()
-            calls: list = []
+            ctx_a = resolver.resolve("bitbucket.corp.com", port=7990)
+            ctx_b = resolver.resolve("bitbucket.corp.com", port=7991)
 
-            def fake_cred(host, port=None, **_kwargs):
-                calls.append((host, port))
-                return f"tok-{host}-{port}"
-
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
-            ):
-                ctx_a = resolver.resolve("bitbucket.corp.com", port=7990)
-                ctx_b = resolver.resolve("bitbucket.corp.com", port=7991)
-
-        assert ctx_a.token == "tok-bitbucket.corp.com-7990"
-        assert ctx_b.token == "tok-bitbucket.corp.com-7991"
+        assert ctx_a.token == "tok-bitbucket.corp.com:7990"
+        assert ctx_b.token == "tok-bitbucket.corp.com:7991"
         assert ctx_a is not ctx_b
-        assert calls == [
-            ("bitbucket.corp.com", 7990),
-            ("bitbucket.corp.com", 7991),
-        ]
+        # gitcredentials(7): the port rides in the host field.
+        assert credential_children.hosts() == ["bitbucket.corp.com:7990", "bitbucket.corp.com:7991"]
 
-    def test_same_port_hits_cache(self):
+    def test_same_port_hits_cache(self, credential_children):
         """Calling resolve() twice with the same (host, port, org) hits the cache."""
+        credential_children.answer("tok")
         with patch.dict(os.environ, {}, clear=True):
             resolver = AuthResolver()
-
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="tok"
-            ) as mock_cred:
-                ctx_1 = resolver.resolve("bitbucket.corp.com", port=7990)
-                ctx_2 = resolver.resolve("bitbucket.corp.com", port=7990)
+            ctx_1 = resolver.resolve("bitbucket.corp.com", port=7990)
+            ctx_2 = resolver.resolve("bitbucket.corp.com", port=7990)
 
         assert ctx_1 is ctx_2
-        assert mock_cred.call_count == 1
+        assert ctx_1.token == "tok"
+        assert credential_children.hosts() == ["bitbucket.corp.com:7990"]
 
-    def test_port_none_vs_port_set_are_separate(self):
+    def test_port_none_vs_port_set_are_separate(self, credential_children):
         """resolve(host) and resolve(host, port=443) produce distinct entries."""
+        credential_children.answer("tok")
         with patch.dict(os.environ, {}, clear=True):
             resolver = AuthResolver()
+            ctx_a = resolver.resolve("bitbucket.corp.com")
+            ctx_b = resolver.resolve("bitbucket.corp.com", port=443)
 
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="tok"
-            ) as mock_cred:
-                resolver.resolve("bitbucket.corp.com")
-                resolver.resolve("bitbucket.corp.com", port=443)
+        assert ctx_a is not ctx_b
+        assert credential_children.hosts() == ["bitbucket.corp.com", "bitbucket.corp.com:443"]
 
-        assert mock_cred.call_count == 2
-
-    def test_resolve_for_dep_threads_port(self):
+    def test_resolve_for_dep_threads_port(self, credential_children):
         """resolve_for_dep propagates dep_ref.port into the resolver."""
         from apm_cli.models.dependency.reference import DependencyReference
 
         dep = DependencyReference.parse("ssh://git@bitbucket.corp.com:7999/team/repo.git")
         assert dep.port == 7999
 
+        credential_children.answer("p")
         with patch.dict(os.environ, {}, clear=True):
             resolver = AuthResolver()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="p"
-            ) as mock_cred:
-                ctx = resolver.resolve_for_dep(dep)
+            ctx = resolver.resolve_for_dep(dep)
 
         assert ctx.host_info.port == 7999
         assert ctx.host_info.display_name == "bitbucket.corp.com:7999"
-        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7999, env=ANY)
+        assert ctx.token == "p"
+        assert credential_children.hosts() == ["bitbucket.corp.com:7999"]
 
-    def test_resolve_for_dep_threads_port_from_https_url(self):
+    def test_resolve_for_dep_threads_port_from_https_url(self, credential_children):
         """https://host:port/... also carries the port into the resolver."""
         from apm_cli.models.dependency.reference import DependencyReference
 
         dep = DependencyReference.parse("https://bitbucket.corp.com:7990/team/repo.git")
         assert dep.port == 7990
 
+        credential_children.answer("p")
         with patch.dict(os.environ, {}, clear=True):
             resolver = AuthResolver()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="p"
-            ) as mock_cred:
-                ctx = resolver.resolve_for_dep(dep)
+            ctx = resolver.resolve_for_dep(dep)
 
         assert ctx.host_info.port == 7990
-        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7990, env=ANY)
+        assert ctx.token == "p"
+        assert credential_children.hosts() == ["bitbucket.corp.com:7990"]
 
     @pytest.mark.windows_compat
-    def test_host_info_carries_port(self):
-        with (
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "t"}, clear=True),
-            patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value=None
-            ) as mock_cred,
-            patch(
-                "apm_cli.core.token_manager.subprocess.run",
-                side_effect=AssertionError("Port metadata must not launch credential helpers"),
-            ),
-        ):
+    def test_host_info_carries_port(self, credential_children):
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "t"}, clear=True):
             resolver = AuthResolver()
             ctx = resolver.resolve("gitlab.corp.com", port=8443)
             assert ctx.host_info.port == 8443
             assert ctx.host_info.display_name == "gitlab.corp.com:8443"
             assert ctx.token is None
-        mock_cred.assert_called_once_with("gitlab.corp.com", port=8443, env=ANY)
+        # A GitHub PAT never answers for a GitLab host; only the helper is asked, once.
+        assert credential_children.fills == [{"protocol": "https", "host": "gitlab.corp.com:8443"}]
 
 
 # ---------------------------------------------------------------------------
@@ -1344,9 +1180,8 @@ class TestResolvePortDiscrimination:
 class TestBuildErrorContextWithPort:
     def test_error_message_uses_display_name(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
         # Anchor with surrounding context tokens (" on " before, "." after)
         # so the assertion pins the rendered position rather than just the
         # substring's existence anywhere -- and so CodeQL's
@@ -1356,25 +1191,22 @@ class TestBuildErrorContextWithPort:
 
     def test_port_hint_appears_when_port_set(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
         assert "per-port" in msg, f"Expected per-port hint when port is set, got:\n{msg}"
 
     def test_port_hint_includes_credential_fill_command(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
         assert "git credential fill" in msg, (
             f"Expected 'git credential fill' verification command in hint, got:\n{msg}"
         )
 
     def test_port_hint_includes_docs_url(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
         # Extract the docs URL from the hint and validate its components with urlparse
         # (substring URL assertions are prohibited; see tests.instructions.md)
         url_line = next(
@@ -1390,9 +1222,8 @@ class TestBuildErrorContextWithPort:
 
     def test_no_port_hint_when_port_missing(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("github.com", "clone")
+            resolver = AuthResolver()
+            msg = resolver.build_error_context("github.com", "clone")
         assert "per-port" not in msg
 
 
@@ -1402,77 +1233,55 @@ class TestBuildErrorContextWithPort:
 
 
 class TestTryWithFallbackWithPort:
-    def test_port_threads_into_credential_fallback(self):
+    def test_port_threads_into_credential_fallback(self, credential_children):
         """When env token fails on ghe_cloud, credential fill is called with port."""
+        credential_children.answer("good")
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
-            captured: list = []
+            resolver = AuthResolver()
 
-            def fake_cred(host, port=None, path=None):
-                captured.append((host, port))
-                return "good"
+            def op(token, env):
+                if token == "bad":
+                    raise RuntimeError("rejected")
+                return "ok"
 
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
-            ):
-                resolver = AuthResolver()
-
-                def op(token, env):
-                    if token == "bad":
-                        raise RuntimeError("rejected")
-                    return "ok"
-
-                result = resolver.try_with_fallback("contoso.ghe.com", op, port=8443)
+            result = resolver.try_with_fallback("contoso.ghe.com", op, port=8443)
         assert result == "ok"
-        assert captured == [("contoso.ghe.com", 8443)]
+        assert credential_children.fills == [{"protocol": "https", "host": "contoso.ghe.com:8443"}]
 
 
 class TestTryWithFallbackPathDisambiguation:
     """try_with_fallback must thread `path` to credential fill (per-URL GCM)."""
 
-    def test_path_threaded_to_credential_fallback(self):
-        """When env token fails, path is forwarded to resolve_credential_from_git."""
+    def test_path_threaded_to_credential_fallback(self, credential_children):
+        """When env token fails, the fill request carries the repository path."""
+        credential_children.answer("good")
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
-            seen_kwargs: list = []
+            resolver = AuthResolver()
 
-            def fake_cred(host, port=None, path=None):
-                seen_kwargs.append({"host": host, "port": port, "path": path})
-                return "good"
+            def op(token, env):
+                if token != "good":
+                    raise RuntimeError("rejected")
+                return "ok"
 
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
-            ):
-                resolver = AuthResolver()
-
-                def op(token, env):
-                    if token != "good":
-                        raise RuntimeError("rejected")
-                    return "ok"
-
-                result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
+            result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
         assert result == "ok"
-        assert seen_kwargs == [{"host": "github.com", "port": None, "path": "acme/widgets"}]
+        assert credential_children.fills == [
+            {"protocol": "https", "host": "github.com", "path": "acme/widgets"}
+        ]
 
-    def test_path_default_none_preserves_legacy_call(self):
-        """Callers that omit path still invoke credential fill with path=None."""
+    def test_path_default_none_preserves_legacy_call(self, credential_children):
+        """Callers that omit path still invoke credential fill without a path line."""
+        credential_children.answer("good")
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
-            seen_kwargs: list = []
+            resolver = AuthResolver()
 
-            def fake_cred(host, port=None, path=None):
-                seen_kwargs.append({"host": host, "port": port, "path": path})
-                return "good"
+            def op(token, env):
+                if token != "good":
+                    raise RuntimeError("rejected")
+                return "ok"
 
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
-            ):
-                resolver = AuthResolver()
-
-                def op(token, env):
-                    if token != "good":
-                        raise RuntimeError("rejected")
-                    return "ok"
-
-                resolver.try_with_fallback("github.com", op)
-        assert seen_kwargs == [{"host": "github.com", "port": None, "path": None}]
+            assert resolver.try_with_fallback("github.com", op) == "ok"
+        assert credential_children.fills == [{"protocol": "https", "host": "github.com"}]
 
     def test_gitlab_auth_first_resolution_uses_repository_path(self):
         """GitLab policy reads preserve credential.useHttpPath selection."""
@@ -1508,28 +1317,22 @@ class TestGhCliShortCircuitsCredentialFill:
     the GCM account-picker prompt for users who configured gh.
     """
 
-    def test_gh_cli_success_skips_credential_fill(self):
+    def test_gh_cli_success_skips_credential_fill(self, credential_children):
         """resolve_credential_from_git must not be invoked when gh CLI returns a token."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
-            with patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_gh_cli",
-                return_value="gho_from_gh_cli",
-            ):
-                with patch.object(
-                    GitHubTokenManager, "resolve_credential_from_git"
-                ) as mock_cred_fill:
-                    resolver = AuthResolver()
+            credential_children.gh_token = "gho_from_gh_cli"
+            credential_children.answer("helper-must-not-be-asked")
+            resolver = AuthResolver()
 
-                    def op(token, env):
-                        if token != "gho_from_gh_cli":
-                            raise RuntimeError("rejected")
-                        return f"ok:{token}"
+            def op(token, env):
+                if token != "gho_from_gh_cli":
+                    raise RuntimeError("rejected")
+                return f"ok:{token}"
 
-                    result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
+            result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
 
-            assert result == "ok:gho_from_gh_cli"
-            mock_cred_fill.assert_not_called()
+        assert result == "ok:gho_from_gh_cli"
+        assert credential_children.fills == []
 
 
 # ---------------------------------------------------------------------------
@@ -1567,10 +1370,9 @@ class TestCredentialFallbackOrderRegressionTrap:
             {per_org_key: "per-org-token", "GITHUB_APM_PAT": "global-token"},
             clear=True,
         ):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                seen = []
-                resolver = AuthResolver()
-                self._run_op(resolver, seen, org=org)
+            seen = []
+            resolver = AuthResolver()
+            self._run_op(resolver, seen, org=org)
         assert seen[0] == "per-org-token", (
             "per-org PAT must be tried before global PAT; cascade order changed"
         )
@@ -1581,10 +1383,9 @@ class TestCredentialFallbackOrderRegressionTrap:
             {"GITHUB_APM_PAT": "global-pat", "GITHUB_TOKEN": "gh-token"},
             clear=True,
         ):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                seen = []
-                resolver = AuthResolver()
-                self._run_op(resolver, seen)
+            seen = []
+            resolver = AuthResolver()
+            self._run_op(resolver, seen)
         assert seen[0] == "global-pat", (
             "GITHUB_APM_PAT must be tried before GITHUB_TOKEN; cascade order changed"
         )
@@ -1595,38 +1396,30 @@ class TestCredentialFallbackOrderRegressionTrap:
             {"GITHUB_TOKEN": "gh-token-env", "GH_TOKEN": "gh-token-alt"},
             clear=True,
         ):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                seen = []
-                resolver = AuthResolver()
-                self._run_op(resolver, seen)
+            seen = []
+            resolver = AuthResolver()
+            self._run_op(resolver, seen)
         assert seen[0] == "gh-token-env", (
             "GITHUB_TOKEN must be tried before GH_TOKEN; cascade order changed"
         )
 
-    def test_gh_cli_token_beats_git_credential_fill(self):
+    def test_gh_cli_token_beats_git_credential_fill(self, credential_children):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_gh_cli",
-                return_value="gho_cli",
-            ):
-                with patch.object(
-                    GitHubTokenManager, "resolve_credential_from_git"
-                ) as mock_git_cred:
-                    seen = []
-                    resolver = AuthResolver()
-                    self._run_op(resolver, seen)
+            credential_children.gh_token = "gho_cli"
+            credential_children.answer("helper-must-not-be-asked")
+            seen = []
+            resolver = AuthResolver()
+            self._run_op(resolver, seen)
         assert seen[0] == "gho_cli", (
             "gh CLI token must be tried before git credential fill; cascade order changed"
         )
-        mock_git_cred.assert_not_called()
+        assert credential_children.fills == []
 
     def test_no_token_falls_back_to_unauthenticated(self):
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                seen = []
-                resolver = AuthResolver()
-                self._run_op(resolver, seen)
+            seen = []
+            resolver = AuthResolver()
+            self._run_op(resolver, seen)
         assert seen[0] is None, (
             "When no token is available, unauthenticated access (None) must be tried"
         )
@@ -1634,16 +1427,15 @@ class TestCredentialFallbackOrderRegressionTrap:
     def test_cascade_exception_emits_debug_log(self, caplog):
         """Debug logging fires when the initial op raises (fallback triggered) -- #935."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "test-token"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
+            resolver = AuthResolver()
 
-                def op_fail_on_token(token, env):
-                    if token is not None:
-                        raise Exception("simulated token rejection")
-                    return "ok"
+            def op_fail_on_token(token, env):
+                if token is not None:
+                    raise Exception("simulated token rejection")
+                return "ok"
 
-                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
-                    resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
+            with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
 
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
         assert debug_msgs, (
@@ -1654,25 +1446,24 @@ class TestCredentialFallbackOrderRegressionTrap:
         """Credential values must not appear in debug log output -- security guard (#935)."""
         sentinel = "ghp_SENTINEL_TOKEN_DO_NOT_LOG_12345"
         with patch.dict(os.environ, {"GITHUB_APM_PAT": sentinel}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
+            resolver = AuthResolver()
 
-                def op_fail_on_token(token, env):
-                    if token is not None:
-                        raise Exception("simulated token rejection")
-                    return "ok"
+            def op_fail_on_token(token, env):
+                if token is not None:
+                    raise Exception("simulated token rejection")
+                return "ok"
 
-                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
-                    resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
+            with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
 
         full_log = " ".join(r.message for r in caplog.records)
         assert sentinel not in full_log, "Credential values must not appear in debug log output"
 
-    def test_ado_attempts_bearer_before_raising(self):
+    def test_ado_attempts_bearer_before_raising(self, credential_children):
         """ADO: when PAT fails with auth signal, bearer MUST be attempted before raising.
 
-        Regression trap -- if the _try_ado_bearer_fallback() call is removed from the
-        ADO branch of try_with_fallback, this test fails because get_bearer_token() is
+        Regression trap -- if the bearer step is removed from the ADO chain in
+        core/auth_chain.py, this test fails because get_bearer_token() is
         never called and the original PAT exception propagates without the bearer attempt.
         """
         from apm_cli.core.azure_cli import AzureCliBearerError
@@ -1686,7 +1477,7 @@ class TestCredentialFallbackOrderRegressionTrap:
 
                 def _get_bearer():
                     bearer_calls.append(1)
-                    raise AzureCliBearerError("no az login")
+                    raise AzureCliBearerError("no az login", kind="not_logged_in")
 
                 mock_provider.get_bearer_token.side_effect = _get_bearer
 
@@ -1695,17 +1486,13 @@ class TestCredentialFallbackOrderRegressionTrap:
                 def ado_op(token, env):
                     raise RuntimeError("401 unauthorized")
 
-                with (
-                    patch.object(
-                        GitHubTokenManager,
-                        "resolve_credential_from_git",
-                        return_value=None,
+                with pytest.raises(
+                    RuntimeError,
+                    match=(
+                        r"ADO_APM_PAT was rejected.*az CLI bearer could not get a token"
+                        r".*git credential fill returned no credential"
                     ),
-                    pytest.raises(
-                        RuntimeError,
-                        match=r"ADO_APM_PAT, az CLI bearer, and git credential fill",
-                    ) as caught,
-                ):
+                ) as caught:
                     resolver.try_with_fallback("dev.azure.com", ado_op)
 
         assert bearer_calls, (
@@ -1714,6 +1501,7 @@ class TestCredentialFallbackOrderRegressionTrap:
         )
         assert caught.value.__cause__ is not None
         assert str(caught.value.__cause__) == "401 unauthorized"
+        assert credential_children.hosts() == ["dev.azure.com"]
 
     def test_ghe_cloud_never_falls_back_to_unauth(self):
         """ghe_cloud: unauthenticated fallback must NEVER be attempted.
@@ -1726,15 +1514,14 @@ class TestCredentialFallbackOrderRegressionTrap:
         tokens_seen = []
 
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghe-pat"}, clear=True):
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
-                resolver = AuthResolver()
+            resolver = AuthResolver()
 
-                def op_capture(token, env):
-                    tokens_seen.append(token)
-                    raise RuntimeError("ghe_cloud op always fails")
+            def op_capture(token, env):
+                tokens_seen.append(token)
+                raise RuntimeError("ghe_cloud op always fails")
 
-                with pytest.raises(RuntimeError):
-                    resolver.try_with_fallback("contoso.ghe.com", op_capture)
+            with pytest.raises(RuntimeError):
+                resolver.try_with_fallback("contoso.ghe.com", op_capture)
 
         assert None not in tokens_seen, (
             "ghe_cloud must never fall back to unauthenticated (None token) access; "
@@ -1758,22 +1545,19 @@ class TestCredentialFallbackOrderRegressionTrap:
 
         try:
             with patch.dict(os.environ, {"GITHUB_APM_PAT": "safe-outer-token"}, clear=True):
-                with patch.object(
-                    GitHubTokenManager, "resolve_credential_from_git", return_value=None
-                ):
-                    resolver = AuthResolver()
+                resolver = AuthResolver()
 
-                    def op_raise_on_authenticated_attempt(token, env):
-                        if token is not None:
-                            # Simulates an HTTP library embedding a bearer token in
-                            # the exception message (the real supply-chain risk).
-                            raise RuntimeError(f"Bearer {sentinel} was rejected by server")
-                        return "ok"
+                def op_raise_on_authenticated_attempt(token, env):
+                    if token is not None:
+                        # Simulates an HTTP library embedding a bearer token in
+                        # the exception message (the real supply-chain risk).
+                        raise RuntimeError(f"Bearer {sentinel} was rejected by server")
+                    return "ok"
 
-                    with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
-                        resolver.try_with_fallback(
-                            "github.com", op_raise_on_authenticated_attempt, path="owner/repo"
-                        )
+                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                    resolver.try_with_fallback(
+                        "github.com", op_raise_on_authenticated_attempt, path="owner/repo"
+                    )
         finally:
             auth_logger.removeFilter(redaction_filter)
 

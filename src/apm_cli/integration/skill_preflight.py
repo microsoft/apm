@@ -8,15 +8,22 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from apm_cli.install.deployed_paths import deployed_path_entry
-from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
+from apm_cli.core.remediation import SKILL_CONFLICT_UNMANAGED
+from apm_cli.install.deployed_paths import deployed_path_entry, refuse_symlinked_deploy
+from apm_cli.integration.base_integrator import (
+    BaseIntegrator,
+    recovery_directory,
+    untrusted_baseline_message,
+)
 from apm_cli.integration.skill_adoption import (
+    installing_commit,
     is_skill_dir_identical_to_source,
     skill_tree_baselines,
 )
 from apm_cli.integration.skill_support import skill_dir_has_content
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens, skill_subset_selects_all
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
+from apm_cli.utils.paths import relative_to
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -38,8 +45,9 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
     """Resolve the one source route consumed by deployment and preflight."""
     from apm_cli.integration.skill_integrator import SkillIntegrator, should_install_skill
     from apm_cli.models.apm_package import PackageType
+    from apm_cli.utils.realpath import resolve_path
 
-    root = package_info.install_path.resolve()
+    root = resolve_path(package_info.install_path)
     subskills = root / ".apm" / "skills"
 
     def local_children() -> dict[str, Path]:
@@ -86,13 +94,34 @@ def preflight_skill_selection(
         else skill_subset_filter_tokens(skill_subset)
     )
     available = frozenset(selection.children)
-    if not SkillIntegrator._skill_filter_misses_available(name_filter, available):
-        return True
     dependency = package_info.dependency_ref
+    package_key = (
+        dependency.get_unique_key() if dependency is not None else package_info.install_path.name
+    )
+    # #3204 holds per declaring edge: a merged union must not hide one
+    # parent's selection that matches nothing (#3735).
+    for edge in getattr(dependency, "selection_contributors", ()) or ():
+        edge_filter = skill_subset_filter_tokens(edge.skill_subset)
+        if SkillIntegrator._skill_filter_misses_available(
+            edge_filter, available, selects_all=skill_subset_selects_all(edge.skill_subset)
+        ):
+            SkillIntegrator._error_no_skill_filter_match(
+                available,
+                tuple(edge.skill_subset or ()),
+                package_key,
+                diagnostics=diagnostics,
+                logger=logger,
+                declared_by=edge.declared_by() if edge.parent_chain else None,
+            )
+            return False
+    if not SkillIntegrator._skill_filter_misses_available(
+        name_filter, available, selects_all=skill_subset_selects_all(skill_subset)
+    ):
+        return True
     SkillIntegrator._error_no_skill_filter_match(
         available,
         tuple(skill_subset or ()),
-        dependency.get_unique_key() if dependency is not None else package_info.install_path.name,
+        package_key,
         diagnostics=diagnostics,
         logger=logger,
     )
@@ -113,11 +142,15 @@ class SkillConflict:
     path: str
     targets: tuple[str, ...]
     untrusted: bool = False
+    directory: str | None = None
+    user_scope: bool = False
 
     def message(self) -> str:
         """Name the source, local file and affected targets in ordinary output."""
         if self.untrusted:
-            return printable_ascii_text(untrusted_baseline_message(self.path))
+            return printable_ascii_text(
+                untrusted_baseline_message(self.path, self.directory, user_scope=self.user_scope)
+            )
         return printable_ascii_text(
             f"Installation refused: skill '{self.skill}' from '{self.package}' "
             f"(source: {self.source}) conflicts with unmanaged file '{self.path}'. "
@@ -130,8 +163,7 @@ def format_skill_conflicts(conflicts: Sequence[SkillConflict]) -> str:
     return "\n".join(
         [
             *(conflict.message() for conflict in conflicts),
-            "Rename the local skill or use a valid existing skills: or targets: selection "
-            "in apm.yml that excludes these conflicts, then run 'apm install'.",
+            SKILL_CONFLICT_UNMANAGED.sentence(),
         ]
     )
 
@@ -199,6 +231,7 @@ def find_unmanaged_conflicts(
     dependency = package_info.dependency_ref
     owner = dependency.get_unique_key() if dependency else "."
     session = integrator._materialization_session
+    user_scope = integrator.install_user_scope()
     replay_owners = integrator._replay_owners
     adopted: dict[tuple[Path, Path], dict[Path, str]] = {}
     unchanged: dict[tuple[Path, Path], bool] = {}
@@ -248,9 +281,15 @@ def find_unmanaged_conflicts(
         for target in targets:
             if target.supports("skills"):
                 destination = integrator._target_skill_dir(target, project_root, name)
-                destinations.setdefault(destination.resolve(), (destination, target))
+                try:
+                    resolved = destination.resolve()
+                except (OSError, RuntimeError):
+                    # A link loop cannot be resolved; it is refused like any link (#5287).
+                    refuse_symlinked_deploy(destination, project_root)
+                    raise
+                destinations.setdefault(resolved, (destination, target))
         for source in files:
-            suffix = source.relative_to(source_root)
+            suffix = relative_to(source, source_root)
             parent = source_root
             for part in suffix.parts:
                 if part in ignore(str(parent), [part]):
@@ -307,6 +346,7 @@ def find_unmanaged_conflicts(
                                 plan=source_plan,
                                 owner=owner,
                                 targets=targets,
+                                commit=installing_commit(package_info),
                             )
                         if path in adopted[key] or (identical and unchanged[key]):
                             continue
@@ -318,6 +358,12 @@ def find_unmanaged_conflicts(
                             relative_target,
                             affected,
                             untrusted=not unmanaged,
+                            directory=recovery_directory(
+                                deployed_path_entry(destination, project_root, [target]),
+                                destination,
+                                user_scope=user_scope,
+                            ),
+                            user_scope=user_scope,
                         )
                     )
     return tuple(conflicts)

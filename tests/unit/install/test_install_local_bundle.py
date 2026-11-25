@@ -191,6 +191,50 @@ def _expected_deployed_command_path(project: Path, target: TargetProfile) -> Pat
     return root / mapping.subdir / f"{stem}{extension}"
 
 
+_AGENT_FILES = {
+    "agents/rev.agent.md": "---\nname: rev\ndescription: Review agent\n---\nReview the diff.\n",
+    "agents/lint.md": "---\ndescription: Lint agent\n---\n# Lint\n",
+}
+
+
+def _integrate_agents(
+    bundle: Path,
+    project: Path,
+    target: TargetProfile,
+    *,
+    lockfile: dict | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+    scope=None,
+):
+    """Run the bundle deploy loop for one target with a fresh diagnostics collector."""
+    from apm_cli.bundle.local_bundle import LocalBundleInfo
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.services import integrate_local_bundle
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    if lockfile is None:
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+    diagnostics = DiagnosticCollector()
+    bundle_info = LocalBundleInfo(
+        source_dir=bundle,
+        plugin_json={"id": "test-plugin"},
+        package_id="test-plugin",
+        lockfile=lockfile,
+        pack_targets=["claude"],
+    )
+    result = integrate_local_bundle(
+        bundle_info,
+        project,
+        targets=(target,),
+        force=force,
+        dry_run=dry_run,
+        diagnostics=diagnostics,
+        scope=scope or InstallScope.PROJECT,
+    )
+    return result, diagnostics
+
+
 def test_local_bundle_receives_enabled_empty_executable_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -746,45 +790,503 @@ class TestGrokBuildLocalBundleDeployment:
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
-    def test_packed_markdown_agents_are_skipped_for_codex_with_one_warning_each(
+    def test_packed_markdown_agents_render_to_codex_toml(self, tmp_path: Path) -> None:
+        """Codex agents are rendered to TOML and claimed by the rendered hash (#3714)."""
+        import tomllib
+
+        from apm_cli.utils.content_hash import compute_file_hash
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["skipped"] == 0
+        assert sorted(result["deployed_files"]) == [
+            ".codex/agents/lint.toml",
+            ".codex/agents/rev.toml",
+        ]
+        rev = tomllib.loads((project / ".codex/agents/rev.toml").read_text(encoding="utf-8"))
+        assert rev == {
+            "name": "rev",
+            "description": "Review agent",
+            "developer_instructions": "Review the diff.",
+        }
+        lint = tomllib.loads((project / ".codex/agents/lint.toml").read_text(encoding="utf-8"))
+        assert lint["developer_instructions"] == "# Lint"
+        for record, claim in result["deployed_file_hashes"].items():
+            assert claim == compute_file_hash(project / record)
+        assert CATEGORY_WARNING not in diagnostics.by_category()
+
+    def test_codex_bundle_agent_collision_dry_run_and_force(self, tmp_path: Path) -> None:
+        """Rendered agents adopt identical bytes, keep edits without --force (#3714)."""
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        codex = KNOWN_TARGETS["codex"]
+        rev = project / ".codex/agents/rev.toml"
+
+        preview, _diagnostics = _integrate_agents(bundle, project, codex, dry_run=True)
+        assert not (project / ".codex").exists()
+        assert preview["written_files"] == []
+        installed, _diagnostics = _integrate_agents(bundle, project, codex)
+        assert preview["deployed_file_hashes"] == installed["deployed_file_hashes"]
+        # Real writes are receipt evidence; adoptions and dry runs are not.
+        assert sorted(installed["written_files"]) == sorted(installed["deployed_files"])
+        rendered = rev.read_bytes()
+
+        again, diagnostics = _integrate_agents(bundle, project, codex)
+        assert again["deployed_file_hashes"] == installed["deployed_file_hashes"]
+        assert again["skipped"] == 0
+        assert again["written_files"] == []
+        assert not diagnostics.has_diagnostics
+
+        rev.write_bytes(rendered + b"# edited\n")
+        kept, diagnostics = _integrate_agents(bundle, project, codex)
+        assert rev.read_bytes() == rendered + b"# edited\n"
+        assert kept["skipped"] == 1
+        assert ".codex/agents/rev.toml" not in kept["deployed_file_hashes"]
+        assert [d.message for d in diagnostics.by_category()["collision"]] == [
+            ".codex/agents/rev.toml"
+        ]
+
+        forced, _diagnostics = _integrate_agents(bundle, project, codex, force=True)
+        assert rev.read_bytes() == rendered
+        assert forced["deployed_file_hashes"] == installed["deployed_file_hashes"]
+
+    @pytest.mark.parametrize("codex_home", [False, True], ids=["default-home", "codex-home"])
+    def test_user_scope_codex_bundle_agent_keeps_an_edit_without_force(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex_home: bool
+    ) -> None:
+        """A -g reinstall over an edited agent keeps it, and --force replaces it (#3714)."""
+        from apm_cli.core.scope import InstallScope
+
+        home = tmp_path / "home"
+        home.mkdir()
+        agents = home / ".codex/agents"
+        if codex_home:
+            agents = tmp_path / "codex-home/agents"
+            monkeypatch.setenv("CODEX_HOME", str(agents.parent))
+        else:
+            monkeypatch.delenv("CODEX_HOME", raising=False)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        codex = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        user = InstallScope.USER
+        rev = agents / "rev.toml"
+
+        installed, _diagnostics = _integrate_agents(bundle, home, codex, scope=user)
+        assert rev.as_posix() in installed["deployed_file_hashes"]
+        rendered = rev.read_bytes()
+
+        rev.write_bytes(rendered + b"# edited\n")
+        kept, diagnostics = _integrate_agents(bundle, home, codex, scope=user)
+        assert rev.read_bytes() == rendered + b"# edited\n"
+        assert kept["skipped"] == 1
+        assert rev.as_posix() not in kept["deployed_file_hashes"]
+        assert len(diagnostics.by_category()["collision"]) == 1
+
+        forced, _diagnostics = _integrate_agents(bundle, home, codex, scope=user, force=True)
+        assert rev.read_bytes() == rendered
+        assert forced["deployed_file_hashes"] == installed["deployed_file_hashes"]
+
+    @pytest.mark.parametrize(
+        ("rel", "content", "reason"),
+        [
+            ("agents/bad.md", b"---\nname: bad\n---\n\xff\xfe\n", "UnicodeDecodeError"),
+            ("agents/native.toml", b'name = "native"\n', "cannot convert"),
+        ],
+        ids=["render-failure", "non-markdown-source"],
+    )
+    def test_codex_bundle_agent_that_cannot_render_writes_nothing(
+        self, tmp_path: Path, rel: str, content: bytes, reason: str
+    ) -> None:
+        """A failed render skips the agent with a named warning and no claim (#3714)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files={})
+        (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+        (bundle / rel).write_bytes(content)
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        lockfile["pack"]["bundle_files"] = {rel: hashlib.sha256(content).hexdigest()}
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(
+            bundle, project, KNOWN_TARGETS["codex"], lockfile=lockfile
+        )
+
+        assert result["deployed_files"] == []
+        assert result["deployed_file_hashes"] == {}
+        assert result["skipped"] == 1
+        assert not (project / ".codex").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert f"{rel!r}" in warning.message
+        assert "for target codex" in warning.message
+        assert reason in warning.message
+
+    def test_codex_bundle_agent_renders_the_verified_bytes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bytes swapped in after the digest check are never rendered (#3714)."""
+        import tomllib
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        packed = bundle / "agents/rev.agent.md"
+        read_text = Path.read_text
+
+        def _swapped_read(path: Path, *args: Any, **kwargs: Any) -> str:
+            if path == packed:  # the file changed after its digest was verified
+                return "---\nname: rev\ndescription: Evil\n---\nInjected.\n"
+            return read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _swapped_read)
+        _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        rev = project / ".codex/agents/rev.toml"
+        assert tomllib.loads(rev.read_text(encoding="utf-8")) == {
+            "name": "rev",
+            "description": "Review agent",
+            "developer_instructions": "Review the diff.",
+        }
+
+    @pytest.mark.parametrize(
+        "digest_form",
+        ["upper", "prefixed-upper-padded"],
+    )
+    def test_codex_bundle_agent_accepts_normalized_manifest_digests(
+        self, tmp_path: Path, digest_form: str
+    ) -> None:
+        """Digests bundle admission normalizes do not drop the agent (#3714)."""
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        digest = lockfile["pack"]["bundle_files"]["agents/rev.agent.md"].upper()
+        if digest_form == "prefixed-upper-padded":
+            digest = f"sha256:{digest}  "
+        lockfile["pack"]["bundle_files"]["agents/rev.agent.md"] = digest
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(
+            bundle, project, KNOWN_TARGETS["codex"], lockfile=lockfile
+        )
+
+        assert result["skipped"] == 0
+        assert ".codex/agents/rev.toml" in result["deployed_file_hashes"]
+        assert not diagnostics.has_diagnostics
+
+    @pytest.mark.parametrize(
+        ("content", "description"),
+        [
+            ("# Lint\nCheck style.\n", "Lint"),
+            ("Check style.\n", "lint"),
+            ("---\nname: linter\ndescription: '  '\n---\nCheck style.\n", "linter"),
+            ("---\nname: linter\ndescription:\n---\nCheck style.\n", "linter"),
+        ],
+        ids=["leading-heading", "no-heading", "blank-description", "null-description"],
+    )
+    def test_codex_bundle_agent_without_a_description_gets_a_loadable_one(
+        self, tmp_path: Path, content: str, description: str
+    ) -> None:
+        """A plugin agent with no description still installs for Codex (#3714)."""
+        import tomllib
+
+        files = {**_AGENT_FILES, "agents/lint.md": content}
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["skipped"] == 0
+        lint = tomllib.loads((project / ".codex/agents/lint.toml").read_text(encoding="utf-8"))
+        assert lint["description"] == description
+        assert lint["developer_instructions"]
+        assert not diagnostics.has_diagnostics
+
+    @pytest.mark.parametrize(
+        ("content", "field"),
+        [
+            ("---\ndescription: Lint agent\n---\n\n", "developer_instructions"),
+            ("---\nname: ' '\ndescription: Lint agent\n---\nCheck style.\n", "name"),
+        ],
+        ids=["blank-body", "blank-name"],
+    )
+    def test_codex_bundle_agent_with_a_field_codex_rejects_is_skipped(
+        self, tmp_path: Path, content: str, field: str
+    ) -> None:
+        """An agent Codex cannot load is warned about, never written or claimed (#3714)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        files = {**_AGENT_FILES, "agents/lint.md": content}
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["skipped"] == 1
+        assert result["deployed_files"] == [".codex/agents/rev.toml"]
+        assert not (project / ".codex/agents/lint.toml").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert "'agents/lint.md' for target codex" in warning.message
+        assert f"'{field}' must be a non-empty string" in warning.message
+
+    def test_codex_bundle_agent_rejects_bytes_that_do_not_match_the_manifest(
         self, tmp_path: Path
     ) -> None:
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        (bundle / "agents/rev.agent.md").write_bytes(b"---\nname: evil\n---\nInjected.\n")
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["deployed_files"] == [".codex/agents/lint.toml"]
+        assert not (project / ".codex/agents/rev.toml").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert "'agents/rev.agent.md'" in warning.message
+        assert "pack.bundle_files" in warning.message
+
+    @pytest.mark.parametrize(
+        "target_name",
+        sorted(name for name, target in KNOWN_TARGETS.items() if "agents" in target.primitives),
+    )
+    def test_only_codex_agents_are_rendered_across_agent_targets(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        """Non-Codex agent targets keep copying packed bytes unchanged (#3714)."""
+        import tomllib
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        target = KNOWN_TARGETS[target_name]
+        mapping = target.primitives["agents"]
+
+        result, diagnostics = _integrate_agents(bundle, project, target)
+
+        assert result["skipped"] == 0
+        assert not diagnostics.has_diagnostics
+        root = project / (mapping.deploy_root or target.root_dir) / mapping.subdir
+        expected = {
+            (root / f"{stem}{mapping.extension}").relative_to(project).as_posix(): packed
+            for stem, packed in (("rev", "agents/rev.agent.md"), ("lint", "agents/lint.md"))
+        }
+        assert sorted(result["deployed_files"]) == sorted(expected)
+        for record, packed in expected.items():
+            deployed = (project / record).read_bytes()
+            if mapping.format_id == "codex_agent":
+                assert tomllib.loads(deployed.decode("utf-8"))["developer_instructions"]
+            else:
+                assert deployed == (bundle / packed).read_bytes()
+
+    @staticmethod
+    def _install_bundle_files(
+        tmp_path: Path,
+        files: dict[str, str],
+        target_name: str,
+        deployed: list[str] | None = None,
+    ):
         from apm_cli.bundle.local_bundle import LocalBundleInfo
         from apm_cli.core.scope import InstallScope
         from apm_cli.install.services import integrate_local_bundle
-        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+        from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        bundle = _make_bundle(
-            tmp_path / "src",
-            pack_target="claude",
-            files={"agents/rev.agent.md": "# Rev\n", "agents/lint.md": "# Lint\n"},
-        )
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
         project = _make_project(tmp_path / "dst")
         diagnostics = DiagnosticCollector()
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        if deployed is not None:
+            lockfile["dependencies"][0]["deployed_files"] = deployed
         bundle_info = LocalBundleInfo(
             source_dir=bundle,
             plugin_json={"id": "test-plugin"},
             package_id="test-plugin",
-            lockfile=yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8")),
+            lockfile=lockfile,
             pack_targets=["claude"],
         )
-
         result = integrate_local_bundle(
             bundle_info,
             project,
-            targets=(KNOWN_TARGETS["codex"],),
+            targets=(KNOWN_TARGETS[target_name],),
             diagnostics=diagnostics,
             scope=InstallScope.PROJECT,
         )
+        return project, result, diagnostics
 
-        assert result["deployed_files"] == []
-        assert result["skipped"] == 2
-        assert not (project / ".codex" / "agents").exists()
-        warnings = sorted(w.message for w in diagnostics.by_category()[CATEGORY_WARNING])
-        assert len(warnings) == 2
-        assert "'agents/lint.md' for target codex" in warnings[0]
-        assert "'agents/rev.agent.md' for target codex" in warnings[1]
-        assert all("codex_agent (.toml)" in message for message in warnings)
+    def test_packed_native_claude_rule_with_dotted_stem_keeps_its_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """#3686: a Claude rule packed as py.instructions.md is not converted twice."""
+        rule = '---\npaths:\n  - "**/*.py"\n---\n\n# Python rule\n'
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path, {"instructions/py.instructions.md": rule}, "claude"
+        )
+        assert result["deployed_files"] == [".claude/rules/py.md"]
+        assert (project / ".claude/rules/py.md").read_text(encoding="utf-8") == rule
+
+    def test_malformed_instruction_frontmatter_skips_only_that_file(self, tmp_path: Path) -> None:
+        """#3686: an unparseable packed instruction is named and skipped; its sibling installs."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/bad.instructions.md": "---\napplyTo: [unclosed\n---\nbody\n",
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/bad.md").exists()
+        assert ".claude/rules/bad.md" not in result["deployed_file_hashes"]
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+        assert "paths:" in (project / ".claude/rules/good.md").read_text(encoding="utf-8")
+        warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
+        assert len(warnings) == 1 and ".claude/rules/bad.md" in warnings[0], warnings
+        assert "not valid YAML" in warnings[0]
+
+    def test_non_string_frontmatter_keys_install_with_their_sibling(self, tmp_path: Path) -> None:
+        """#3686: valid YAML with a numeric mapping key passes the decoded preflight."""
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/keys.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: {1: numeric, note: text}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert result["deployed_files"] == [".claude/rules/good.md", ".claude/rules/keys.md"]
+        assert "paths:" in (project / ".claude/rules/keys.md").read_text(encoding="utf-8")
+        assert "paths:" in (project / ".claude/rules/good.md").read_text(encoding="utf-8")
+        assert not diagnostics.has_diagnostics
+
+    def test_hidden_character_under_a_colliding_numeric_key_is_still_scanned(
+        self, tmp_path: Path
+    ) -> None:
+        """#3686: keys 1 and '1' stay separate, so neither decoded value escapes the scan."""
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: {1: \"x\\u202ey\", '1': ok}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+
+    def test_hidden_character_in_a_yaml_set_is_still_scanned(self, tmp_path: Path) -> None:
+        """#3686: a decoded override character inside a !!set member is not hidden by repr."""
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: !!set {\"x\\u202ey\": null}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+
+    def test_hidden_character_in_decoded_frontmatter_rejects_the_rule(self, tmp_path: Path) -> None:
+        """#3686: packed rules pass the instruction owner's decoded-frontmatter preflight."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    '---\napplyTo: "src/\\u202e*.py"\n---\nbody\n'
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert ".claude/rules/evil.md" not in result["deployed_file_hashes"]
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+        warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
+        assert any(".claude/rules/evil.md" in w and "hidden Unicode" in w for w in warnings), (
+            warnings
+        )
+
+    @pytest.mark.parametrize(
+        ("deployed", "expected"),
+        [
+            # Two distinct Claude agents: provenance keeps both names apart.
+            (
+                [".claude/agents/rv.md", ".claude/agents/rv.agent.md"],
+                [".claude/agents/rv.agent.md", ".claude/agents/rv.md"],
+            ),
+            # A pre-fix bundle's Claude and Copilot renderings of one agent.
+            ([".claude/agents/rv.md", ".github/agents/rv.agent.md"], [".claude/agents/rv.md"]),
+        ],
+    )
+    def test_packed_agents_lower_by_rendering_provenance(
+        self, tmp_path: Path, deployed: list[str], expected: list[str]
+    ) -> None:
+        """#3686: distinct native agents rv.md and rv.agent.md both install for Claude."""
+        files = {
+            "agents/rv.md": "---\nname: rv\n---\nrv\n",
+            "agents/rv.agent.md": "---\nname: rv-agent\n---\nother\n",
+        }
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path, files, "claude", deployed
+        )
+        assert sorted(result["deployed_files"]) == expected
+        assert (project / ".claude/agents/rv.md").read_text(encoding="utf-8") == files[
+            "agents/rv.md"
+        ]
+
+    @pytest.mark.parametrize(
+        ("pack_extra", "expected"),
+        [
+            # pack.renderings is authoritative, even against deployed_files.
+            ({"renderings": {"agents/rv.agent.md": ".md"}}, {"agents/rv.agent.md": ".md"}),
+            # An own source has no entry, so no deployed_files fallback applies.
+            ({"renderings": {}}, {}),
+            # Pre-renderings bundle: a path claimed with two extensions is dropped.
+            ({}, {"agents/rv.md": ".md"}),
+        ],
+    )
+    def test_rendering_provenance_prefers_the_packed_winner(
+        self, pack_extra: dict, expected: dict
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.install.local_bundle_paths import bundle_rendering_extensions
+
+        lockfile = {
+            "pack": {"format": "plugin", **pack_extra},
+            "dependencies": [
+                {"deployed_files": [".claude/agents/rv.md", ".github/agents/rv.agent.md"]},
+                {"deployed_files": [".claude/agents/rv.agent.md"]},
+            ],
+        }
+        info = LocalBundleInfo(
+            source_dir=Path("."),
+            plugin_json={"id": "p"},
+            package_id="p",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+        assert bundle_rendering_extensions(info) == expected
+
+    def test_superseded_renderings_count_as_skipped(self, tmp_path: Path) -> None:
+        """#3686: a rendering skipped for another one is counted in the install summary."""
+        _project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/py.md": '---\npaths:\n  - "**/*.py"\n---\n\nbody\n',
+                "instructions/py.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert result["deployed_files"] == [".claude/rules/py.md"]
+        assert result["skipped"] == 1
 
     @pytest.mark.parametrize(
         "target_name",
@@ -842,7 +1344,8 @@ class TestLocalBundlePathRouting:
             assert not original_path.exists()
 
     @pytest.mark.parametrize("rel", ["hooks.json", "hooks/scripts/fmt.sh", "hooks/fmt.json"])
-    def test_plugin_hook_paths_are_skipped_with_a_named_warning(self, rel: str) -> None:
+    def test_plugin_hook_paths_are_left_to_the_hook_integrator(self, rel: str) -> None:
+        """Plugin hook files are never file-copied; local_bundle_hooks registers them."""
         from apm_cli.install.local_bundle_paths import (
             bundle_deploy_relative_path,
             bundle_deploy_skip_warning,
@@ -851,10 +1354,28 @@ class TestLocalBundlePathRouting:
 
         for target in (KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]):
             prefixes = frozenset({f"{target.root_dir}/"})
-            assert bundle_deploy_relative_path(rel, prefixes, prefixes, target=target) is None
-            warning = bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target)
-            assert warning is not None
-            assert f"Skipped packed bundle hook file {rel!r}" in warning
+            assert (
+                bundle_deploy_relative_path(
+                    rel,
+                    prefixes,
+                    prefixes,
+                    target=target,
+                    hooks_approved=True,
+                    canvas_approved=True,
+                )
+                is None
+            )
+            assert (
+                bundle_deploy_skip_warning(
+                    rel,
+                    prefixes,
+                    prefixes,
+                    target=target,
+                    hooks_approved=True,
+                    canvas_approved=True,
+                )
+                is None
+            )
 
     def test_target_rooted_hook_files_keep_routing(self) -> None:
         """Deployed-layout bundles keep their target hook files (not plugin hooks)."""
@@ -864,7 +1385,14 @@ class TestLocalBundlePathRouting:
         target = KNOWN_TARGETS["copilot"]
         prefixes = frozenset({".github/"})
         assert (
-            bundle_deploy_relative_path(".github/hooks/pkg.json", prefixes, prefixes, target=target)
+            bundle_deploy_relative_path(
+                ".github/hooks/pkg.json",
+                prefixes,
+                prefixes,
+                target=target,
+                hooks_approved=True,
+                canvas_approved=True,
+            )
             == "hooks/pkg.json"
         )
 
@@ -891,8 +1419,15 @@ class TestLocalBundlePathRouting:
         for name in ("claude", "copilot", "cursor"):
             target = KNOWN_TARGETS[name]
             allowed = target_bundle_deploy_prefixes(target)
-            assert bundle_deploy_relative_path(rel, allowed, known, target=target) is None
-            warning = bundle_deploy_skip_warning(rel, allowed, known, target=target)
+            assert (
+                bundle_deploy_relative_path(
+                    rel, allowed, known, target=target, hooks_approved=True, canvas_approved=True
+                )
+                is None
+            )
+            warning = bundle_deploy_skip_warning(
+                rel, allowed, known, target=target, hooks_approved=True, canvas_approved=True
+            )
             if warning is not None:
                 assert "not a primitive file" in warning
 
@@ -908,12 +1443,12 @@ class TestLocalBundlePathRouting:
         rel = ".github/hooks/pkg.json"
         assert (
             bundle_deploy_relative_path(
-                rel, prefixes, prefixes, target=target, hooks_approved=False
+                rel, prefixes, prefixes, target=target, hooks_approved=False, canvas_approved=True
             )
             is None
         )
         warning = bundle_deploy_skip_warning(
-            rel, prefixes, prefixes, target=target, hooks_approved=False
+            rel, prefixes, prefixes, target=target, hooks_approved=False, canvas_approved=True
         )
         assert warning is not None and "not approved" in warning
 
@@ -936,12 +1471,12 @@ class TestLocalBundlePathRouting:
         prefixes = frozenset({".github/"})
         assert (
             bundle_deploy_relative_path(
-                rel, prefixes, prefixes, target=target, canvas_approved=False
+                rel, prefixes, prefixes, target=target, canvas_approved=False, hooks_approved=True
             )
             is None
         )
         warning = bundle_deploy_skip_warning(
-            rel, prefixes, prefixes, target=target, canvas_approved=False
+            rel, prefixes, prefixes, target=target, canvas_approved=False, hooks_approved=True
         )
         assert warning is not None and "not approved" in warning
 
@@ -953,9 +1488,143 @@ class TestLocalBundlePathRouting:
         prefixes = frozenset({".github/"})
         assert (
             bundle_deploy_relative_path(
-                ".github/prompts/review.prompt.md", prefixes, prefixes, target=target
+                ".github/prompts/review.prompt.md",
+                prefixes,
+                prefixes,
+                target=target,
+                hooks_approved=True,
+                canvas_approved=True,
             )
             == "prompts/review.prompt.md"
+        )
+
+    @pytest.mark.parametrize(
+        ("target_name", "superseded"),
+        [
+            (
+                "claude",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.instructions.md",
+                    "instructions/py.mdc",
+                },
+            ),
+            (
+                "copilot",
+                {"agents/rv.md", "agents/rv.toml", "instructions/py.md", "instructions/py.mdc"},
+            ),
+            (
+                "cursor",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.instructions.md",
+                    "instructions/py.md",
+                },
+            ),
+            ("codex", {"agents/rv.agent.md"}),
+            # Grok Build copies instructions verbatim under their source name.
+            (
+                "grok-build",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.md",
+                    "instructions/py.mdc",
+                },
+            ),
+        ],
+    )
+    def test_duplicated_bundle_keeps_the_target_own_rendering(
+        self, target_name: str, superseded: set[str]
+    ) -> None:
+        """#3686: a pre-fix bundle deploys one rendering per primitive and target."""
+        from apm_cli.install.local_bundle_paths import (
+            known_bundle_deploy_prefixes,
+            superseded_bundle_renderings,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        rels = [
+            "agents/rv.agent.md",
+            "agents/rv.md",
+            "agents/rv.toml",
+            "agents/solo.md",
+            "instructions/py.instructions.md",
+            "instructions/py.md",
+            "instructions/py.mdc",
+            "skills/s/SKILL.md",
+        ]
+        assert (
+            superseded_bundle_renderings(
+                rels,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            ).keys()
+            == superseded
+        )
+
+    @pytest.mark.parametrize(
+        ("target_name", "deployed"),
+        [("grok-build", "rules/py.instructions.md"), ("claude", "rules/py.md")],
+    )
+    def test_packed_instruction_lowers_to_the_target_deployed_name(
+        self, target_name: str, deployed: str
+    ) -> None:
+        """#3686: a bundle installs an instruction under the name a source install gives it."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        lowered = bundle_deploy_relative_path(
+            "instructions/py.instructions.md",
+            target_bundle_deploy_prefixes(target),
+            known_bundle_deploy_prefixes(),
+            target=target,
+            hooks_approved=True,
+            canvas_approved=True,
+            rendering_extension=".instructions.md",
+        )
+        assert lowered == deployed
+
+    @pytest.mark.parametrize(
+        ("target_name", "rel", "rule_format"),
+        [
+            ("claude", "instructions/py.instructions.md", "claude_rules"),
+            ("claude", "instructions/py.md", None),
+            ("cursor", "instructions/py.instructions.md", "cursor_rules"),
+            ("copilot", "instructions/py.instructions.md", None),
+            ("claude", "agents/rv.agent.md", None),
+        ],
+    )
+    def test_packed_apm_instructions_render_to_the_target_rule_format(
+        self, target_name: str, rel: str, rule_format: str | None
+    ) -> None:
+        """#3686: bundles carry applyTo instructions; rule targets convert them."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_rule_format_id,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        assert (
+            bundle_rule_format_id(
+                rel,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            )
+            == rule_format
         )
 
     def test_rejects_traversal_before_prefix_routing(self) -> None:
@@ -967,6 +1636,8 @@ class TestLocalBundlePathRouting:
                 ".grok/../outside.txt",
                 frozenset({".grok/"}),
                 frozenset({".grok/"}),
+                hooks_approved=True,
+                canvas_approved=True,
             )
 
 
@@ -1188,3 +1859,74 @@ class TestLocalBundleCanvasTrust:
         assert not (project / ".github" / "extensions" / "widget").exists()
         # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output
+
+
+def test_bundle_without_integrity_manifest_skips_hooks(tmp_path: Path) -> None:
+    """Hooks register only from bytes ``pack.bundle_files`` covers (#3700)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_hooks import integrate_local_bundle_hooks
+
+    bundle = tmp_path / "bundle"
+    (bundle / "hooks").mkdir(parents=True)
+    (bundle / "hooks.json").write_text('{"hooks": {}}')
+    (bundle / "hooks" / "x.sh").write_text("echo x\n")
+    (bundle / "plugin.json").write_text('{"name": "b", "hooks": "./hooks.json"}')
+    info = types.SimpleNamespace(source_dir=bundle, lockfile=None)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    logger = MagicMock()
+
+    result = integrate_local_bundle_hooks(
+        info,
+        {"hooks.json": "a", "hooks/x.sh": "b"},
+        project,
+        targets=[KNOWN_TARGETS["claude"]],
+        slug="b",
+        hooks_approved=True,
+        approval_key=None,
+        force=False,
+        dry_run=False,
+        scope=InstallScope.PROJECT,
+        logger=logger,
+    )
+
+    assert (result.skipped, result.scripts) == (2, [])
+    (message,), _ = logger.warning.call_args
+    assert "no integrity manifest" in message
+    assert "apm pack" in message
+    assert not (project / ".claude" / "settings.json").exists()
+
+
+def test_tampered_bundle_fails_integrity_before_executable_approval_advice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bundle that fails integrity is refused without approval advice (RA-035)."""
+    bundle = _make_bundle(tmp_path / "source")
+    (bundle / ".lsp.json").write_text(
+        json.dumps(
+            {
+                "lspServers": {
+                    "unsafe": {
+                        "command": "unsafe-language-server",
+                        "extensionToLanguage": {".unsafe": "unsafe"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = _make_project(tmp_path / "destination")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["executables"] = {}
+    (project / "apm.yml").write_text(yaml.dump(manifest), encoding="utf-8")
+
+    result = _invoke(project, monkeypatch, str(bundle), "--no-policy")
+
+    assert result.exit_code == 1, result.output
+    assert "To approve this exact local bundle" not in result.stdout
+    assert "To approve this exact local bundle" not in result.stderr
+    assert "[x] Bundle integrity check failed:" in result.stderr
+    assert "Unlisted bundle file (not in pack.bundle_files): .lsp.json" in result.stderr

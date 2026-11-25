@@ -9,6 +9,8 @@ import pytest
 
 from apm_cli.bootstrap_mirror import append_url_path, get_env_url
 
+pytestmark = pytest.mark.unit
+
 
 def test_get_env_url_strips_quotes_whitespace_and_trailing_slash() -> None:
     """Mirror URL env values are normalized before callers use them."""

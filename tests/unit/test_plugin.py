@@ -6,7 +6,11 @@ cp1252/cp950 UnicodeDecodeError on Windows when reading plugin.json.
 
 import json
 
+import pytest
+
 from apm_cli.models.plugin import Plugin
+
+pytestmark = pytest.mark.component
 
 
 class TestPluginUtf8RoundTrip:

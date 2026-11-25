@@ -19,6 +19,7 @@ from apm_cli.deps.transport_selection import (
     TransportSelector,
 )
 from apm_cli.models.apm_package import DependencyReference
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 
 def make_host(
@@ -52,6 +53,7 @@ def make_host(
     auth_resolver.build_error_context.return_value = (
         "Check PAT permissions." if effective_token else "Set a token."
     )
+    install_simulated_ado_chain(auth_resolver)
     host.auth_resolver = auth_resolver
     host._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
     host._protocol_pref = ProtocolPreference.NONE
@@ -137,7 +139,7 @@ class TestResilientGetPhase3W5:
 
 
 class TestBuildRepoUrlPhase3W5:
-    def test_gitlab_backend_uses_resolve_for_dep_token(self) -> None:
+    def test_gitlab_backend_never_receives_resolved_token(self) -> None:
         host = make_host(resolved_token="gitlab-token")
         delegate = DownloadDelegate(host)
         dep = make_dep("group/repo", host="gitlab.example.com")
@@ -150,7 +152,7 @@ class TestBuildRepoUrlPhase3W5:
             url = delegate.build_repo_url("group/repo", dep_ref=dep)
 
         assert url == "https://gitlab.example.com/group/repo.git"
-        assert backend.build_clone_https_url.call_args.kwargs["token"] == "gitlab-token"
+        backend.build_clone_https_url.assert_called_once_with(dep)
 
     def test_ado_without_organization_rebuilds_backend(self) -> None:
         host = make_host(ado_token="ado-token")

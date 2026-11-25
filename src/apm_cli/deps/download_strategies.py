@@ -25,20 +25,21 @@ import requests
 
 from ..cache.url_normalize import normalize_repo_url
 from ..core.auth import AuthResolver, HostInfo
+from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.auth_outcome import AuthAttemptFailed
 from ..models.apm_package import DependencyReference
 from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner_and_repo
-from ..utils.archive import ArchiveError, safe_extract_zip
+from ..utils.archive import ArchiveError, read_zip_member, safe_extract_zip
 from ..utils.console import _rich_warning
 from ..utils.git_env import redact_git_diagnostic, validate_git_url_rewrite_safety
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
-    build_https_clone_url,
     build_raw_content_url,
-    build_ssh_url,
     default_host,
     is_github_hostname,
 )
+from ..utils.http_credentials import unfollowed_redirect_request
 from .artifactory_entry import _NoNetrcSession
 from .git_file_transport import (
     GitFileFetchResult,
@@ -67,6 +68,15 @@ def _close_response(response: requests.Response, context: str) -> None:
         response.close()
     except Exception as exc:
         _debug(f"{context} response close failed: {exc}")
+
+
+def _backoff_sleep(seconds: float) -> None:
+    """Wait between resilient_get retries.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
 
 
 _ARTIFACTORY_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -134,6 +144,7 @@ class DownloadDelegate:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """HTTP GET with selectable retries for transient HTTP failures.
 
@@ -147,6 +158,10 @@ class DownloadDelegate:
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
             allow_netrc: Whether Requests may use ambient netrc credentials.
+            redirect_base: When set, every attempt goes through the redirect
+                owner (``unfollowed_redirect_request``) with *url* bounded to
+                this base. No redirect is followed: a 3xx is returned so the
+                auth-outcome classifier sees it.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -158,7 +173,17 @@ class DownloadDelegate:
         last_response = None
         for attempt in range(max_retries):
             try:
-                if allow_netrc:
+                if redirect_base is not None:
+                    response = unfollowed_redirect_request(
+                        "GET",
+                        url,
+                        base_url=redirect_base,
+                        headers=headers,
+                        timeout=timeout,
+                        stream=stream,
+                        ambient_credentials=allow_netrc,
+                    )
+                elif allow_netrc:
                     response = requests.get(
                         url,
                         headers=headers,
@@ -190,7 +215,7 @@ class DownloadDelegate:
                             f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                         )
                         _close_response(response, "rate-limit retry")
-                        time.sleep(wait)
+                        _backoff_sleep(wait)
                     continue
 
                 if response.status_code == 503:
@@ -202,7 +227,7 @@ class DownloadDelegate:
                             f"(attempt {attempt + 1}/{max_retries})"
                         )
                         _close_response(response, "service-unavailable retry")
-                        time.sleep(wait)
+                        _backoff_sleep(wait)
                     continue
 
                 return response
@@ -214,7 +239,7 @@ class DownloadDelegate:
                         f"Connection error, retry in {wait:.1f}s "
                         f"(attempt {attempt + 1}/{max_retries})"
                     )
-                    time.sleep(wait)
+                    _backoff_sleep(wait)
             except requests.exceptions.Timeout as e:
                 last_exc = e
                 if attempt < max_retries - 1:
@@ -237,34 +262,32 @@ class DownloadDelegate:
         self,
         repo_ref: str,
         use_ssh: bool = False,
-        dep_ref: DependencyReference = None,
-        token: str | None = None,
-        auth_scheme: str = "basic",
+        *,
+        dep_ref: DependencyReference,
     ) -> str:
-        """Build the appropriate repository URL for cloning.
+        """Build the credential-free repository URL for cloning.
 
         Supports both GitHub and Azure DevOps URL formats:
         - GitHub: https://github.com/owner/repo.git
         - ADO: https://dev.azure.com/org/project/_git/repo
 
+        Credentials are never embedded in the URL; they are injected via
+        git env (``http.extraheader`` / credential helpers) by
+        :class:`AuthResolver`.
+
         Args:
             repo_ref: Repository reference in format "owner/repo" or
-                "org/project/repo" for ADO
+                "org/project/repo" for ADO (kept for call-site symmetry;
+                the URL is derived from ``dep_ref``)
             use_ssh: Whether to use SSH URL for git operations
-            dep_ref: Optional DependencyReference for ADO-specific URL building
-            token: Optional per-dependency token override
-            auth_scheme: Auth scheme ("basic" or "bearer"). Bearer tokens are
-                injected via env vars, NOT embedded in the URL.
+            dep_ref: DependencyReference describing host, port, and repo
 
         Returns:
             str: Repository URL suitable for git clone operations
         """
-        # Resolve host (used for token-routing and as a fallback when
-        # ``dep_ref`` is missing for legacy callers).
-        if dep_ref and dep_ref.host:
-            host = dep_ref.host
-        else:
-            host = getattr(self._host, "github_host", None) or default_host()
+        # Fall back to the configured default host when the dep_ref
+        # carries none (e.g. shorthand ``owner/repo`` references).
+        host = dep_ref.host or getattr(self._host, "github_host", None) or default_host()
 
         # Pick the vendor-specific backend via ``classify_host`` -- this
         # replaces the in-line ``if is_ado / elif is_github / else`` ladder
@@ -276,64 +299,27 @@ class DownloadDelegate:
         )
 
         is_ado = backend.kind == "ado"
-        is_insecure = bool(getattr(dep_ref, "is_insecure", False)) if dep_ref is not None else False
-
-        # Resolve the effective token. ``token == ""`` is the explicit
-        # "suppress per-instance default" signal used by the
-        # TransportSelector for plain-HTTPS / SSH attempts.
-        if token == "":
-            effective_token: str | None = ""
-        elif token is not None:
-            effective_token = token
-        elif is_ado and dep_ref is not None:
-            effective_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
-        elif backend.is_github_family:
-            effective_token = self._host.github_token
-        elif backend.kind == "gitlab" and dep_ref is not None:
-            # GitLab tokens come from GITLAB_APM_PAT / GITLAB_TOKEN /
-            # credential helpers via the per-dep AuthResolver lookup.
-            effective_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
-        else:
-            # Generic hosts: backend never embeds tokens; pick None so the
-            # branch below produces the expected "no credential in URL" form.
-            effective_token = None
+        is_insecure = bool(getattr(dep_ref, "is_insecure", False))
 
         _debug(
-            f"build_repo_url: host={host}, kind={backend.kind}, "
-            f"dep_ref={'present' if dep_ref else 'None'}, "
-            f"ado_org={dep_ref.ado_organization if dep_ref else None}"
+            f"build_repo_url: host={host}, kind={backend.kind}, ado_org={dep_ref.ado_organization}"
         )
 
         # ADO without a parsed ``ado_organization`` cannot use the ADO
         # builders (they need org/project/repo). Fall through to the
         # generic GitHub-style URL the way the previous ladder did.
-        if is_ado and not (dep_ref and dep_ref.ado_organization):
+        if is_ado and not dep_ref.ado_organization:
             backend = backend_for(
                 None,
                 self._host.auth_resolver,
                 fallback_host=host,
             )
 
-        if dep_ref is None:
-            # Legacy no-dep_ref callers: preserve historical behaviour.
-            # Build URL directly from ``repo_ref`` + ``host`` since the
-            # backends require a dep_ref to read host/port/etc.
-            port = None
-            if use_ssh:
-                return build_ssh_url(host, repo_ref, port=port)
-            if is_insecure:
-                return f"http://{host}/{repo_ref}.git"
-            if backend.is_github_family and effective_token:
-                return build_https_clone_url(host, repo_ref, token=effective_token, port=port)
-            return build_https_clone_url(host, repo_ref, token=None, port=port)
-
         if use_ssh:
             return backend.build_clone_ssh_url(dep_ref)
         if is_insecure:
             return backend.build_clone_http_url(dep_ref)
-        return backend.build_clone_https_url(
-            dep_ref, token=effective_token, auth_scheme=auth_scheme
-        )
+        return backend.build_clone_https_url(dep_ref)
 
     # ------------------------------------------------------------------
     # Artifactory helpers
@@ -563,7 +549,7 @@ class DownloadDelegate:
                             entry = zf.getinfo(name)
                         except KeyError:
                             continue
-                        return zf.read(entry)
+                        return read_zip_member(zf, entry, error_type=ArchiveError)
             except (zipfile.BadZipFile, requests.RequestException):
                 continue
 
@@ -636,102 +622,50 @@ class DownloadDelegate:
             dep_ref.port,
         )
 
-        # Set up authentication headers.
-        # PAT path is first and unchanged; bearer is strictly the fallback
-        # when no PAT is present.  Bearer acquisition is routed through
-        # AuthResolver.resolve() so this module stays inside the auth-protocol
-        # boundary (scripts/lint-auth-signals.sh Rule A); auth.py's resolver
-        # handles the AAD bearer lookup internally.
-        auth_ctx = self._host.auth_resolver.resolve(
-            host,
-            dep_ref.ado_organization,
-            port=dep_ref.port,
-        )
+        resolver = self._host.auth_resolver
 
-        def _headers_for(token: str | None, scheme: str) -> dict[str, str]:
-            if not token:
-                return {}
-            if scheme == "bearer":
-                return {"Authorization": f"Bearer {token}"}
-            encoded = base64.b64encode(f":{token}".encode()).decode()
-            return {"Authorization": f"Basic {encoded}"}
-
-        headers = _headers_for(auth_ctx.token, auth_ctx.auth_scheme)
-
-        def _check_html_signin(response) -> None:
-            """Fail-closed when ADO returns an interactive sign-in HTML page.
-
-            Azure DevOps responds with HTTP 200 + text/html when auth is
-            missing or insufficient instead of a 401.  Writing that HTML to
-            disk produces a corrupt file (the #1671 bug).  Detect it by
-            Content-Type only on 200 responses so 404/403 error pages with
-            text/html bodies still fall through to raise_for_status and the
-            existing 404-fallback / 401-403 error paths.  Content-Type is
-            lowercased before comparison per RFC 7230 case-insensitivity.
-            """
-            if not 200 <= response.status_code < 300:
-                return
-            content_type = response.headers.get("Content-Type", "").lower()
-            if "text/html" in content_type:
-                error_msg = (
-                    f"Azure DevOps returned a sign-in page for {dep_ref.repo_url}. "
-                    "The server responded with HTML instead of the requested file, "
-                    "which means authentication is missing or insufficient. "
-                )
-                error_msg += self._host.auth_resolver.build_error_context(
-                    host,
-                    "download",
-                    org=dep_ref.ado_organization if dep_ref else None,
-                    port=dep_ref.port if dep_ref else None,
-                    dep_url=dep_ref.repo_url if dep_ref else None,
-                )
-                raise RuntimeError(error_msg)
-
-        bearer_attempted = False
-
-        def _request(url: str):
-            nonlocal bearer_attempted
-
-            def _primary_op():
-                return self._host._resilient_get(url, headers=headers, timeout=30)
-
-            if auth_ctx.source != "ADO_APM_PAT":
-                return _primary_op()
-
-            def _bearer_op(bearer: str):
-                return self._host._resilient_get(
+        def _fetch(url: str) -> bytes:
+            def _request(_token: str | None, git_env: dict[str, str]):
+                # The auth chain picks the credential (PAT, az bearer, or the
+                # path-scoped helper) and classifies every response, including
+                # an HTML sign-in page; ambient netrc never overrides it.
+                response = self._host._resilient_get(
                     url,
-                    headers=_headers_for(bearer, "bearer"),
+                    headers=resolver.http_authorization_headers(git_env),
                     timeout=30,
+                    allow_netrc=False,
+                    # No redirect is followed; a sign-in 3xx returns to the
+                    # auth-outcome classifier.
+                    redirect_base=url,
                 )
+                if response.status_code != 200:
+                    raise AuthAttemptFailed(response=response)
+                return response
 
-            outcome = self._host.auth_resolver.execute_with_bearer_fallback(
-                dep_ref,
-                _primary_op,
-                _bearer_op,
-                lambda response: response.status_code in (401, 403),
+            response = resolver.try_with_fallback(
+                host,
+                _request,
+                org=dep_ref.ado_organization,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
             )
-            bearer_attempted = bearer_attempted or outcome.bearer_attempted
-            return outcome.outcome
+            return response.content
 
         try:
-            response = _request(api_url)
-            _check_html_signin(response)
-            response.raise_for_status()
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"Unexpected HTTP {response.status_code} downloading "
-                    f"{file_path} from Azure DevOps"
-                )
-            return response.content
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                # Try fallback branches
+            try:
+                return _fetch(api_url)
+            except AuthAttemptFailed as failed:
+                status = getattr(failed.response, "status_code", None)
+                if isinstance(status, int) and 200 <= status < 300:
+                    raise RuntimeError(
+                        f"Unexpected HTTP {status} downloading {file_path} from Azure DevOps"
+                    ) from failed
+                if status != 404:
+                    raise RuntimeError(f"Failed to download {file_path}: HTTP {status}") from failed
                 if ref not in ["main", "master"]:
                     raise RuntimeError(
                         f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
-                    ) from e
-
+                    ) from failed
                 fallback_ref = "master" if ref == "main" else "main"
                 fallback_url = build_ado_api_url(
                     dep_ref.ado_organization,
@@ -742,37 +676,24 @@ class DownloadDelegate:
                     host,
                     dep_ref.port,
                 )
-
                 try:
-                    response = _request(fallback_url)
-                    _check_html_signin(response)
-                    response.raise_for_status()
-                    if response.status_code != 200:
-                        raise RuntimeError(
-                            f"Unexpected HTTP {response.status_code} downloading "
-                            f"{file_path} from Azure DevOps"
-                        )
-                    return response.content
-                except requests.exceptions.HTTPError as fallback_err:
+                    return _fetch(fallback_url)
+                except AuthAttemptFailed as fallback_failed:
                     raise RuntimeError(
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
-                    ) from fallback_err
-            elif e.response.status_code in (401, 403):
-                error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. "
-                error_msg += self._host.auth_resolver.build_error_context(
-                    host,
-                    "download",
-                    org=dep_ref.ado_organization if dep_ref else None,
-                    port=dep_ref.port if dep_ref else None,
-                    dep_url=dep_ref.repo_url if dep_ref else None,
-                    bearer_also_failed=bearer_attempted,
-                )
-                raise RuntimeError(error_msg) from e
-            else:
-                raise RuntimeError(
-                    f"Failed to download {file_path}: HTTP {e.response.status_code}"
-                ) from e
+                    ) from fallback_failed
+        except AdoAuthChainExhaustedError as exhausted:
+            error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. {exhausted}"
+            error_msg += resolver.build_error_context(
+                host,
+                "download",
+                org=dep_ref.ado_organization,
+                port=dep_ref.port,
+                dep_url=dep_ref.repo_url,
+                attempts=exhausted.attempts,
+            )
+            raise RuntimeError(error_msg) from exhausted
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
@@ -867,12 +788,7 @@ class DownloadDelegate:
                     *,
                     dep_ref: DependencyReference,
                 ) -> str:
-                    return self.build_repo_url(
-                        repo_ref,
-                        dep_ref=dep_ref,
-                        token="",
-                        auth_scheme="basic",
-                    )
+                    return self.build_repo_url(repo_ref, dep_ref=dep_ref)
 
                 transport_factory = self._git_file_transport_factory or GitSparseFileTransport
                 transport = transport_factory(
@@ -898,12 +814,7 @@ class DownloadDelegate:
             )
 
         auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)
-        remote_url = self.build_repo_url(
-            dep_ref.repo_url,
-            dep_ref=dep_ref,
-            token="",
-            auth_scheme="basic",
-        )
+        remote_url = self.build_repo_url(dep_ref.repo_url, dep_ref=dep_ref)
         if auth_ctx.token:
             git_env = self._host.auth_resolver.git_env_for_remote(auth_ctx, remote_url)
         else:
@@ -995,7 +906,6 @@ class DownloadDelegate:
             project_path,
             dep_ref=dep_ref,
             use_ssh=initial_transport_scheme(dep_ref, self._host._protocol_pref) == "ssh",
-            token="",
         )
         anonymous_plan = self._host._transport_selector.select(
             dep_ref=dep_ref,
@@ -1037,7 +947,6 @@ class DownloadDelegate:
                 project_path,
                 dep_ref=dep_ref,
                 use_ssh=attempt.scheme == "ssh",
-                token="",
             )
             effective_url = attempt.effective_url or requested_url
             attempt_ctx = resolver.resolve_for_remote(
@@ -1241,8 +1150,7 @@ class DownloadDelegate:
             headers: dict[str, str] = {
                 "Accept": "application/vnd.github.v3.raw",
             }
-            if token:
-                headers["Authorization"] = f"token {token}"
+            headers.update(AuthResolver.github_rest_headers(token))
             last_response = None
             for candidate_ref in refs:
                 api_url = self._build_contents_api_urls(
@@ -1461,8 +1369,7 @@ class DownloadDelegate:
         accept = "application/vnd.github.v3.raw" if is_github_host else "application/json"
         if is_github_host:
             headers: dict[str, str] = {"Accept": accept}
-            if token:
-                headers["Authorization"] = f"token {token}"
+            headers.update(AuthResolver.github_rest_headers(token))
         else:
             headers = self._build_generic_host_auth_headers(host, file_ctx, accept=accept)
 
@@ -1761,7 +1668,7 @@ class DownloadDelegate:
         org_scoped = source.startswith("GITHUB_APM_PAT_")
         configured_ghes = DownloadDelegate._is_configured_ghes(host)
         if host_scoped or org_scoped or configured_ghes:
-            headers["Authorization"] = f"token {auth_ctx.token}"
+            headers.update(AuthResolver.github_rest_headers(auth_ctx.token))
         return headers
 
     @staticmethod

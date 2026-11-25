@@ -35,7 +35,7 @@ Only files whose name ends in `.prompt.md` are compiled. Any other path in the s
 ## Behavior
 
 - **Compilation target.** Compiled prompts are written to `.apm/compiled/<basename>.txt` (the `.prompt.md` suffix is stripped). The same files would be produced by `apm run`.
-- **Output panels.** When the rich renderer is available, `apm preview` prints three panels: the original command, the compiled command, and the list of compiled prompt file paths. With no `.prompt.md` in the command, it prints a single yellow panel and a warning instead.
+- **Output panels.** When the rich renderer is available, `apm preview` prints three panels: the original command, the compiled command, and the list of compiled prompt file paths. With no `.prompt.md` in the command, it prints the command in a yellow panel, a warning, and a compilation-info panel instead.
 - **No runtime invocation.** The script's runtime (`codex`, `llm`, `claude`, etc.) is never spawned. Preview only resolves and compiles; it does not execute.
 - **Parameter parsing.** `--param foo=bar` becomes `{foo: "bar"}` and is passed to the prompt compiler. The first `=` splits the key from the value; later `=` characters stay in the value. A `--param` with no `=` is dropped.
 

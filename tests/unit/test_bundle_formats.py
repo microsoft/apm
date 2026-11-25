@@ -13,6 +13,8 @@ from apm_cli.bundle.formats import (
     resolve_bundle_format,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestBundleFormatSelection:
     @pytest.mark.parametrize(

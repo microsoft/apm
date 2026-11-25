@@ -8,13 +8,16 @@ path-traversal, and decompression-bomb guards.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import io
 import os
+import re
 import shutil
 import tarfile
+import unicodedata
 import uuid
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PureWindowsPath
 from typing import IO, TypeVar
 from urllib.parse import urlparse
@@ -32,6 +35,8 @@ MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024
 SUPPORTED_ARCHIVE_FORMATS = frozenset({"zip", "tar.gz"})
 
 _MAX_UNCOMPRESSED_BYTES = MAX_ZIP_UNCOMPRESSED
+# Tar headers, padding and pax records the uncompressed cap does not count.
+_TAR_HEADER_ALLOWANCE = 16 * 1024 * 1024
 _MAX_ARCHIVE_DOWNLOAD_BYTES = _MAX_UNCOMPRESSED_BYTES
 _COPY_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -43,6 +48,88 @@ _ErrorT = TypeVar("_ErrorT", bound=Exception)
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
+
+
+class _TarStreamLimit(tarfile.ReadError):
+    """The decompressed tar stream would pass the uncompressed cap plus headers."""
+
+
+class _BoundedStream:
+    """A decompressed tar stream that refuses to read or seek past *limit*.
+
+    ``tarfile`` reads a pax header and a GNU long-name or long-link block into
+    memory at the size the header declares, before any member reaches the
+    extraction limits. A read that would pass the limit is refused before
+    anything is read, so memory stays bounded.
+    """
+
+    def __init__(self, stream: IO[bytes], max_uncompressed: int) -> None:
+        self._stream = stream
+        self._cap = max_uncompressed
+        self._limit = max_uncompressed + _TAR_HEADER_ALLOWANCE
+
+    def _refuse(self) -> None:
+        raise _TarStreamLimit(
+            f"Archive uncompressed size exceeds size limit: {self._cap // (1024 * 1024)} MB"
+        )
+
+    def read(self, size: int | None = -1) -> bytes:
+        remaining = self._limit - self._stream.tell()
+        if size is None or size < 0:
+            size = remaining + 1
+        elif size > remaining:
+            self._refuse()
+        data = self._stream.read(size)
+        if self._stream.tell() > self._limit:
+            self._refuse()
+        return data
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET and offset > self._limit:
+            self._refuse()
+        if whence == io.SEEK_CUR and self._stream.tell() + offset > self._limit:
+            self._refuse()
+        return self._stream.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._stream.tell()
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+
+@contextlib.contextmanager
+def open_tar_gz(
+    *,
+    path: Path | None = None,
+    fileobj: IO[bytes] | None = None,
+    max_uncompressed: int | None = None,
+    error_type: type[_ErrorT] = ArchiveError,
+) -> Iterator[tarfile.TarFile]:
+    """Open a gzip-compressed tar for reading through the bounded stream."""
+    cap = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
+    with contextlib.ExitStack() as stack:
+        raw = stack.enter_context(open(path, "rb")) if path is not None else fileobj
+        compressed = stack.enter_context(gzip.GzipFile(fileobj=raw, mode="rb"))
+        stream = _BoundedStream(compressed, cap)
+        try:
+            tar = stack.enter_context(tarfile.open(fileobj=stream, mode="r:"))
+        except _TarStreamLimit as exc:
+            raise error_type(str(exc)) from exc
+        except OSError as exc:
+            raise tarfile.ReadError("not a gzip file") from exc
+        yield tar
+
+
+def _bounded_members(tar: tarfile.TarFile, error_type: type[_ErrorT]) -> Iterator[tarfile.TarInfo]:
+    """Iterate *tar*, mapping a refused stream read to *error_type*."""
+    try:
+        yield from tar
+    except _TarStreamLimit as exc:
+        _raise(error_type, str(exc))
 
 
 def validate_archive_format(archive_format: str) -> None:
@@ -87,23 +174,33 @@ def _raise(error_type: type[_ErrorT], message: str) -> None:
     raise error_type(message)
 
 
-def _copy_member_within_limit(src: IO[bytes], dst: IO[bytes], running_total: int) -> int:
-    """Stream *src* into *dst*, enforcing the cumulative uncompressed cap.
+# Windows reserved device names, matched on the text before the first dot;
+# COM and LPT also take a superscript digit (U+00B9, U+00B2, U+00B3).
+_RESERVED_DEVICE_STEM = re.compile(
+    r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[0-9\u00b9\u00b2\u00b3])", re.IGNORECASE
+)
 
-    Counts the actual bytes read from the decompressed member stream and aborts
-    mid-stream once the running total exceeds the cap, rather than trusting
-    archive header-declared member sizes.
+
+def portable_name_problem(name: str) -> str | None:
+    """Why *name* would not be written as-is on every OS, or ``None``.
+
+    Windows trims a trailing dot or space, reads ``:`` as an alternate data
+    stream and maps reserved device names, so a segment with any of these
+    would not land at the path it names. The rule applies on every OS (as
+    git's ``core.protectNTFS``) so one archive extracts the same everywhere.
     """
-    total = running_total
-    while True:
-        chunk = src.read(_COPY_CHUNK_BYTES)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_UNCOMPRESSED_BYTES:
-            raise ArchiveError(f"Archive exceeds size limit of {_MAX_UNCOMPRESSED_BYTES} bytes")
-        dst.write(chunk)
-    return total
+    for segment in name.replace("\\", "/").split("/"):
+        if not segment:
+            continue
+        if not segment.strip("."):
+            return "a segment made only of dots"
+        if segment[-1] in ". ":
+            return "a segment ending in a dot or space"
+        if ":" in segment or any(ord(char) < 0x20 for char in segment):
+            return "a colon or control character"
+        if _RESERVED_DEVICE_STEM.fullmatch(segment.split(".", 1)[0].rstrip(" ")):
+            return "a reserved device name"
+    return None
 
 
 def _check_archive_member(member_path: str) -> None:
@@ -146,27 +243,62 @@ def _detect_archive_format(content_type: str, url: str) -> str:
     )
 
 
-def _safe_destination(dest_dir: str, member_name: str) -> Path:
-    """Return a contained destination path for an archive member."""
-    destination_root = Path(dest_dir)
-    destination = destination_root / member_name
-    try:
-        return ensure_path_within(destination, destination_root)
-    except PathTraversalError as exc:
-        raise ArchiveError(
-            f"Archive member would extract outside destination: {member_name!r}"
-        ) from exc
+def _member_key(member_name: str) -> str:
+    """Return the collision key for an archive member name.
+
+    Two names that land on the same path on a case-insensitive filesystem,
+    that differ only by ``./`` prefixes or separators, or that are NFC and
+    NFD spellings of one name (one file on macOS), share one key.
+    """
+    normalized = member_name.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+    key = unicodedata.normalize("NFC", "/".join(parts))
+    return unicodedata.normalize("NFC", key.casefold())
 
 
-def _zip_member_target(
+class _MemberClaims:
+    """Path claims for one archive, checked before the first write.
+
+    Refuses a second entry for the same path (exact or case-folded), and a
+    file whose path is also used as a directory, in either order.
+    """
+
+    def __init__(self) -> None:
+        self._files: set[str] = set()
+        self._dirs: set[str] = set()
+        self._parents: set[str] = set()
+
+    def claim(self, member_name: str, *, is_dir: bool, error_type: type[_ErrorT]) -> None:
+        key = _member_key(member_name)
+        if key in self._files or key in self._dirs:
+            _raise(error_type, f"Refusing to extract duplicate entry: {member_name}")
+        if not is_dir and key in self._parents:
+            _raise(error_type, f"Refusing to extract conflicting entry: {member_name}")
+        parts = key.split("/")
+        for depth in range(1, len(parts)):
+            parent = "/".join(parts[:depth])
+            if parent in self._files:
+                _raise(error_type, f"Refusing to extract conflicting entry: {member_name}")
+            self._parents.add(parent)
+        (self._dirs if is_dir else self._files).add(key)
+
+
+_ZIP_FILE_TYPE_MASK = 0xF000
+_ZIP_SYMLINK = 0xA000
+_ZIP_ALLOWED_FILE_TYPES = frozenset({0, 0x4000, 0x8000})
+
+
+def _archive_member_target(
     member_name: str,
     dest_root: Path,
     *,
     error_type: type[_ErrorT],
 ) -> Path | None:
-    """Return a safe extraction target for a zip member, or None for empty dirs."""
-    if not member_name or member_name in (".", "/"):
+    """Return a safe extraction target for an archive member, or None for empty dirs."""
+    if not member_name or member_name in (".", "/", "./"):
         return None
+    if "\x00" in member_name:
+        _raise(error_type, f"Refusing to extract entry with a null byte: {member_name!r}")
     if (
         member_name.startswith(("/", "\\"))
         or PureWindowsPath(member_name).drive
@@ -177,6 +309,9 @@ def _zip_member_target(
         validate_path_segments(member_name, context="zip member")
     except PathTraversalError:
         _raise(error_type, f"Refusing to extract path-traversal entry: {member_name}")
+    problem = portable_name_problem(member_name)
+    if problem is not None:
+        _raise(error_type, f"Refusing to extract entry with {problem}: {member_name!r}")
     target = dest_root / member_name
     try:
         ensure_path_within(target, dest_root)
@@ -185,93 +320,214 @@ def _zip_member_target(
     return target
 
 
+def _stream_member(
+    src: IO[bytes],
+    target: Path,
+    running_total: int,
+    max_uncompressed: int,
+    *,
+    error_type: type[_ErrorT],
+) -> int:
+    """Stream one member into *target*, enforcing the cumulative uncompressed cap.
+
+    Counts bytes actually read from the decompressed stream, never the
+    member size an archive header declares.
+    """
+    total = running_total
+    with open(target, "wb") as fh:
+        while True:
+            chunk = src.read(_COPY_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_uncompressed:
+                limit_mb = max_uncompressed // (1024 * 1024)
+                actual_mb = total // (1024 * 1024)
+                _raise(
+                    error_type,
+                    f"Archive uncompressed size exceeds size limit: {actual_mb} MB > {limit_mb} MB",
+                )
+            fh.write(chunk)
+    return total
+
+
+def _write_planned(
+    plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]],
+    max_uncompressed: int,
+    *,
+    error_type: type[_ErrorT],
+) -> list[str]:
+    """Write validated members; on any failure remove the files written so far."""
+    written: list[Path] = []
+    names: list[str] = []
+    total_uncompressed = 0
+    try:
+        for target, name, opener, mode in plan:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            src = opener()
+            if src is None:
+                continue
+            written.append(target)
+            with src:
+                total_uncompressed = _stream_member(
+                    src, target, total_uncompressed, max_uncompressed, error_type=error_type
+                )
+            if mode:
+                os.chmod(target, mode & 0o755)
+            names.append(name)
+    except BaseException:
+        for path in written:
+            with contextlib.suppress(OSError):
+                path.unlink()
+        raise
+    return names
+
+
+def safe_extract_tar(
+    tar: tarfile.TarFile,
+    dest_root: Path,
+    *,
+    max_entries: int | None = None,
+    max_uncompressed: int | None = None,
+    error_type: type[_ErrorT] = ValueError,
+) -> list[str]:
+    """Safely stream-extract *tar* under *dest_root* with the shared archive limits.
+
+    Applies the same limits as :func:`safe_extract_zip`: an entry-count cap,
+    a streamed uncompressed-size cap, and refusal of links, special files,
+    absolute or traversing paths and duplicate entries. Every entry is
+    validated before the first file is written. Returns the names of the
+    regular files written.
+    """
+    entry_limit = MAX_ZIP_ENTRIES if max_entries is None else max_entries
+    size_limit = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
+    claims = _MemberClaims()
+    declared_total = 0
+    dirs: list[Path] = []
+    plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]] = []
+    # Advancing a compressed tar to the next header decompresses the current
+    # member's data, so the declared sizes are capped before each advance.
+    for count, member in enumerate(_bounded_members(tar, error_type), start=1):
+        if count > entry_limit:
+            _raise(error_type, f"Archive has more than {entry_limit} entries (limit {entry_limit})")
+        if member.issym() or member.islnk():
+            _raise(error_type, f"Symlinks and hard links are not supported: {member.name!r}")
+        if not (member.isdir() or member.isreg()):
+            _raise(error_type, f"Refusing to extract special file: {member.name!r}")
+        # A negative size would move the next header read backward, forever.
+        if member.size < 0:
+            _raise(error_type, f"Refusing to extract entry with a negative size: {member.name!r}")
+        declared_total += member.size
+        if declared_total > size_limit:
+            _raise(
+                error_type,
+                f"Archive uncompressed size exceeds size limit: {size_limit // (1024 * 1024)} MB",
+            )
+        target = _archive_member_target(member.name, dest_root, error_type=error_type)
+        if target is None:
+            continue
+        claims.claim(member.name, is_dir=member.isdir(), error_type=error_type)
+        if member.isdir():
+            dirs.append(target)
+            continue
+        plan.append((target, member.name, lambda m=member: tar.extractfile(m), member.mode))
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for directory in dirs:
+        directory.mkdir(parents=True, exist_ok=True)
+    return _write_planned(plan, size_limit, error_type=error_type)
+
+
 def safe_extract_zip(
     zf: zipfile.ZipFile,
     dest_root: Path,
     *,
-    max_entries: int = MAX_ZIP_ENTRIES,
-    max_uncompressed: int = MAX_ZIP_UNCOMPRESSED,
+    max_entries: int | None = None,
+    max_uncompressed: int | None = None,
     error_type: type[_ErrorT] = ValueError,
     member_name_transform: Callable[[str], str | None] | None = None,
 ) -> list[str]:
-    """Safely stream-extract *zf* under *dest_root* with zip-bomb limits.
+    """Safely stream-extract *zf* under *dest_root* with the shared archive limits.
 
     The uncompressed-size limit is enforced against bytes actually read from
     each entry, not against attacker-controlled ZipInfo.file_size metadata.
+    Every entry is validated before the first file is written.
     ``member_name_transform`` can strip or reject names before validation; the
     returned list contains the transformed member names that were written.
     """
-    dest_root.mkdir(parents=True, exist_ok=True)
+    max_entries = MAX_ZIP_ENTRIES if max_entries is None else max_entries
+    max_uncompressed = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
     members = zf.infolist()
     if len(members) > max_entries:
         _raise(error_type, f"ZIP archive has {len(members)} entries (limit {max_entries})")
 
-    extracted: list[str] = []
-    total_uncompressed = 0
+    claims = _MemberClaims()
+    dirs: list[Path] = []
+    plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]] = []
     for info in members:
         unix_mode = (info.external_attr >> 16) & 0xFFFF
-        if unix_mode and (unix_mode & 0xF000) == 0xA000:
+        file_type = unix_mode & _ZIP_FILE_TYPE_MASK
+        if file_type == _ZIP_SYMLINK:
             _raise(error_type, f"Refusing to extract symlink: {info.filename}")
+        if file_type not in _ZIP_ALLOWED_FILE_TYPES:
+            _raise(error_type, f"Refusing to extract special file: {info.filename!r}")
+        # zipfile cuts a name at its first NUL; judge the name the archive stores.
+        stored = info.orig_filename
+        if "\x00" in stored:
+            _raise(error_type, f"Refusing to extract entry with a null byte: {stored!r}")
         member_name = info.filename
         if member_name_transform is not None:
             member_name = member_name_transform(member_name)
         if member_name is None:
             continue
-        target = _zip_member_target(member_name, dest_root, error_type=error_type)
+        target = _archive_member_target(member_name, dest_root, error_type=error_type)
         if target is None:
             continue
+        claims.claim(member_name, is_dir=info.is_dir(), error_type=error_type)
         if info.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
+            dirs.append(target)
             continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(info, "r") as src, open(target, "wb") as fh:
-            while True:
-                chunk = src.read(_COPY_CHUNK_BYTES)
-                if not chunk:
-                    break
-                next_total = total_uncompressed + len(chunk)
-                if next_total > max_uncompressed:
-                    limit_mb = max_uncompressed // (1024 * 1024)
-                    actual_mb = next_total // (1024 * 1024)
-                    _raise(
-                        error_type,
-                        f"ZIP archive uncompressed size exceeds size limit: {actual_mb} MB > {limit_mb} MB",
-                    )
-                fh.write(chunk)
-                total_uncompressed = next_total
-        if unix_mode:
-            os.chmod(target, unix_mode & 0o755)
-        extracted.append(member_name)
-    return extracted
+        plan.append((target, member_name, lambda i=info: zf.open(i, "r"), unix_mode))
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for directory in dirs:
+        directory.mkdir(parents=True, exist_ok=True)
+    return _write_planned(plan, max_uncompressed, error_type=error_type)
+
+
+def read_zip_member(
+    zf: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    max_uncompressed: int | None = None,
+    error_type: type[_ErrorT] = ValueError,
+) -> bytes:
+    """Read one zip member into memory under the shared uncompressed-size cap."""
+    limit = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
+    buf = io.BytesIO()
+    total = 0
+    with zf.open(info, "r") as src:
+        while True:
+            chunk = src.read(_COPY_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                _raise(
+                    error_type,
+                    f"Archive member exceeds size limit: {info.filename} > {limit // (1024 * 1024)} MB",
+                )
+            buf.write(chunk)
+    return buf.getvalue()
 
 
 def _extract_tar_archive(archive: tarfile.TarFile, dest_dir: str) -> list[str]:
-    """Extract an opened tar archive into *dest_dir* with safety checks."""
-    extracted: list[str] = []
-    total_size = 0
-    for member in archive.getmembers():
-        if member.isdir():
-            continue
-        if member.issym() or member.islnk():
-            raise ArchiveError(f"Symlinks and hard links are not supported: {member.name!r}")
-        if not member.isreg():
-            continue
-        _check_archive_member(member.name)
-        destination = _safe_destination(dest_dir, member.name)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        src = archive.extractfile(member)
-        if src is None:
-            continue
-        with src, open(destination, "wb") as dst:
-            total_size = _copy_member_within_limit(src, dst, total_size)
-        extracted.append(member.name)
-    return extracted
+    """Extract an opened tar archive into *dest_dir* with the shared archive limits."""
+    return safe_extract_tar(archive, Path(dest_dir), error_type=ArchiveError)
 
 
 def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
     """Extract a tar.gz archive into *dest_dir* with safety checks."""
     try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        with open_tar_gz(fileobj=io.BytesIO(data)) as archive:
             return _extract_tar_archive(archive, dest_dir)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc
@@ -280,7 +536,7 @@ def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
 def _extract_tar_gz_file(path: Path, dest_dir: str) -> list[str]:
     """Extract a tar.gz archive file into *dest_dir* with safety checks."""
     try:
-        with tarfile.open(path, mode="r:gz") as archive:
+        with open_tar_gz(path=path) as archive:
             return _extract_tar_archive(archive, dest_dir)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc

@@ -6,10 +6,13 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
+import pytest
 from click.testing import CliRunner
 
 import apm_cli.commands.self_update as update_module
 from apm_cli.cli import cli
+
+pytestmark = pytest.mark.component
 
 
 class TestUpdateCommand(unittest.TestCase):
@@ -67,8 +70,8 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.self_update.shutil.which", return_value="powershell.exe")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value="powershell.exe")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_powershell_installer_on_windows(
         self,
@@ -110,7 +113,38 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value="powershell.exe")
+    @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
+    def test_windows_update_does_not_forward_parent_psmodulepath(
+        self,
+        mock_latest,
+        mock_which,
+        mock_version,
+        mock_run,
+        mock_get,
+    ):
+        """A PowerShell 7 module path must not reach the installer host (#3926)."""
+        mock_response = Mock()
+        mock_response.text = "Write-Host 'install'"
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+        mock_run.return_value = Mock(returncode=0)
+
+        with (
+            patch.dict(os.environ, {"PSModulePath": r"C:\Program Files\PowerShell\7\Modules"}),
+            patch.object(update_module.sys, "platform", "win32"),
+        ):
+            result = self.runner.invoke(cli, ["self-update"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        env = mock_run.call_args.kwargs["env"]
+        self.assertFalse([key for key in env if key.upper() == "PSMODULEPATH"])
+        self.assertEqual(env["VERSION"], "v0.7.0")
+
+    @patch("requests.get")
+    @patch("subprocess.run")
+    @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_shell_installer_on_unix(
         self,
@@ -129,7 +163,7 @@ class TestUpdateCommand(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "darwin"),
-            patch.object(update_module.shutil, "which", return_value="/usr/bin/bash"),
+            patch.object(update_module.git_env, "trusted_executable", return_value="/usr/bin/bash"),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 
@@ -150,94 +184,6 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertIn("env", mock_run.call_args.kwargs)
         self.assertIsNotNone(mock_run.call_args.kwargs["env"])
         self.assertEqual(mock_run.call_args.kwargs["env"]["VERSION"], "v0.7.0")
-
-
-class TestUpdatePlatformHelpers(unittest.TestCase):
-    """Tests for platform-detection helper functions."""
-
-    def test_is_windows_platform_true_on_win32(self):
-        with patch.object(update_module.sys, "platform", "win32"):
-            self.assertTrue(update_module._is_windows_platform())
-
-    def test_is_windows_platform_false_on_linux(self):
-        with patch.object(update_module.sys, "platform", "linux"):
-            self.assertFalse(update_module._is_windows_platform())
-
-    def test_is_windows_platform_false_on_darwin(self):
-        with patch.object(update_module.sys, "platform", "darwin"):
-            self.assertFalse(update_module._is_windows_platform())
-
-    def test_installer_url_windows(self):
-        with patch.object(update_module.sys, "platform", "win32"):
-            url = update_module._get_update_installer_url()
-        self.assertEqual(url, "https://aka.ms/apm-windows")
-
-    def test_installer_url_unix(self):
-        with patch.object(update_module.sys, "platform", "linux"):
-            url = update_module._get_update_installer_url()
-        self.assertEqual(url, "https://aka.ms/apm-unix")
-
-    def test_installer_suffix_windows(self):
-        with patch.object(update_module.sys, "platform", "win32"):
-            suffix = update_module._get_update_installer_suffix()
-        self.assertEqual(suffix, ".ps1")
-
-    def test_installer_suffix_unix(self):
-        with patch.object(update_module.sys, "platform", "linux"):
-            suffix = update_module._get_update_installer_suffix()
-        self.assertEqual(suffix, ".sh")
-
-    def test_manual_update_command_unix(self):
-        with patch.object(update_module.sys, "platform", "linux"):
-            command = update_module._get_manual_update_command()
-        self.assertIn("aka.ms/apm-unix", command)
-        self.assertIn("curl", command)
-
-    def test_installer_run_command_unix_bash_found(self):
-        with (
-            patch.object(update_module.sys, "platform", "linux"),
-            patch.object(update_module.shutil, "which", return_value="/usr/bin/bash"),
-        ):
-            cmd = update_module._get_installer_run_command("/tmp/install.sh")
-        self.assertEqual(cmd, ["/usr/bin/bash", "/tmp/install.sh"])
-
-    def test_installer_run_command_unix_fallback_to_bin_bash(self):
-        with (
-            patch.object(update_module.sys, "platform", "linux"),
-            patch.object(update_module.shutil, "which", return_value=None),
-            patch.object(update_module.os.path, "exists", return_value=True),
-        ):
-            cmd = update_module._get_installer_run_command("/tmp/install.sh")
-        self.assertEqual(cmd, ["/bin/bash", "/tmp/install.sh"])
-
-    def test_installer_run_command_unix_no_bash_raises(self):
-        with (
-            patch.object(update_module.sys, "platform", "linux"),
-            patch.object(update_module.shutil, "which", return_value=None),
-            patch.object(update_module.os.path, "exists", return_value=False),
-        ):
-            with self.assertRaises(FileNotFoundError):
-                update_module._get_installer_run_command("/tmp/install.sh")
-
-    def test_installer_run_command_windows_powershell_not_found(self):
-        with (
-            patch.object(update_module.sys, "platform", "win32"),
-            patch.object(update_module.shutil, "which", return_value=None),
-        ):
-            with self.assertRaises(FileNotFoundError):
-                update_module._get_installer_run_command("/tmp/install.ps1")
-
-    def test_installer_run_command_windows_pwsh_fallback(self):
-        def _which(name):
-            return "pwsh.exe" if name == "pwsh" else None
-
-        with (
-            patch.object(update_module.sys, "platform", "win32"),
-            patch.object(update_module.shutil, "which", side_effect=_which),
-        ):
-            cmd = update_module._get_installer_run_command("/tmp/install.ps1")
-        self.assertEqual(cmd[0], "pwsh.exe")
-        self.assertIn("-File", cmd)
 
 
 class TestUpdateCommandLogic(unittest.TestCase):
@@ -319,7 +265,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_installer_failure_exits_1(
         self, mock_latest, mock_chmod, mock_version, mock_run, mock_get
@@ -332,7 +278,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 
@@ -363,7 +309,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
     @patch("requests.get")
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_network_error_exits_1(self, mock_latest, mock_chmod, mock_version, mock_get):
         mock_get.side_effect = OSError("Network error")
@@ -377,7 +323,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_temp_file_cleanup_on_success(
         self, mock_latest, mock_chmod, mock_version, mock_run, mock_get
@@ -398,7 +344,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
             patch.object(update_module.os, "unlink", side_effect=tracking_unlink),
         ):
             result = self.runner.invoke(cli, ["self-update"])

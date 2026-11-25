@@ -18,6 +18,8 @@ from apm_cli.deps.reachability import compute_forward_reachable_keys
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.models.dependency import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _isolated_apm_yml_cache():
@@ -624,3 +626,44 @@ def test_walk_reads_manifest_of_case_variant_install(tmp_path):
 
     assert result.complete is True
     assert child in result.reachable
+
+
+def test_fails_closed_when_a_candidate_directory_cannot_be_stat(tmp_path, monkeypatch):
+    """A candidate directory whose stat fails (not ENOENT) is unverifiable, not path-only.
+
+    Without its file identity an aliased spelling of another candidate
+    cannot be told apart, so the candidate is kept and named (#4989).
+    """
+    import pathlib
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    for name in ("root-b", "shared", "other"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0\n")
+    lockfile = LockFile()
+    for name in ("root-b", "other"):
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url=f"_local/{name}", source="local", local_path=f"../{name}", depth=1
+            )
+        )
+    other_key = _shared_key(lockfile, "_local/other")
+    denied = (tmp_path / "other").resolve()
+    real_stat = pathlib.Path.stat
+
+    def stat(self, *args, **kwargs):
+        if self == denied:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", stat)
+    root_b_ref = DependencyReference.parse_from_dict({"path": "../root-b"})
+    result = compute_forward_reachable_keys(
+        lockfile, project_root, project_root / "apm_modules", [root_b_ref], frozenset({other_key})
+    )
+
+    assert result.complete is False
+    assert [key for key, _ in result.unverifiable] == [other_key]
+    assert "Permission denied" in result.unverifiable[0][1]
+    assert (tmp_path / "other" / "apm.yml").is_file()

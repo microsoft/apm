@@ -3,7 +3,11 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.adapters.package_manager.default_manager import DefaultMCPPackageManager
+
+pytestmark = pytest.mark.unit
 
 
 class TestDefaultMCPPackageManager(unittest.TestCase):

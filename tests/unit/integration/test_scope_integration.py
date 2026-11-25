@@ -11,7 +11,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -20,6 +20,8 @@ from apm_cli.integration.targets import KNOWN_TARGETS, resolve_targets
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
+
+pytestmark = pytest.mark.component
 
 
 def _set_home(monkeypatch, home: Path) -> None:
@@ -306,8 +308,9 @@ class TestClaudeScopeResolution:
         assert ".." not in scoped.root_dir
         assert scoped.root_dir == str((tmp_path / "outside").resolve())
 
-    def test_project_scope_ignores_env_var(self, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/should/not/be/used")
+    @pytest.mark.windows_compat
+    def test_project_scope_ignores_env_var(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "should-not-be-used"))
         scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=False)
         assert scoped is KNOWN_TARGETS["claude"]
         assert scoped.root_dir == ".claude"

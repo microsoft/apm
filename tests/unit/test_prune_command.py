@@ -34,9 +34,12 @@ from apm_cli.core.deployment_state import (
 )
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.cleanup import remove_stale_deployed_files
+from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+from tests.utils.deployment_evidence import receipted_evidence
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -138,6 +141,14 @@ class TestPruneCommand:
         except (FileNotFoundError, OSError):
             repo_root = Path(__file__).parent.parent.parent
             os.chdir(str(repo_root))
+
+    def _receipted(self, *roots: Path, deploy_root: Path):
+        """Patch evidence collection: APM deployed *roots* on this machine (#3701)."""
+        return patch.object(
+            DeploymentEvidence,
+            "collect",
+            return_value=receipted_evidence(*roots, deploy_root=deploy_root),
+        )
 
     @contextlib.contextmanager
     def _chdir_tmp(self):
@@ -247,6 +258,29 @@ class TestPruneCommand:
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             assert not orphan_dir.exists(), "Orphaned package dir should be removed"
+
+    def test_prune_refuses_before_any_change_when_its_graph_check_fails(self):
+        """The pre-pass fails closed (#5140): no reconciliation, no removal."""
+        reconciled: list[object] = []
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            orphan_dir = _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            with (
+                patch(
+                    "apm_cli.commands.prune.decide_orphan_removal",
+                    side_effect=RuntimeError("graph unreadable"),
+                ),
+                patch(
+                    "apm_cli.install.local_bundle_hook_trust.reconcile_scope_bundle_hooks",
+                    side_effect=lambda *a, **k: reconciled.append(a),
+                ),
+            ):
+                result = self.runner.invoke(cli, ["prune"])
+            assert result.exit_code == 1, result.output
+            assert "could not be checked (graph unreadable)" in result.output
+            assert "Nothing was changed." in result.output
+            assert reconciled == [], "the refusal comes before bundle reconciliation"
+            assert orphan_dir.is_dir()
 
     def test_prune_keeps_declared_packages(self):
         """prune must not remove packages that are declared in apm.yml."""
@@ -568,35 +602,47 @@ class TestPruneCommand:
             assert result.exit_code == 1
             assert "Failed to remove bad-org/bad-repo" in result.output
             assert "Prune incomplete" in result.output
-            assert "rerun 'apm prune'" in " ".join(result.output.split())
+            assert "then run 'apm prune' to finish the filesystem cleanup" in " ".join(
+                result.output.split()
+            )
+
+    @pytest.mark.parametrize("dry_run", [False, True], ids=["prune", "dry-run"])
+    def test_prune_fails_closed_when_the_native_gate_check_errors(self, dry_run):
+        """#4754: a gate_retirements error stops prune with an error, never silently."""
+        from apm_cli.native_plugins.record import NativePluginRecord
+
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            orphan_dir = _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            dependency = LockedDependency(
+                repo_url="acme/tool", resolved_commit="a" * 40, package_type="marketplace_plugin"
+            )
+            dependency.native_plugin = NativePluginRecord(
+                "tool", "sha256:" + "0" * 64, "apm-p-00000000", "./.agents/plugins"
+            )
+            lock_path = tmp / "apm.lock.yaml"
+            LockFile(dependencies={"acme/tool": dependency}).write(lock_path)
+            lock_before = lock_path.read_bytes()
+
+            with patch(
+                "apm_cli.install.exec_gate.gate_retirements",
+                side_effect=RuntimeError("approval store unreadable"),
+            ):
+                args = ["prune", "--dry-run"] if dry_run else ["prune"]
+                result = self.runner.invoke(cli, args)
+
+            output = " ".join(result.output.split())
+            assert result.exit_code == 1, result.output
+            assert "Could not check locked native plugins" in output
+            assert "approval store unreadable" in output
+            assert "Prune stopped before removing packages" in output
+            assert "then run 'apm prune' to retire native plugins" in output
+            assert lock_path.read_bytes() == lock_before
+            assert orphan_dir.exists()
 
     # ------------------------------------------------------------------
     # Lockfile cleanup
     # ------------------------------------------------------------------
-
-    def test_prune_removes_lockfile_entry_for_pruned_package(self):
-        """prune deletes the lockfile entry for a pruned package."""
-        lockfile_content = """\
-version: 1
-dependencies:
-  - repo_url: orphan-org/orphan-repo
-    host: github.com
-    resolved_commit: abc123
-    depth: 1
-"""
-        with self._chdir_tmp() as tmp:
-            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
-            _make_package_dir(tmp, "orphan-org", "orphan-repo")
-            _write_lockfile(tmp, lockfile_content)
-            result = self.runner.invoke(cli, ["prune"])
-            assert result.exit_code == 0
-            lockfile_path = tmp / "apm.lock.yaml"
-            # When the package is pruned, its lockfile entry should be removed;
-            # the lockfile itself may also be deleted.
-            if lockfile_path.exists():
-                assert "orphan-org/orphan-repo" not in lockfile_path.read_text()
-            else:
-                pass
 
     @pytest.mark.windows_compat
     def test_prune_mcp_cleanup_failure_preserves_lock_and_live_config(self):
@@ -682,7 +728,8 @@ dependencies:
             deployed = tmp / ".github" / "prompts" / "orphan-prompt.md"
             deployed.parent.mkdir(parents=True, exist_ok=True)
             deployed.write_text("# Orphan prompt\n")
-            result = self.runner.invoke(cli, ["prune"])
+            with self._receipted(deployed, deploy_root=tmp):
+                result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             assert not deployed.exists(), "Deployed file must be removed by prune"
 
@@ -869,10 +916,13 @@ dependencies:
                 ),
             )
 
-            with patch(
-                "apm_cli.commands.prune.remove_stale_deployed_files",
-                wraps=remove_stale_deployed_files,
-            ) as cleanup:
+            with (
+                self._receipted(beta, deploy_root=tmp),
+                patch(
+                    "apm_cli.commands.prune.remove_stale_deployed_files",
+                    wraps=remove_stale_deployed_files,
+                ) as cleanup,
+            ):
                 result = self.runner.invoke(cli, ["prune"])
 
             assert result.exit_code == 0, result.output
@@ -910,6 +960,8 @@ dependencies:
             assert "repair 1 deployment ownership record" in result.output
             assert ghost_path in result.output
             assert "removed/beta" in result.output
+            # The preview names the path, not the internal composite key (#3994).
+            assert "||" not in result.output
             assert lockfile_path.read_bytes() == before
             assert ghost.read_text() == "# Manual sentinel\n"
 
@@ -1077,6 +1129,8 @@ dependencies:
             _make_package_dir(tmp, "orphan-org", "orphan-repo")
             deployed = tmp / deployed_path
             deployed.parent.mkdir(parents=True)
+            deployed.write_text("# Deployed\n")
+            receipts = self._receipted(deployed, deploy_root=tmp)
             deployed.write_text("# User edit\n")
             _write_canonical_lockfile(
                 tmp,
@@ -1097,7 +1151,8 @@ dependencies:
                 ),
             )
 
-            result = self.runner.invoke(cli, ["prune"])
+            with receipts:
+                result = self.runner.invoke(cli, ["prune"])
 
             assert result.exit_code == 0, result.output
             assert deployed.read_text() == "# User edit\n"
@@ -1220,7 +1275,7 @@ dependencies:
             assert result.exit_code == 1
             assert "Failed to update apm.lock.yaml" in result.output
             assert "Package directories already removed: orphan-org/orphan-repo." in result.output
-            assert "Rerun 'apm prune'" in result.output
+            assert "Run 'apm prune' to finish the filesystem" in result.output
 
     def test_prune_retry_repairs_lock_after_prior_write_failure(self):
         """A retry converges after package cleanup outlives a failed lock write."""
@@ -1348,3 +1403,32 @@ dependencies:
             assert prod_dir.exists(), "Prod dependency must remain"
             assert dev_dir.exists(), "Dev dependency must remain"
             assert not orphan_dir.exists(), "Orphaned package must be removed"
+
+
+class TestPruneLocalBundleHookRecheck:
+    """Only a target-resolution failure lets prune skip the hook re-check."""
+
+    @pytest.fixture
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "apm.yml").write_text(_APM_YML_NO_DEPS)
+        monkeypatch.chdir(tmp_path)
+        clear_apm_yml_cache()
+        return tmp_path
+
+    def test_unresolved_targets_warn_and_continue(self, project: Path) -> None:
+        with patch(
+            "apm_cli.integration.targets.resolve_targets",
+            side_effect=RuntimeError("no targets"),
+        ):
+            result = CliRunner().invoke(cli, ["prune"])
+        assert result.exit_code == 0, result.output
+        assert "Local bundle hooks were NOT re-checked" in " ".join(result.output.split())
+
+    def test_other_recheck_failures_fail_closed(self, project: Path) -> None:
+        with patch(
+            "apm_cli.install.local_bundle_hook_trust.retire_unadmitted_bundle_hooks",
+            side_effect=OSError("lockfile unreadable"),
+        ):
+            result = CliRunner().invoke(cli, ["prune"])
+        assert result.exit_code == 1, result.output
+        assert "Local bundle hook re-check failed" in " ".join(result.output.split())

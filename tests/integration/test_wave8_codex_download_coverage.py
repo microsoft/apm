@@ -345,7 +345,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -363,7 +363,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -381,7 +381,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -396,7 +396,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 return_value=rate_resp,
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 503
@@ -414,7 +414,7 @@ class TestResilientGet:
                     ok_resp,
                 ],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -426,7 +426,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=requests.exceptions.ConnectionError("fail"),
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
             pytest.raises(requests.exceptions.ConnectionError),
         ):
             delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
@@ -465,7 +465,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200

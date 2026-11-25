@@ -55,9 +55,13 @@ class DependencyPolicy:
 
 @dataclass(frozen=True)
 class McpTransportPolicy:
-    """Allowed MCP transport protocols."""
+    """Allowed MCP transport protocols.
 
-    allow: tuple[str, ...] | None = None  # stdio, sse, http, streamable-http
+    ``allow`` holds canonical names only (stdio, streamable-http, sse); the
+    parser folds the ``http`` alias into ``streamable-http``.
+    """
+
+    allow: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -68,7 +72,8 @@ class McpPolicy:
     deny: tuple[str, ...] = ()
     transport: McpTransportPolicy = field(default_factory=McpTransportPolicy)
     self_defined: str = "warn"  # deny | warn | allow
-    trust_transitive: bool = False
+    # None: not set (effective false); an explicit value makes the policy non-empty.
+    trust_transitive: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,20 @@ class RegistrySourcePolicy:
 
     require: tuple[str, ...] = ()
     allow_non_registry: bool = True
+
+
+@dataclass(frozen=True)
+class MarketplacePolicy:
+    """Rules governing the marketplaces a root project's apm.yml may declare.
+
+    ``allow``: origin patterns (``host/path`` globs such as
+    ``github.com/contoso/*``) that every ``marketplaces:`` entry in the root
+    project manifest must match (#2903 D1). ``None`` = no opinion;
+    ``()`` = no declared marketplace is allowed. A local catalog has no
+    origin and never matches.
+    """
+
+    allow: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -287,6 +306,7 @@ class ApmPolicy:
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
+    marketplace: MarketplacePolicy = field(default_factory=MarketplacePolicy)
     security: SecurityPolicy = field(default_factory=SecurityPolicy)
     # ``bin_deploy`` is the DEPRECATED bin-scoped predecessor of
     # ``executables`` (issue #1873). Retained one minor cycle as an alias the

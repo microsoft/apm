@@ -23,6 +23,8 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.unit
+
 # Patch targets:
 # _discover_with_chain is a module-level function in policy_gate
 _PATCH_DISCOVER = "apm_cli.install.phases.policy_gate._discover_with_chain"
@@ -43,6 +45,12 @@ class _FakeContext:
     logger: Any = None
     deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
+    # the resolved graph whose depth the gate judges (#4826)
+    dependency_graph: Any = None
+    dry_run: bool = False
+    package_hashes: dict[str, str] = field(default_factory=dict)
+    package_types: dict[str, Any] = field(default_factory=dict)
+    update_plan_complete_dep_keys: set[str] = field(default_factory=set)
 
     # policy_gate fields
     policy_fetch: Any = None
@@ -363,6 +371,38 @@ class TestEnforcementBlock:
         assert (
             call_kwargs[1]["severity"] == "block" or call_kwargs.kwargs.get("severity") == "block"
         )
+
+
+class TestViolationNamesDependency:
+    """#3835: each violation names the offending dependency, not the check."""
+
+    @patch(_PATCH_DISCOVER)
+    def test_block_violation_names_each_denied_dependency(self, mock_discover):
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        policy = ApmPolicy(
+            enforcement="block",
+            dependencies=DependencyPolicy(deny=("evilcorp/*",)),
+        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy)
+        deps = [
+            DependencyReference.parse("evilcorp/bad-pkg"),
+            DependencyReference.parse("evilcorp/worse-pkg"),
+            DependencyReference.parse("acme/good-pkg"),
+        ]
+        ctx = _make_ctx(deps=deps)
+
+        with pytest.raises(PolicyViolationError):
+            run(ctx)
+
+        calls = [c.kwargs for c in ctx.logger.policy_violation.call_args_list]
+        assert [c["dep_ref"] for c in calls] == [
+            "github.com/evilcorp/bad-pkg",
+            "github.com/evilcorp/worse-pkg",
+        ]
+        assert all(c["reason"] == "denied by pattern: evilcorp/*" for c in calls)
+        assert all(c["remedy"] == "remove" for c in calls)
+        assert all(c["rule"] == "dependency-denylist" for c in calls)
 
 
 class TestEnforcementWarn:
@@ -925,3 +965,31 @@ class TestExplicitIncludesWiring:
 
         with pytest.raises(PolicyViolationError):
             run(ctx)
+
+
+@pytest.mark.parametrize("package_info", [None, "instruction"], ids=["no-targets", "instruction"])
+def test_content_types_gate_judges_only_materializations_that_deploy(tmp_path, package_info):
+    """A no-targets materialization (package_info None) deploys nothing and passes."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.phases.policy_gate import enforce_content_types
+    from apm_cli.policy.schema import ManifestPolicy
+
+    package = tmp_path / "pkg"
+    (package / ".apm" / "instructions").mkdir(parents=True)
+    (package / ".apm" / "instructions" / "i.instructions.md").write_text("x\n", encoding="utf-8")
+    policy = ApmPolicy(
+        enforcement="block", manifest=ManifestPolicy(content_types={"allow": ["skill"]})
+    )
+    ctx = SimpleNamespace(
+        policy_enforcement_active=True,
+        policy_fetch=SimpleNamespace(policy=policy, source="org:acme/.github"),
+        logger=None,
+    )
+    info = None if package_info is None else SimpleNamespace(install_path=package)
+    materialized = [(SimpleNamespace(dep_key="acme/pkg"), SimpleNamespace(package_info=info))]
+    if package_info is None:
+        enforce_content_types(ctx, materialized)
+    else:
+        with pytest.raises(PolicyViolationError, match=r"manifest\.content_types"):
+            enforce_content_types(ctx, materialized)

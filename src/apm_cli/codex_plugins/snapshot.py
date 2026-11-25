@@ -11,7 +11,14 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
+from apm_cli.cache.cached_repo import (
+    UntrustedCachedRepoError,
+    cached_repo_env,
+    inert_git_args,
+    require_trusted_cached_repo,
+)
 from apm_cli.codex_plugins.client import CodexNativeError
+from apm_cli.core.remediation import CODEX_NATIVE_REGISTRATION_UNVERIFIED
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.content_hash import compute_native_bundle_hash
@@ -37,8 +44,20 @@ class NativeSnapshot:
 
 
 def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) -> str:
-    """Run only local Git plumbing without credentials, hooks, filters, or templates."""
-    env = git_subprocess_env()
+    """Run only local Git plumbing without credentials, hooks, filters, or templates.
+
+    A snapshot repository persists in ``apm_modules``, so every run after
+    ``init`` first checks it holds only the Git state ``init`` writes.
+    """
+    if arguments[0] != "init":
+        try:
+            require_trusted_cached_repo(root, bare=False, origin_ok=lambda _url: False)
+        except UntrustedCachedRepoError as error:
+            raise CodexNativeError(
+                "The local native transport snapshot holds unexpected Git state; "
+                "remove it and retry."
+            ) from error
+    env = cached_repo_env(git_subprocess_env(), root)
     clear_git_platform_token_env(env, remove=True)
     clear_git_auth_env(env, remove_helpers=True)
     env.update(
@@ -58,6 +77,7 @@ def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) 
             [
                 get_git_executable(),
                 *git_no_hooks_args(),
+                *inert_git_args(),
                 "-c",
                 "core.autocrlf=false",
                 "-c",
@@ -107,7 +127,10 @@ def prepare_snapshot(
 ) -> NativeSnapshot:
     """Materialize only admitted bytes; Codex owns every native-cache mutation."""
     if compute_native_bundle_hash(plan.source_root) != expected_hash:
-        raise CodexNativeError("Codex plugin source changed after admission; rerun apm install.")
+        raise CodexNativeError(
+            "Codex plugin source changed after admission. "
+            + CODEX_NATIVE_REGISTRATION_UNVERIFIED.sentence()
+        )
     if destination.exists() or destination.is_symlink():
         raise CodexNativeError(
             "Native snapshot destination already exists; refusing to replace it."

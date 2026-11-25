@@ -17,17 +17,19 @@ from __future__ import annotations
 
 import json
 import tomllib
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..integration.base_integrator import BaseIntegrator
+from ..integration.hook_bundle import is_deployed_hook_module_metadata
 from ..integration.hook_integrator import native_hook_config
 from ..integration.hook_native_formats import HookContentEntry, inspect_native_hooks
 from ..integration.targets import TargetProfile
-from ..security.content_scanner import ContentScanner, ScanFinding
+from ..security.content_scanner import ContentScanner, ScanFinding, pointer_location
+from ..utils.path_security import open_regular_file
 from .primitive_discovery import (
     PrimitiveSurface,
     iter_surface_files,
@@ -48,6 +50,20 @@ class CoverageEntry:
     status: Literal["checked", "not-applicable", "incomplete"]
     diagnostic: str | None = None
     strippable: bool = False
+    # An entry APM merged into a shared hook config, proven by its owner marker (RA-043).
+    owned_entry: bool = False
+
+    @property
+    def tracking(self) -> str:
+        """Name the ownership evidence: lock-recorded file, APM-marked entry, or none."""
+        if self.owned_entry:
+            return "apm-owned-entry"
+        return "recorded-file" if self.tracked else "untracked"
+
+    @property
+    def location(self) -> str:
+        """Render the file path and the JSON pointer inside it as separate parts."""
+        return pointer_location(self.file, self.pointer)
 
 
 @dataclass(frozen=True)
@@ -153,15 +169,37 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
-def _content_entries(path: Path, surface: PrimitiveSurface) -> tuple[HookContentEntry, ...]:
-    """Extract documented prompt-bearing content, not arbitrary string values."""
+def _regular_bytes(path: Path) -> bytes:
+    """The bytes of *path*; ``OSError`` unless it is a regular file that is not a link.
+
+    A FIFO or device at a deployed path reads as not a primitive and never
+    blocks (#5280).
+    """
+    with open_regular_file(path) as handle:
+        return handle.read()
+
+
+def _content_entries(
+    path: Path, surface: PrimitiveSurface, recorded_hash: str | None = None
+) -> tuple[HookContentEntry, ...]:
+    """Extract documented prompt-bearing content, not arbitrary string values.
+
+    *recorded_hash* is the lockfile hash of *path*, if recorded; it lets the
+    hook bundle owner recognize the module metadata it deployed.
+    """
     if surface.kind == "executable":
         return (HookContentEntry(""),)
-    text = path.read_text(encoding="utf-8")
     if surface.kind == "hooks":
         config = native_hook_config(surface.target)
+        # Untranslated newlines: the canonical deployed-file hash alone normalizes them.
+        text = _regular_bytes(path).decode("utf-8")
+        document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+        if is_deployed_hook_module_metadata(
+            path, text, target_name=surface.target, recorded_hash=recorded_hash
+        ):
+            return (HookContentEntry(""),)
         return inspect_native_hooks(
-            json.loads(text, object_pairs_hook=_reject_duplicate_keys),
+            document,
             surface.format_id,
             container=config.event_container_key if config else "hooks",
             prompt_types=config.prompt_handler_types if config else (),
@@ -169,6 +207,8 @@ def _content_entries(path: Path, surface: PrimitiveSurface) -> tuple[HookContent
             shared=surface.shared,
             nested_handlers=config.nested_handlers if config else None,
         )
+    # Universal newlines, as read_text gave.
+    text = _regular_bytes(path).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if surface.prompt_fields:
         document = tomllib.loads(text)
         return tuple(
@@ -189,6 +229,7 @@ def _scan_primitive(
     *,
     tracked: bool,
     cache: dict[PrimitiveSurface, FileScanResult] | None = None,
+    recorded_hash: str | None = None,
 ) -> FileScanResult:
     """Check one recognized surface and retain non-applicability/coverage evidence."""
     key = replace(
@@ -218,7 +259,7 @@ def _scan_primitive(
                     for entry in cached.inventory
                 ),
             )
-        entries = _content_entries(path, surface)
+        entries = _content_entries(path, surface, recorded_hash)
     except (OSError, UnicodeError, ValueError) as exc:
         entries = (
             HookContentEntry("", error=f"cannot interpret primitive ({type(exc).__name__})"),
@@ -293,15 +334,14 @@ def _scan_deployed_trees(
     for surface in primitive_surfaces(project_root, scoped, user_scope=user_scope):
         try:
             for path in iter_surface_files(surface):
-                results.append(
-                    _scan_primitive(
-                        path,
-                        surface,
-                        _label(path, surface, project_root),
-                        tracked=False,
-                        cache=cache,
-                    )
+                result = _scan_primitive(
+                    path,
+                    surface,
+                    _label(path, surface, project_root),
+                    tracked=False,
+                    cache=cache,
                 )
+                results.append(_mark_owned_hook_entries(result, surface, path))
         except OSError as exc:
             label = _label(surface.path, surface, project_root)
             results.append(
@@ -324,10 +364,57 @@ def _scan_deployed_trees(
     return _merge_results(results)
 
 
+def _mark_owned_hook_entries(
+    result: FileScanResult, surface: PrimitiveSurface, path: Path
+) -> FileScanResult:
+    """Mark the entries a shared hook config's APM owner marker claims (RA-043)."""
+    config = native_hook_config(surface.target)
+    if not surface.shared or surface.kind != "hooks" or config is None:
+        return result
+    from ..integration.hook_ownership import apm_owned_hook_entry_pointers
+
+    owned = apm_owned_hook_entry_pointers(path, config.event_container_key)
+    if not owned:
+        return result
+    return replace(
+        result,
+        inventory=tuple(
+            replace(entry, tracked=True, owned_entry=True)
+            if any(entry.pointer == p or entry.pointer.startswith(f"{p}/") for p in owned)
+            else entry
+            for entry in result.inventory
+        ),
+    )
+
+
 def scan_deployed_trees(project_root: Path) -> tuple[dict[str, list[ScanFinding]], int]:
     """Scan governed deploy trees and return findings plus unique file count."""
     result = _scan_deployed_trees(project_root)
     return result.findings_by_file, len(result.scanned_files)
+
+
+def surface_candidates(
+    surfaces: Sequence[PrimitiveSurface],
+) -> Callable[[Path], list[PrimitiveSurface]]:
+    """Return a lookup of the surfaces that may hold a path, in *surfaces* order.
+
+    Exactly ``[s for s in surfaces if s.contains(p) or (s.pattern is not None
+    and p.is_relative_to(s.path))]``: an exact surface holds only its own
+    path, and a pattern surface holds its path and every descendant. Indexing
+    by surface path turns one scan over every surface per claimed file into
+    lookups of the path and its ancestors.
+    """
+    by_path: dict[Path, list[tuple[int, PrimitiveSurface]]] = {}
+    for index, surface in enumerate(surfaces):
+        by_path.setdefault(surface.path, []).append((index, surface))
+
+    def candidates(path: Path) -> list[PrimitiveSurface]:
+        hits = list(by_path.get(path, ()))
+        for ancestor in path.parents:
+            hits.extend(hit for hit in by_path.get(ancestor, ()) if hit[1].pattern is not None)
+        return [surface for _index, surface in sorted(hits, key=lambda hit: hit[0])]
+
+    return candidates
 
 
 def _scan_claimed_files(
@@ -338,6 +425,7 @@ def _scan_claimed_files(
     *,
     user_scope: bool = False,
     cache: dict[PrimitiveSurface, FileScanResult] | None = None,
+    recorded_hashes: dict[str, str] | None = None,
 ) -> FileScanResult:
     """Scan one canonical deployment-claim projection."""
     from ..integration.targets import KNOWN_TARGETS
@@ -351,6 +439,7 @@ def _scan_claimed_files(
         and not profile.user_root_resolver
     ] + list(reversed(targets))
     surfaces = primitive_surfaces(project_root, profiles, user_scope=user_scope)
+    candidates_for = surface_candidates(surfaces)
     results: list[FileScanResult] = []
     cache = {} if cache is None else cache
     for rel_path, owner in claims.items():
@@ -372,11 +461,7 @@ def _scan_claimed_files(
             if decoded is None:
                 continue
             abs_path = decoded
-        candidates = [
-            s
-            for s in surfaces
-            if s.contains(abs_path) or (s.pattern is not None and abs_path.is_relative_to(s.path))
-        ]
+        candidates = candidates_for(abs_path)
         try:
             if candidates and not safe_surface_path(candidates[0], abs_path):
                 continue
@@ -415,13 +500,25 @@ def _scan_claimed_files(
             continue
 
         if surface is None:
-            surface = PrimitiveSurface(
+            # A recorded file under an absolute user root (``COPILOT_HOME`` or
+            # ``CLAUDE_CONFIG_DIR`` outside HOME) is labelled from that root.
+            recorded_root = next(
+                (
+                    target.managed_deploy_root
+                    for target in targets
+                    if target.managed_deploy_root is not None
+                    and abs_path.is_relative_to(target.managed_deploy_root)
+                ),
                 project_root,
+            )
+            surface = PrimitiveSurface(
+                recorded_root,
                 abs_path,
                 "*.md" if is_directory else None,
                 "recorded",
                 "document" if abs_path.suffix in {".md", ".mdc"} or is_directory else "executable",
                 "recorded",
+                external=recorded_root != project_root,
                 user_scope=user_scope,
             )
         if is_directory:
@@ -471,6 +568,7 @@ def _scan_claimed_files(
                 _label(abs_path, surface, project_root),
                 tracked=True,
                 cache=cache,
+                recorded_hash=(recorded_hashes or {}).get(rel_path),
             )
         )
 
@@ -568,7 +666,13 @@ def scan_project_result(
     claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock) if lock else {}
     cache: dict[PrimitiveSurface, FileScanResult] = {}
     result = _scan_claimed_files(
-        deploy_root, claims, package_filter, scoped, user_scope=user_scope, cache=cache
+        deploy_root,
+        claims,
+        package_filter,
+        scoped,
+        user_scope=user_scope,
+        cache=cache,
+        recorded_hashes=DeploymentLedgerCodec.deployed_file_hashes(lock) if lock else {},
     )
     if include_deployed_trees:
         result = result.merged(

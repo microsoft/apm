@@ -9,6 +9,8 @@ from apm_cli.marketplace import registry as registry_mod
 from apm_cli.marketplace.errors import MarketplaceNotFoundError
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(tmp_path, monkeypatch):
@@ -21,12 +23,32 @@ def _isolate_registry(tmp_path, monkeypatch):
     yield
 
 
+def _registry_file() -> Path:
+    """The registry path with its parent directory created (no registry file)."""
+    path = Path(registry_mod._marketplaces_path())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 class TestRegistryBasicOps:
     """CRUD operations on marketplace registry."""
 
     def test_empty_registry(self):
         assert registry_mod.get_registered_marketplaces() == []
         assert registry_mod.marketplace_count() == 0
+
+    def test_reads_never_create_the_registry(self):
+        """A missing registry reads as empty and nothing is written (#4600)."""
+        config_dir = Path(registry_mod._marketplaces_path()).parent
+        assert registry_mod.get_registered_marketplaces() == []
+        assert registry_mod.marketplace_names() == []
+        with pytest.raises(MarketplaceNotFoundError):
+            registry_mod.get_marketplace_by_name("acme")
+        assert not config_dir.exists()
+
+        registry_mod.add_marketplace(MarketplaceSource(name="acme", owner="o", repo="r"))
+        written = json.loads(Path(registry_mod._marketplaces_path()).read_text())
+        assert [entry["name"] for entry in written["marketplaces"]] == ["acme"]
 
     def test_add_and_get(self):
         src = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
@@ -110,7 +132,7 @@ class TestRegistryPersistence:
         assert fetched.owner == "acme-org"
 
     def test_corrupted_file_returns_empty(self, tmp_path):
-        path = registry_mod._ensure_file()
+        path = _registry_file()
         with open(path, "w") as f:
             f.write("not json")
 
@@ -118,7 +140,7 @@ class TestRegistryPersistence:
         assert registry_mod.get_registered_marketplaces() == []
 
     def test_invalid_persisted_source_does_not_hide_valid_entries(self):
-        path = Path(registry_mod._ensure_file())
+        path = _registry_file()
         path.write_text(
             json.dumps(
                 {
@@ -166,9 +188,7 @@ class TestRegistryUtf8RoundTrip:
         Windows locales where the default open() would fail to decode."""
         import json as _json
 
-        path = registry_mod._marketplaces_path()
-        # Ensure parent dir exists.
-        registry_mod._ensure_file()
+        path = _registry_file()
         payload = {
             "marketplaces": [
                 {"name": "cafe-mkt", "owner": "o", "repo": "repo-\u4e2d\u6587"},
@@ -183,3 +203,208 @@ class TestRegistryUtf8RoundTrip:
         fetched = registry_mod.get_marketplace_by_name("cafe-mkt")
         assert fetched is not None
         assert fetched.repo == "repo-\u4e2d\u6587"
+
+
+class TestCatalogScopedRefPins:
+    """#4966: ref pins belong to the catalog, not to the alias that named it."""
+
+    @pytest.fixture(autouse=True)
+    def _pins_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+        self.pins = tmp_path / "apm-home" / "cache" / "marketplace" / "version-pins.json"
+        self.pins.parent.mkdir(parents=True)
+
+    def _write(self, pins: dict) -> None:
+        self.pins.write_text(json.dumps(pins))
+
+    @staticmethod
+    def _key(source: MarketplaceSource) -> str:
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+        return f"{catalog_pin_identity(source)}#tool/1.0.0"
+
+    @staticmethod
+    def _check(alias: str, ref: str, source: MarketplaceSource):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import check_ref_pin
+
+        return check_ref_pin(alias, "tool", ref, "1.0.0", catalog=catalog_pin_identity(source))
+
+    def test_a_legacy_alias_pin_still_guards_the_catalog_the_alias_names(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        source = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source)
+
+        assert self._check("team", "v2", source) == "v1"
+        assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
+
+    def test_removing_an_alias_keeps_its_catalog_pinned(self):
+        self._write({"team/tool/1.0.0": "v1", "teams/tool/1.0.0": "v9"})
+        source = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(source)
+
+        registry_mod.remove_marketplace("TEAM")
+        registry_mod.add_marketplace(MarketplaceSource(name="other", owner="a", repo="catalog"))
+
+        assert self._check("other", "v2", source) == "v1"
+        assert json.loads(self.pins.read_text())["teams/tool/1.0.0"] == "v9"
+
+    def test_an_alias_re_added_for_another_catalog_starts_without_its_pins(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+
+        registry_mod.remove_marketplace("team")
+        other = MarketplaceSource(name="team", owner="b", repo="catalog")
+        registry_mod.add_marketplace(other)
+
+        assert self._check("team", "v2", other) is None
+        first = MarketplaceSource(name="team", owner="a", repo="catalog")
+        assert json.loads(self.pins.read_text()) == {self._key(first): "v1"}
+
+    def test_rebinding_an_alias_in_place_keeps_the_old_catalog_pinned(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        old = MarketplaceSource(name="team", owner="a", repo="catalog")
+        registry_mod.add_marketplace(old)
+
+        new = MarketplaceSource(name="team", owner="b", repo="catalog")
+        registry_mod.add_marketplace(new)
+
+        assert self._check("team", "v2", new) is None
+        assert self._check("team", "v2", old) == "v1"
+        assert json.loads(self.pins.read_text()) == {self._key(old): "v1"}
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "https://github.com/a/catalog.git",
+            "git@github.com:a/catalog.git",
+            "https://GitHub.com/a/catalog.git",
+        ],
+    )
+    def test_an_equivalent_catalog_spelling_keeps_its_pins(self, spelling: str):
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(
+            MarketplaceSource(name="team", url="https://github.com/a/catalog")
+        )
+
+        respelled = MarketplaceSource(name="team", url=spelling)
+        registry_mod.add_marketplace(respelled)
+
+        assert self._check("team", "v2", respelled) == "v1"
+        # The name still names the same catalog, so its legacy pin stays with it.
+        assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
+
+    def test_a_manifest_removal_keeps_its_catalog_pinned(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        source = MarketplaceSource(name="team", owner="a", repo="catalog", origin="manifest")
+        registry_mod.register_manifest_marketplace(source)
+
+        assert registry_mod.unregister_manifest_marketplace("team")
+
+        assert self._check("team", "v2", source) == "v1"
+        assert "team/tool/1.0.0" not in json.loads(self.pins.read_text())
+
+    def test_an_alias_named_like_a_host_never_adopts_catalog_scoped_pins(self):
+        scoped = "github.com/a/catalog:marketplace.json#tool/1.0.0"
+        self._write({scoped: "v1", "github.com/tool/1.0.0": "v0"})
+        registry_mod.add_marketplace(
+            MarketplaceSource(name="github.com", url="https://github.com/b/catalog")
+        )
+
+        registry_mod.remove_marketplace("github.com")
+
+        pins = json.loads(self.pins.read_text())
+        assert pins[scoped] == "v1"
+        assert "github.com/tool/1.0.0" not in pins
+        assert pins["github.com/b/catalog:marketplace.json#tool/1.0.0"] == "v0"
+
+    def test_adoption_follows_the_registration_another_writer_left_on_disk(self):
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        rebound = MarketplaceSource(name="team", owner="b", repo="catalog")
+        Path(registry_mod._marketplaces_path()).write_text(
+            json.dumps({"marketplaces": [rebound.to_dict()]})
+        )
+
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="c", repo="catalog"))
+
+        assert json.loads(self.pins.read_text()) == {self._key(rebound): "v1"}
+
+    def test_a_project_map_shadowing_an_alias_never_reads_or_consumes_its_legacy_pins(self):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import record_ref_pin
+
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        shadow = MarketplaceSource(name="team", owner="b", repo="catalog")
+
+        assert self._check("team", "v2", shadow) is None
+        record_ref_pin("team", "tool", "v1", "1.0.0", catalog=catalog_pin_identity(shadow))
+
+        assert json.loads(self.pins.read_text()) == {
+            "team/tool/1.0.0": "v1",
+            self._key(shadow): "v1",
+        }
+
+    def test_a_failed_pin_write_leaves_the_registration_unchanged(self):
+        from apm_cli.marketplace.version_pins import RefPinWriteError
+
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        registry = Path(registry_mod._marketplaces_path())
+        before = (self.pins.read_bytes(), registry.read_bytes())
+        Path(str(self.pins) + ".tmp").mkdir()
+
+        with pytest.raises(RefPinWriteError) as refused:
+            registry_mod.remove_marketplace("team")
+
+        message = str(refused.value)
+        assert f"Cannot write the marketplace version pins at {self.pins}" in message
+        assert "fix its permissions or free space and retry" in message
+        assert "delete" not in message.lower()
+        assert (self.pins.read_bytes(), registry.read_bytes()) == before
+
+
+class TestCatalogPinIdentity:
+    """#4966: the pin scope names exactly one catalog."""
+
+    @staticmethod
+    def _record(pins_dir: Path, source: MarketplaceSource) -> None:
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import record_ref_pin
+
+        record_ref_pin(
+            "t", "tool", "v1", "1.0.0", str(pins_dir), catalog=catalog_pin_identity(source)
+        )
+
+    def test_catalog_paths_that_differ_only_in_case_are_different_catalogs(self, tmp_path):
+        url = "https://git.example.com/Org/catalog"
+        self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/A.json"))
+        self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/a.json"))
+
+        assert len(json.loads((tmp_path / "version-pins.json").read_text())) == 2
+
+    def test_a_local_catalog_is_scoped_by_its_resolved_location_and_path(self, tmp_path):
+        root = tmp_path / "catalogs"
+        root.mkdir()
+        (tmp_path / "link").symlink_to(root, target_is_directory=True)
+        pins_dir = tmp_path / "pins"
+
+        self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="a.json"))
+        self._record(
+            pins_dir, MarketplaceSource(name="t", url=str(tmp_path / "link"), path="a.json")
+        )
+        self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="b.json"))
+
+        assert len(json.loads((pins_dir / "version-pins.json").read_text())) == 2
+
+    def test_hosted_catalog_paths_that_differ_only_in_case_are_different_catalogs(self, tmp_path):
+        base = "https://gitlab.com/group/project/-/raw/main"
+        self._record(
+            tmp_path, MarketplaceSource(name="t", url=f"{base}/A/marketplace.json", path="")
+        )
+        self._record(
+            tmp_path, MarketplaceSource(name="t", url=f"{base}/a/marketplace.json", path="")
+        )
+
+        assert len(json.loads((tmp_path / "version-pins.json").read_text())) == 2

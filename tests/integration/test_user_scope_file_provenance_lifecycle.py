@@ -21,7 +21,7 @@ from tests.integration._path_corner_world_kit import (
     tree_bytes,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 OWNER = "git.example.invalid/acme/uni"
 USER_FILES = (

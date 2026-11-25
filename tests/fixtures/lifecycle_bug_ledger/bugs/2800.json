@@ -1,0 +1,16 @@
+{
+  "issue": 2800,
+  "fixed_in": "Unreleased",
+  "summary": "Unknown host-qualified package paths reached mutable install work.",
+  "failure_modes": [
+    "routing",
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
+  ]
+}

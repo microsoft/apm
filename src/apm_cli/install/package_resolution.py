@@ -11,10 +11,16 @@ from __future__ import annotations
 import builtins
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from apm_cli.install import registry_wiring
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
+from apm_cli.models.dependency.subsets import (
+    SKILL_SELECT_ALL,
+    SkillTargetSelection,
+    skill_subset_selects_all,
+    union_selection_names,
+)
 from apm_cli.utils.github_host import build_ssh_url
 
 GIT_PARENT_USER_SCOPE_ERROR = (
@@ -24,7 +30,13 @@ GIT_PARENT_USER_SCOPE_ERROR = (
 
 
 def dependency_reference_to_yaml_entry(dep_ref: Any) -> dict:
-    """Serialize a structured dependency reference for ``apm.yml`` storage."""
+    """Serialize a structured dependency reference for ``apm.yml`` storage.
+
+    A registry-sourced reference (a catalog entry routed to a registry) keeps
+    its registry form; it is never rewritten as a ``git:`` entry (#4009).
+    """
+    if getattr(dep_ref, "source", None) == "registry":
+        return dep_ref.to_apm_yml_entry()
     git_url = dep_ref.to_github_url()
     if dep_ref.explicit_scheme == "ssh":
         git_url = build_ssh_url(
@@ -121,20 +133,19 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     """
     if scope is None:
         return None
-    from pathlib import Path
-
     from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
 
-    if dep_ref.is_local and scope is InstallScope.USER:
-        local_path = dep_ref.local_path or ""
-        # Match the rest of the install pipeline (sources.py, phases/resolve.py)
-        # which expanduser()s local paths before consuming them: `~/pkg` is
-        # absolute after expansion and must NOT be rejected here.
-        if not Path(local_path).expanduser().is_absolute():
-            return (
-                "relative local paths are not supported at user scope (--global). "
-                "Use an absolute path or a remote reference (owner/repo) instead"
-            )
+    # A CLI argument is root-declared: the anchor owner decides (#4153).
+    if (
+        dep_ref.is_local
+        and scope is InstallScope.USER
+        and local_dep_base_dir(
+            dep_ref.local_path or "", declaring_dir=None, source_root=None, user_scope=True
+        )
+        is None
+    ):
+        return USER_SCOPE_RELATIVE_PATH_ERROR
     if dep_ref.is_parent_repo_inheritance and scope is InstallScope.USER:
         return GIT_PARENT_USER_SCOPE_ERROR
     return None
@@ -237,6 +248,8 @@ def normalize_and_merge_skill_subset(
     )
     if existing:
         seen.update(existing)
+    if skill_subset_selects_all(seen):
+        return [SKILL_SELECT_ALL]  # "*" absorbs named skills (req-rs-018)
     return sorted(seen)
 
 
@@ -261,12 +274,74 @@ def effective_deploy_skill_subset(
     """
     if skill_subset_from_cli and not cli_subset:
         return None  # --skill '*' -> full bundle
-    merged: builtins.set[str] = builtins.set()
-    if persisted_subset:
-        merged.update(persisted_subset)
-    if cli_subset:
-        merged.update(cli_subset)
-    return builtins.tuple(sorted(merged)) or None
+    return union_selection_names(persisted_subset, cli_subset)
+
+
+class EffectiveDependencySelection(NamedTuple):
+    """Skill and target selection one package deployment must honor.
+
+    ``skill_pairing`` narrows ``skill_subset`` per target when the flat
+    ``skill_subset x target_subset`` product would over-select (req-rs-018);
+    ``None`` means every selected target receives every selected skill.
+    """
+
+    skill_subset: builtins.tuple[str, ...] | None
+    target_subset: builtins.list[str] | None
+    skill_pairing: SkillTargetSelection | None = None
+
+
+def is_implicit_local(dep_ref: Any, ctx: Any | None) -> bool:
+    """Return True for a local dep a partial install adds only for lock coverage."""
+    implicit = getattr(ctx, "implicit_local_keys", None)
+    if not implicit:
+        return False
+    try:
+        return dep_ref.get_unique_key() in implicit
+    except (AttributeError, TypeError):
+        return False
+
+
+def effective_dependency_selection(
+    dep_ref: Any | None,
+    ctx: Any | None = None,
+) -> EffectiveDependencySelection:
+    """Return the effective deploy selection for one dependency (#3760).
+
+    This is the single owner every ``prepare_package_deployment`` and
+    ``integrate_package_primitives`` caller routes through: install
+    preflight and deploy, audit replay and uninstall survivor
+    re-integration. ``None`` in either field means "no restriction".
+
+    *dep_ref* ``None`` is first-party project content, which has no
+    selection. *ctx* carries the install invocation's CLI ``--skill``
+    overlay; lifecycle paths without an install context (uninstall,
+    audit replay) pass ``None`` and deploy exactly the persisted selection.
+    """
+    if dep_ref is None:
+        return EffectiveDependencySelection(None, None)
+    if is_implicit_local(dep_ref, ctx):
+        ctx = None  # #4198: the CLI --skill overlay targets the named packages only
+    skill_subset = effective_deploy_skill_subset(
+        skill_subset_from_cli=bool(getattr(ctx, "skill_subset_from_cli", False)),
+        cli_subset=getattr(ctx, "skill_subset", None),
+        persisted_subset=getattr(dep_ref, "skill_subset", None),
+    )
+    target_subset = getattr(dep_ref, "target_subset", None)
+    pairing = getattr(dep_ref, "subset_pairings", None)
+    if not isinstance(pairing, SkillTargetSelection):
+        pairing = None  # raw lock records are decoded via LockedDependency.selection()
+    cli_subset = getattr(ctx, "skill_subset", None)
+    if pairing is not None and getattr(ctx, "skill_subset_from_cli", False) and not cli_subset:
+        pairing = None  # --skill '*': every skill on every selected target
+    elif pairing is not None and cli_subset:
+        # The CLI overlay acts as one more edge over the dependency's targets.
+        pairing = pairing.with_edge(cli_subset, target_subset)
+        pairing = None if pairing.is_product else pairing
+    return EffectiveDependencySelection(
+        skill_subset,
+        builtins.list(target_subset) if target_subset else None,
+        pairing,
+    )
 
 
 def cli_skill_subset(
@@ -355,6 +430,7 @@ def update_existing_dependency_entry_if_needed(
     dependency_reference_cls: Any,
     default_registry: str | None = None,
     logger: Any = None,
+    ref_only: bool = False,
 ) -> bool:
     """Apply explicit reference, selection or HTTPS-upgrade intent."""
     requested_entry = apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry())
@@ -399,6 +475,7 @@ def update_existing_dependency_entry_if_needed(
             dependency_reference_cls=dependency_reference_cls,
             default_registry=default_registry,
             logger=logger,
+            ref_only=ref_only and not https_upgrade,
         )
     return False
 
@@ -414,6 +491,7 @@ def try_update_existing_dependency_entry(
     dependency_reference_cls: Any,
     default_registry: str | None = None,
     logger: Any = None,
+    ref_only: bool = False,
 ) -> tuple[bool, str | None]:
     """Like update_existing_dependency_entry_if_needed, but returns
     (updated, error) instead of raising, so callers can report a refused
@@ -429,10 +507,26 @@ def try_update_existing_dependency_entry(
             dependency_reference_cls=dependency_reference_cls,
             default_registry=default_registry,
             logger=logger,
+            ref_only=ref_only,
         )
     except ValueError as e:
         return False, str(e)
     return updated, None
+
+
+def _ref_only_update(existing: Any, existing_ref: Any, requested_ref: Any) -> dict | None:
+    """The existing ``git:`` object entry with only its ref changed (#5154).
+
+    ``install <pkg>#<ref>`` with no other selection intent carries identity
+    and ref only, so the object's other fields (skills, targets, alias, path)
+    stay. A ``ref:`` field overrides an inline ``git: ...#ref``. ``None``
+    when *existing* is not a ``git:`` object entry.
+    """
+    if not isinstance(existing, dict) or not isinstance(existing.get("git"), str):
+        return None
+    if existing_ref.reference == requested_ref.reference:
+        return existing
+    return {**existing, "ref": requested_ref.reference}
 
 
 def merge_structured_entry_into_current_deps(
@@ -444,8 +538,13 @@ def merge_structured_entry_into_current_deps(
     dependency_reference_cls: Any,
     default_registry: str | None = None,
     logger: Any = None,
+    ref_only: bool = False,
 ) -> bool:
-    """Replace by identity only when effective manifest intent changes."""
+    """Replace by identity only when effective manifest intent changes.
+
+    *ref_only* marks ``install <pkg>#<ref>`` with no other selection intent:
+    an existing ``git:`` object entry then changes only its ref (#5154).
+    """
     for idx, dep_entry in enumerate(current_deps):
         try:
             if isinstance(dep_entry, builtins.str):
@@ -492,6 +591,10 @@ def merge_structured_entry_into_current_deps(
                 and (not requires_explicit_path or has_explicit_path)
             ):
                 return False
+            if ref_only and (update := _ref_only_update(dep_entry, existing_ref, requested_ref)):
+                if update is dep_entry:
+                    return False
+                structured_entry = update
             current_deps[idx] = structured_entry
             if logger:
                 logger.verbose_detail(

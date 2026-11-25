@@ -8,12 +8,18 @@ from unittest.mock import MagicMock
 import pytest
 
 
-def _write_plugin_consumer(tmp_path: Path, plugin_manifest: dict) -> tuple[Path, Path]:
-    """Create a local plugin and a consumer that installs it."""
+def _write_plugin_consumer(
+    tmp_path: Path, plugin_manifest: dict, *, root_manifest: bool = False
+) -> tuple[Path, Path]:
+    """Create a local plugin and a consumer that installs it.
+
+    A ``.claude-plugin`` plugin installs whole at project scope (#3921); a root
+    ``plugin.json`` (*root_manifest*) keeps the loose, split route.
+    """
     import json
 
     plugin = tmp_path / "plugin"
-    manifest_dir = plugin / ".claude-plugin"
+    manifest_dir = plugin if root_manifest else plugin / ".claude-plugin"
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "plugin.json").write_text(
         json.dumps(plugin_manifest),
@@ -121,8 +127,7 @@ def test_requested_plugin_skill_with_no_match_fails_closed(
     assert "engineering/resolving-merge-conflicts" in result.output
     assert "matched no declared skills" in result.output
     assert "tdd" in result.output
-    assert "update the package manifest" in result.output
-    assert "then reinstall" in result.output
+    assert "Run 'apm install ../plugin --skill engineering/tdd'" in " ".join(result.output.split())
     assert not (consumer / "apm.lock.yaml").exists()
     assert not (consumer / ".claude" / "skills" / "resolving-merge-conflicts").exists()
 
@@ -254,6 +259,7 @@ def test_plugin_skill_links_leaving_the_bundle_survive_declaration_filtering(
     plugin, consumer = _write_plugin_consumer(
         tmp_path,
         {"name": "linked-skills", "version": "1.0.0", "skills": ["./skills/"]},
+        root_manifest=True,
     )
     (plugin / "docs").mkdir()
     (plugin / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
@@ -353,6 +359,7 @@ def test_plugin_declaring_no_skills_says_which_ones_it_shadowed(
     plugin, consumer = _write_plugin_consumer(
         tmp_path,
         {"name": "quiet-skills", "version": "1.0.0", "skills": []},
+        root_manifest=True,
     )
     for name in ("alpha", "beta"):
         skill = plugin / "skills" / name
@@ -637,6 +644,7 @@ def test_explicit_policy_uses_chain_aware_discovery(
     assert result.policy is None
 
 
+@pytest.mark.req("req-pl-010")
 def test_incomplete_policy_chain_always_fails_closed() -> None:
     """A partial ancestor set must never become an enforceable policy."""
     from apm_cli.install.errors import PolicyViolationError
@@ -656,3 +664,37 @@ def test_incomplete_policy_chain_always_fails_closed() -> None:
             logger=MagicMock(),
             fetch_failure_default="warn",
         )
+
+
+@pytest.mark.parametrize(
+    ("requested", "available", "next_step"),
+    (
+        pytest.param(("nope",), ("beta", "alpha"), "apm install o/r#v1 --skill alpha", id="miss"),
+        pytest.param(
+            ("beta", "nope", "alpha"),
+            ("alpha", "beta"),
+            "apm install o/r#v1 --skill beta --skill alpha",
+            id="partial-keeps-available",
+        ),
+        pytest.param(("nope",), (), "apm install o/r#v1", id="none-available"),
+    ),
+)
+def test_requested_component_miss_names_one_runnable_install(
+    requested: tuple[str, ...], available: tuple[str, ...], next_step: str
+) -> None:
+    """A --skill miss ends with one runnable install that selects available skills (#4206)."""
+    from apm_cli.install.outcome import require_requested_components
+
+    diagnostics = MagicMock()
+    assert not require_requested_components(
+        diagnostics,
+        option="--skill",
+        component="skill",
+        requested=requested,
+        available=available,
+        package="o/r",
+        install_spec="o/r#v1",
+    )
+    (message,), _kwargs = diagnostics.error.call_args
+    assert message.count("Run '") == 1, message
+    assert f"Run '{next_step}' to install " in message, message

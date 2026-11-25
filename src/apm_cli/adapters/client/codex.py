@@ -11,14 +11,21 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import InlineTable, Item, String, Table
 
+from ...core.command_logger import library_logger
+from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
-from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
-from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
+from .base import (
+    _ENV_PLACEHOLDER_RE,
+    _ENV_VAR_RE,
+    _SYMLINKED_MCP_CONFIG,
+    MCPClientAdapter,
+    _warn_symlinked_mcp_config,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -54,6 +61,18 @@ def _ascii_names(names: list[str]) -> str:
     return ", ".join(ascii(name)[1:-1] for name in names)
 
 
+def _connection_identity(config: dict) -> dict:
+    """Drop empty ``args`` and ``env``, which Codex treats as absent."""
+    return {
+        key: value
+        for key, value in config.items()
+        if not (key in _EMPTY_AS_ABSENT and value in ([], {}))
+    }
+
+
+_EMPTY_AS_ABSENT = frozenset({"args", "env"})
+
+
 class CodexClientAdapter(MCPClientAdapter):
     """Codex CLI implementation of MCP client adapter.
 
@@ -61,6 +80,15 @@ class CodexClientAdapter(MCPClientAdapter):
     a scope-resolved config.toml file, following the TOML format for MCP
     server configuration.
     """
+
+    remote_shape = remote_shape_row("codex")
+
+    @classmethod
+    def selected_remote(cls, server_info) -> dict | None:
+        """Codex renders a published stdio package before any remote."""
+        if isinstance(server_info, dict) and server_info.get("packages"):
+            return None
+        return super().selected_remote(server_info)
 
     supports_user_scope: bool = True
     target_name: str = "codex"
@@ -93,16 +121,9 @@ class CodexClientAdapter(MCPClientAdapter):
     def _get_codex_dir(self) -> Path:
         """Return the root directory used for Codex config in the current scope."""
         if self.user_scope:
-            codex_home = os.environ.get("CODEX_HOME", "")
-            if codex_home.strip():
-                codex_home_path = Path(codex_home).expanduser()
-                if not codex_home_path.is_absolute():
-                    raise PathTraversalError(
-                        "CODEX_HOME is set to a non-absolute path; cannot locate the "
-                        "Codex CLI configuration directory."
-                    )
-                return codex_home_path
-            return Path.home() / ".codex"
+            from ...integration.targets import resolve_user_root
+
+            return resolve_user_root("codex")
         return self.project_root / ".codex"
 
     def get_config_path(self) -> str:
@@ -177,18 +198,32 @@ class CodexClientAdapter(MCPClientAdapter):
             table.comment(entry.trivia.comment)
         return table
 
+    def _config_is_linked(self) -> bool:
+        """Whether the base link policy refuses this scope's ``config.toml``."""
+        user_root = self._get_codex_dir() if self.user_scope else None
+        return self._is_linked_config(Path(self.get_config_path()), user_root=user_root)
+
     def _write_config(self, config: dict) -> None:
-        """Validate serialized TOML before atomically replacing the native file."""
+        """Validate serialized TOML before atomically replacing the native file.
+
+        A config that is, or is reached through, a symlink is refused with
+        ``OSError``: it is never written or replaced by a regular file.
+        """
         serialized = tomlkit.dumps(config)
         tomlkit.parse(serialized)
         config_path = Path(self.get_config_path())
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._config_is_linked():
+            raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
+        from .config_journal import journal_config_write, journal_config_written
+
+        journal_config_write(config_path, serialized, lf=True)
         atomic_write_text(config_path, serialized, new_file_mode=0o600)
+        journal_config_written(config_path)
         _log.debug("Codex config written to %s", config_path)
 
     def migrate_legacy_managed_servers(self, managed_names: set[str]) -> set[str]:
         """Remove unsupported IDs only from entries with recorded APM ownership."""
-        if not managed_names:
+        if not managed_names or self._config_is_linked():
             return set()
         config = self.get_current_config()
         if config is None:
@@ -218,13 +253,20 @@ class CodexClientAdapter(MCPClientAdapter):
         return migrated
 
     def matches_managed_server_config(self, native: object, expected: dict) -> bool:
-        """Accept the historical empty-ID spelling without accepting foreign identity."""
+        """Compare connection identity: the command Codex runs and what it passes.
+
+        Accepts the historical empty-ID spelling without accepting foreign
+        identity. Codex's ``enabled`` switch is the user's activation choice,
+        not part of the connection, and empty ``args`` or ``env`` equal absent.
+        """
         if not isinstance(native, dict) or self.get_registry_id(native):
             return False
         comparable = dict(native)
         if comparable.get("id") == "":
             comparable.pop("id")
-        return comparable == expected
+        if isinstance(comparable.get("enabled"), bool):
+            comparable.pop("enabled")
+        return _connection_identity(comparable) == _connection_identity(expected)
 
     def matches_legacy_managed_server_config(
         self, native: object, expected: dict, *, recorded_write: bool | None = None
@@ -284,6 +326,9 @@ class CodexClientAdapter(MCPClientAdapter):
         Args:
             config_updates (dict): Configuration updates to apply.
         """
+        if self._config_is_linked():
+            _warn_symlinked_mcp_config(Path(self.get_config_path()))
+            return False
         current_config = self.get_current_config()
         if current_config is None:
             return False
@@ -318,7 +363,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 return tomlkit.load(config_file)
         except (TOMLKitError, UnicodeDecodeError) as exc:
             _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
-            _rich_warning(
+            library_logger().warning(
                 f"Could not read or parse {config_path}: {exc} "
                 "-- skipping config write to avoid data loss; inspect the file "
                 "or delete it to reset Codex configuration",
@@ -355,7 +400,7 @@ class CodexClientAdapter(MCPClientAdapter):
             bool: True if successful, False otherwise.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         try:
@@ -385,15 +430,11 @@ class CodexClientAdapter(MCPClientAdapter):
             if not self.update_config({config_key: server_config}):
                 return False
             self.written_mcp_hashes[server_url] = fingerprint
-
-            _rich_success(
-                f"Configured MCP server '{config_key}' for Codex CLI",
-                symbol="success",
-            )
+            # The integrator's install tree reports success once (#3994, #4089).
             return True
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -427,7 +468,7 @@ class CodexClientAdapter(MCPClientAdapter):
         # one case that must NOT be resolved and stored: Codex reads those from
         # the launching environment through ``env_vars`` at server start, so the
         # secret never lands in config.toml. See issue #3393.
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             forwarded_env: list[str] = []
             resolved_env_for_args: dict = {}
@@ -483,18 +524,16 @@ class CodexClientAdapter(MCPClientAdapter):
         if remotes and not packages:
             remote = self._select_remote_with_url(remotes) or remotes[0]
             server_name = server_info.get("name", "")
-            if (remote.get("transport_type") or "").strip() == "sse":
-                _rich_warning(
-                    f"Skipping MCP server '{server_name}' for Codex CLI: SSE transport "
-                    "is deprecated by the MCP spec and not supported by Codex. "
-                    "Switch to `transport: streamable-http`.",
-                    symbol="warning",
-                )
-                return None
+            transport = canonical_remote_transport(
+                remote, runtime_label="Codex CLI", server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
 
             remote_url = (remote.get("url") or "").strip()
             if not remote_url:
-                _rich_warning(
+                library_logger().warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote entry "
                     "has an empty url. Set `url:` to the server's streamable-http endpoint.",
                     symbol="warning",
@@ -513,7 +552,7 @@ class CodexClientAdapter(MCPClientAdapter):
             # certs -- so loopback http is allowed. Any other non-https host is
             # still rejected to avoid cleartext bearer tokens in transit.
             if scheme != "https" and not insecure_loopback:
-                _rich_warning(
+                library_logger().warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
                     f"must use https:// (got {scheme or 'no scheme'}). "
                     "Plain http is allowed for loopback addresses only.",
@@ -521,7 +560,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            remote_config = {"url": remote_url}
+            remote_config = shape.render(transport, remote_url)
             http_headers: dict[str, str] = {}
             env_http_headers: dict[str, str] = {}
             bearer_token_env_var = ""
@@ -549,7 +588,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if unsupported_headers:
                 safe_headers = ", ".join(ascii(name)[1:-1] for name in unsupported_headers)
                 safe_server = ascii(server_name)[1:-1]
-                _rich_warning(
+                library_logger().warning(
                     f"Skipping header(s) {safe_headers} of MCP server "
                     f"'{safe_server}' for Codex CLI: Codex reads a header from the "
                     "environment only when the value is exactly ${VAR} or, for "
@@ -752,7 +791,7 @@ class CodexClientAdapter(MCPClientAdapter):
         ]
         if not keys:
             return
-        _rich_warning(
+        library_logger().warning(
             f"Codex cannot forward env {_ascii_names(keys)} for server "
             f"'{_ascii_names([server_name])}' by "
             "reference, so APM resolved them at install time and wrote the values to "

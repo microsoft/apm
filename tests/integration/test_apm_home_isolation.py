@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _PACKAGE = "global-package"
 

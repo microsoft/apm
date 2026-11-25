@@ -41,6 +41,15 @@ _DEFAULT_MAX_DELAY: float = 2.0  # seconds
 _DEFAULT_BACKOFF_FACTOR: float = 2.0
 
 
+def _retry_sleep(seconds: float) -> None:
+    """Wait before retrying a transient file operation.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
+
+
 # ---------------------------------------------------------------------------
 # Error classification
 # ---------------------------------------------------------------------------
@@ -187,7 +196,7 @@ def _retry_on_lock(
                     before_retry()
                 except OSError:
                     pass
-            time.sleep(delay)
+            _retry_sleep(delay)
             delay = min(delay * backoff_factor, max_delay)
 
     # Unreachable: the loop always returns or raises on the last attempt.
@@ -211,10 +220,60 @@ def _debug_file_op(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _on_readonly_retry(func: Callable, path: str, _exc_info: Any) -> None:
-    """``onerror`` callback: chmod writable and retry the failing removal."""
+def _is_link(path: str) -> bool:
+    """Whether *path* is a symlink or a Windows junction (never its target)."""
+    isjunction = getattr(os.path, "isjunction", None)
+    return os.path.islink(path) or bool(isjunction and isjunction(path))
+
+
+def _without_trailing_separators(path: str) -> str:
+    """*path* without trailing separators or ``.`` parts, so ``"link/./"`` names the link.
+
+    Links are not resolved and ``..`` is kept; a filesystem root (``/``,
+    ``C:\\``) is kept as given.
+    """
+    separators = os.sep + (os.altsep or "")
+    current = path
+    while True:
+        stripped = current.rstrip(separators)
+        if not stripped or not os.path.splitdrive(stripped)[1]:
+            return current
+        head, tail = os.path.split(stripped)
+        if tail != "." or not head:
+            return stripped
+        current = head
+
+
+def _remove_link(path: str) -> None:
+    """Remove the link at *path* itself; its target is never touched."""
     try:
-        os.chmod(path, stat.S_IWRITE)
+        if os.name == "nt" and os.path.isdir(path):
+            os.rmdir(path)  # a directory symlink or junction on Windows
+        else:
+            os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def _on_readonly_retry(func: Callable, path: str, _exc_info: Any) -> None:
+    """``onerror`` callback: clear the read-only bit and retry the failing removal.
+
+    A link is removed itself, never made writable: changing its mode would
+    change its target's. The mode change never follows a link; where the
+    platform cannot guarantee that, the error stands.
+    """
+    try:
+        if func is os.path.islink or _is_link(path):
+            _remove_link(path)
+            return
+        try:
+            os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+        except NotImplementedError:
+            # Windows before Python 3.13 changes a link's own attribute and
+            # offers no follow_symlinks; elsewhere the path became a link.
+            if os.name != "nt":
+                raise OSError(errno.ELOOP, "refusing to change a link's mode", path) from None
+            os.chmod(path, stat.S_IWRITE)
         func(path)
     except FileNotFoundError:
         pass
@@ -246,9 +305,13 @@ def robust_rmtree(
     max_retries:
         Maximum retry attempts for transient lock errors.
     """
-    path_s = str(path)
+    path_s = _without_trailing_separators(str(path))
 
     def _do_rmtree() -> None:
+        if _is_link(path_s):
+            # A link root is removed itself: never descended, never made writable.
+            _remove_link(path_s)
+            return
         failures: list[OSError] = []
 
         def recover_or_record(func: Callable, failed_path: str, exc_info: Any) -> None:
@@ -358,6 +421,16 @@ def robust_copytree(
         before_retry=_cleanup_partial,
     )
     return Path(result)
+
+
+def robust_copy_entry(src: Path, dst: Path) -> None:
+    """Copy one directory entry without following links; a link is copied as a link."""
+    if src.is_symlink():
+        os.symlink(os.readlink(src), dst, target_is_directory=src.is_dir())
+    elif src.is_dir():
+        robust_copytree(src, dst, symlinks=True)
+    else:
+        robust_copy2(src, dst)
 
 
 def robust_copy2(

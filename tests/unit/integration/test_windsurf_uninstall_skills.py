@@ -18,6 +18,7 @@ from pathlib import Path
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 class TestWindsurfTargetProfileShape:
@@ -108,11 +109,18 @@ class TestWindsurfSkillUninstallCleanup:
         user_skill.mkdir()
         (user_skill / "SKILL.md").write_text("authored by user\n")
 
+        # Lockfiles list each directory and its members; members need
+        # deployment evidence (#3701).
         managed = {
             ".agents/skills/code-review",
+            ".agents/skills/code-review/SKILL.md",
             ".agents/skills/grill-me",
+            ".agents/skills/grill-me/SKILL.md",
         }
-        stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        evidence = receipted_evidence(managed_a, managed_b, deploy_root=tmp_path)
+        stats = SkillIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=evidence
+        )
 
         # Primary assertions: filesystem outcomes (the actual user-visible
         # contract). The 'files_removed' stats key is the cross-integrator
@@ -124,7 +132,7 @@ class TestWindsurfSkillUninstallCleanup:
         assert user_skill.exists(), "user-authored skill dir must be preserved"
         assert (user_skill / "SKILL.md").read_text() == "authored by user\n"
         assert stats["errors"] == 0
-        assert stats["files_removed"] == 2
+        assert stats["files_removed"] == 4
 
     def test_sync_handles_trailing_slash_in_managed_path(self, tmp_path: Path):
         """Lockfile entries may carry a trailing slash on directory paths;
@@ -135,8 +143,10 @@ class TestWindsurfSkillUninstallCleanup:
         skill.mkdir()
         (skill / "SKILL.md").write_text("managed")
 
-        managed = {".agents/skills/code-review/"}
-        stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        managed = {".agents/skills/code-review/", ".agents/skills/code-review/SKILL.md"}
+        stats = SkillIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=receipted_evidence(skill)
+        )
 
         # Primary assertion: the directory is gone regardless of how the
         # integrator counts it internally.
@@ -144,4 +154,4 @@ class TestWindsurfSkillUninstallCleanup:
             "skill dir must be removed even when lockfile path has trailing slash"
         )
         assert stats["errors"] == 0
-        assert stats["files_removed"] == 1
+        assert stats["files_removed"] == 2

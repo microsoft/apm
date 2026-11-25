@@ -8,32 +8,52 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import click
 
+from apm_cli.core.remediation import (
+    DEPENDENCIES_NOT_INSTALLED,
+    DEPENDENCY_UNPLACED,
+    ORPHANED_PACKAGES_PRUNE,
+)
+from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
 # Import existing APM components
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
+from ...core.deployment_ledger import DeploymentLedgerCodec
+from ...core.deprecations import deprecation_message
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
 from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
-from ...models.manifest_io import DuplicateManifestKeyError
+from ...models.dependency.materialization import (
+    CachedMaterializationPathReader,
+    installed_package_path,
+)
+from ...models.manifest_io import InvalidManifestError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
-    _build_expected_install_paths,
     _expand_with_ancestors,
-    _find_orphaned_packages,
+    _inspect_installed_orphans,
     _standalone_installed_packages,
     resolve_requested_packages,
+)
+from ._inventory import (
+    format_mcps,
+    format_targets,
+    package_mcp_count,
+    package_targets,
+    targets_legend,
 )
 from ._utils import (
     _count_primitives,
     _get_package_display_info,
     _is_agent_plugin_root,
     _is_nested_under_package,
+    _tolerant_identity,
 )
 from .why import why as _why_cmd
 
@@ -51,7 +71,7 @@ def _format_primitive_counts(primitives):
     return ", ".join(parts)
 
 
-_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab"}
+_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab", "generic": "git"}
 
 
 def _deps_list_source_label(
@@ -64,7 +84,8 @@ def _deps_list_source_label(
     """Map a dependency's provider to the ``apm deps list`` Source column.
 
     Remote hosts classify through the canonical provider registry, so a
-    declared or locked ``host_type`` labels a self-hosted GitLab correctly.
+    declared or locked ``host_type`` labels a self-hosted GitLab correctly,
+    and an unrecognized host is labeled ``git`` rather than ``github``.
     """
     from ...core.host_providers import classify_host_provider
 
@@ -231,13 +252,14 @@ def _echo_tree_children(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
+def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
     """Resolve installed packages and orphan status for a single scope.
 
     Returns ``(installed_packages, orphaned_packages)`` where
     *installed_packages* is a list of dicts and *orphaned_packages* is a
     list of name strings, or ``(None, None)`` when no ``apm_modules``
-    directory exists.
+    directory exists. *scope* (``"project"`` or ``"user"``) selects which
+    recorded deployment rows feed each package's Targets column.
     """
     from ...deps.lockfile import LockFile, get_lockfile_path
 
@@ -256,8 +278,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Host-blind logical key -> the identity ``apm deps tree`` and uninstall use.
     display_keys: dict[str, str] = {}
     declared_deps = []
+    # materialized package path (relative to apm_modules) -> its exact lockfile
+    # key, the owner string ledger rows use; host-aware, so aliased packages that
+    # share an owner/repo on different hosts stay distinct
+    owner_by_path: dict[str, str] = {}
+    inventory_lockfile = None
     try:
-        apm_yml_path = apm_dir / APM_YML_FILENAME
+        apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
             project_package = APMPackage.from_apm_yml(apm_yml_path)
             declared_deps = project_package.get_all_apm_dependencies()
@@ -273,7 +300,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 if dep.alias is not None:
                     install_path = dep.get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = dep.get_canonical_dependency_string()
+                    # An aliased slot keeps host and port in its row (B4, #3967).
+                    dep_key = dep.get_unique_key()
                     physical_to_logical[physical_key] = dep_key
                     declared_sources[dep_key] = source
                     continue
@@ -308,7 +336,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
-    except (PathTraversalError, DuplicateManifestKeyError):
+    except (PathTraversalError, InvalidManifestError):
         raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
@@ -324,16 +352,26 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
-            for dep in lockfile.dependencies.values():
+            inventory_lockfile = lockfile
+            reader = CachedMaterializationPathReader()
+            for dep in lockfile.get_package_dependencies():
+                owner_key = dep.get_unique_key()
+                try:
+                    installed = installed_package_path(
+                        dep.to_dependency_ref(), apm_modules_path, reader=reader
+                    )
+                    owner_by_path[installed.relative_to(apm_modules_path).as_posix()] = owner_key
+                except (ValueError, OSError):
+                    # Read-only Targets lookup only: an entry whose path cannot be
+                    # resolved gets no owner (its Targets read ``unknown``) and
+                    # must not disturb the bookkeeping below or other packages.
+                    pass
                 # Local slots and explicit aliases retain their logical lockfile identity.
                 if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = (
-                        dep.repo_url
-                        if dep.source == "local"
-                        else dep.get_canonical_dependency_string()
-                    )
+                    # An aliased slot keeps host and port in its row (B4, #3967).
+                    dep_key = dep.repo_url if dep.source == "local" else dep.get_unique_key()
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
@@ -368,7 +406,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             continue
         if candidate.name.startswith(".") and candidate.parent != apm_modules_path:
             continue
-        has_apm_yml = (candidate / APM_YML_FILENAME).exists()
+        has_apm_yml = manifest_file(candidate).exists()
         has_skill_md = (candidate / SKILL_MD_FILENAME).exists()
         # A canonical Agent Plugin root is a package even though it carries
         # neither apm.yml nor a root SKILL.md -- it is installed as one unit.
@@ -414,14 +452,14 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # stricter warning for a real package above a declared subdirectory stays,
     # at every depth (unlike the depth-capped suppression set above).
     try:
-        expected_paths = _build_expected_install_paths(
-            declared_deps, lockfile_for_check, apm_modules_path, preserve_installed_case=True
+        inspection = _inspect_installed_orphans(
+            declared_deps,
+            lockfile_for_check,
+            apm_modules_path,
+            [name for _c, name, _h, _s in scanned_candidates],
         )
-        selected_orphans = set(
-            _find_orphaned_packages(
-                [name for _c, name, _h, _s in scanned_candidates], expected_paths
-            )
-        )
+        expected_paths = inspection.expected_paths
+        selected_orphans = set(inspection.removed_paths)
         expected_ancestors = {
             "/".join(parts[:depth])
             for parts in (path.replace("\\", "/").split("/") for path in expected_paths)
@@ -432,6 +470,12 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     except Exception:
         selected_orphans, expected_ancestors = None, set()
 
+    # Scope-filtered owner -> records, built once so each package row is a lookup.
+    owner_index = (
+        DeploymentLedgerCodec.recorded_owner_index(inventory_lockfile, scope=scope)
+        if inventory_lockfile is not None
+        else None
+    )
     installed_packages = []
     orphaned_packages = []
     for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
@@ -456,11 +500,20 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         try:
             version = "unknown"
             if has_apm_yml:
-                package = APMPackage.from_apm_yml(candidate / APM_YML_FILENAME)
-                version = package.version or "unknown"
+                identity = _tolerant_identity(candidate, manifest_file(candidate))
+                if identity is None:
+                    raise ValueError("unreadable package manifest")
+                version = identity["version"]
             else:
                 version = _agent_plugin_version(candidate) or version
             primitives = _count_primitives(candidate)
+            mcps = package_mcp_count(candidate)
+            # None when there is nothing to read: no recorded evidence, or the
+            # package is not in the lockfile.
+            owner = owner_by_path.get(org_repo_name)
+            owned_records = (
+                None if owner_index is None or owner is None else owner_index.get(owner, ())
+            )
 
             if is_orphaned:
                 orphaned_packages.append(display_name)
@@ -474,6 +527,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     if is_orphaned
                     else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
+                    "recorded_targets": package_targets(
+                        owned_records,
+                        mcp_count=mcps.count,
+                        has_lsp=mcps.has_lsp,
+                        has_primitives=mcps.has_other_content or any(primitives.values()),
+                    ),
+                    "mcps": mcps,
                     "path": str(candidate),
                     "is_orphaned": is_orphaned,
                     "is_insecure": locked_dep is not None,
@@ -522,24 +582,24 @@ def _agent_plugin_version(candidate) -> str | None:
 
 
 def _report_native_plugins(apm_dir, logger) -> None:
-    """Report Agent Plugins APM registers natively with GitHub Copilot."""
+    """Report the plugins APM activates natively, from apm.lock.yaml."""
     from pathlib import Path
 
-    from ...agent_plugins.errors import AgentPluginError
-    from ...copilot_plugins.registrar import registration_status
+    from ...deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+    from ...native_plugins.record import lock_native_plugins
 
     try:
-        names = registration_status(Path(apm_dir) / "apm_modules")
-    except (AgentPluginError, OSError):
+        lockfile = LockFile.read(get_lockfile_path(Path(apm_dir)))
+    except (LockfileFormatError, OSError):
         return
+    names = sorted(record.name for record in lock_native_plugins(lockfile).values())
     if not names:
         return
-    noun = "Agent Plugin" if len(names) == 1 else "Agent Plugins"
     shown = ", ".join(names[:3])
     if len(names) > 3:
         shown += f", and {len(names) - 3} more"
     logger.info(
-        f"{len(names)} {noun} registered natively with GitHub Copilot: {shown}",
+        f"{len(names)} native plugin(s) activated from .agents/plugins: {shown}",
         symbol="info",
     )
     if len(names) > 3:
@@ -548,11 +608,14 @@ def _report_native_plugins(apm_dir, logger) -> None:
 
 def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
     """Display dependencies for a single scope (Project or Global)."""
-    installed_packages, orphaned_packages = _resolve_scope_deps(apm_dir, logger, insecure_only)
+    scope = "user" if scope_label == "Global" else "project"
+    installed_packages, orphaned_packages = _resolve_scope_deps(
+        apm_dir, logger, insecure_only, scope=scope
+    )
 
     if installed_packages is None:
         logger.progress(f"No APM dependencies installed ({scope_label} scope)")
-        logger.verbose_detail("Run 'apm install' to install dependencies from apm.yml")
+        logger.verbose_detail(DEPENDENCIES_NOT_INSTALLED.sentence())
         return
 
     if not installed_packages:
@@ -567,9 +630,9 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     # Display packages in table format
     if has_rich:
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title=(
                 f" Insecure APM Dependencies ({scope_label})"
                 if insecure_only
@@ -578,7 +641,12 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             show_header=True,
             header_style="bold cyan",
         )
-        table.add_column("Package", style="bold white")
+        table.add_column(
+            "Package",
+            style="bold white",
+            overflow="fold",
+            min_width=max(len(pkg["name"]) for pkg in installed_packages),
+        )
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
         if insecure_only:
@@ -588,6 +656,8 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         table.add_column("Agents", style="cyan", justify="center")
         table.add_column("Skills", style="yellow", justify="center")
         table.add_column("Hooks", style="red", justify="center")
+        table.add_column("MCPs", style="blue", justify="center")
+        table.add_column("Targets", style="green")
 
         for pkg in installed_packages:
             p = pkg["primitives"]
@@ -601,9 +671,16 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                 str(p.get("agents", 0)) if p.get("agents", 0) > 0 else "-",
                 str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-",
                 str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-",
+                format_mcps(pkg.get("mcps")),
+                format_targets(pkg.get("recorded_targets")),
             )
 
-        console.print(table)
+        # Expand only when the table needs more room for its contents.
+        measured_width = console.measure(table, options=console.options.update_width(sys.maxsize))
+        console.print(table, width=max(console.width, measured_width.maximum), crop=False)
+        legend = targets_legend(pkg.get("recorded_targets") for pkg in installed_packages)
+        if legend:
+            console.print(legend, style="dim", markup=False, highlight=False)
 
         # Show orphaned packages warning -- routed through CommandLogger
         # so output goes through the central STATUS_SYMBOLS prefix path
@@ -616,22 +693,26 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
+            logger.info(ORPHANED_PACKAGES_PRUNE.sentence())
     else:
         # Fallback text table
         if insecure_only:
             click.echo(f" Insecure APM Dependencies ({scope_label}):")
-            click.echo(
+            header = (
                 f"{'Package':<30} {'Version':<10} {'Source':<12} {'Origin':<18} "
-                f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
+                f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7} "
+                f"{'MCPs':>4} Targets"
             )
-            click.echo("-" * 117)
+            click.echo(header)
+            click.echo("-" * len(header))
         else:
             click.echo(f" APM Dependencies ({scope_label}):")
-            click.echo(
-                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
+            header = (
+                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} "
+                f"{'Agents':>7} {'Skills':>7} {'Hooks':>7} {'MCPs':>4} Targets"
             )
-            click.echo("-" * 98)
+            click.echo(header)
+            click.echo("-" * len(header))
 
         for pkg in installed_packages:
             p = pkg["primitives"]
@@ -644,15 +725,22 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             agents = str(p.get("agents", 0)) if p.get("agents", 0) > 0 else "-"
             skills = str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-"
             hooks = str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-"
+            mcps = format_mcps(pkg.get("mcps"))
+            targets = format_targets(pkg.get("recorded_targets"))
             if insecure_only:
                 click.echo(
                     f"{name:<30} {version:<10} {source:<12} {insecure_via:<18} "
-                    f"{prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
+                    f"{prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7} "
+                    f"{mcps:>4} {targets}"
                 )
             else:
                 click.echo(
-                    f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
+                    f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} "
+                    f"{agents:>7} {skills:>7} {hooks:>7} {mcps:>4} {targets}"
                 )
+        legend = targets_legend(pkg.get("recorded_targets") for pkg in installed_packages)
+        if legend:
+            click.echo(legend)
 
         # Show orphaned packages warning -- route through CommandLogger
         # for consistency with the rich branch above and with prune.py.
@@ -663,7 +751,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
+            logger.info(ORPHANED_PACKAGES_PRUNE.sentence())
 
     _report_native_plugins(apm_dir, logger)
 
@@ -699,10 +787,10 @@ def list_packages(global_, show_all, insecure_only):
         # Import Rich components with fallback
         import shutil
 
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
 
         term_width = shutil.get_terminal_size((120, 24)).columns
-        console = Console(width=max(120, term_width))
+        console = new_console(width=max(120, term_width))
         has_rich = True
     except ImportError:
         has_rich = False
@@ -780,7 +868,7 @@ def _build_dep_tree(apm_dir):
     # Load project info
     project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME
     try:
-        apm_yml_path = apm_dir / APM_YML_FILENAME
+        apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
             root_package = APMPackage.from_apm_yml(apm_yml_path)
             project_name = root_package.name
@@ -849,7 +937,7 @@ def _build_dep_tree(apm_dir):
     for candidate in sorted(apm_modules_path.rglob("*")):
         if not candidate.is_dir() or candidate.name.startswith("."):
             continue
-        has_apm = (candidate / APM_YML_FILENAME).exists()
+        has_apm = manifest_file(candidate).exists()
         has_skill = (candidate / SKILL_MD_FILENAME).exists()
         if not has_apm and not has_skill:
             continue
@@ -887,10 +975,11 @@ def tree(global_):
 
     try:
         # Import Rich components with fallback
-        from rich.console import Console
         from rich.tree import Tree
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         has_rich = True
     except ImportError:
         has_rich = False
@@ -930,7 +1019,7 @@ def tree(global_):
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
                             f"[yellow]{display} (could not place in tree; "
-                            "run apm install to resolve)[/yellow]"
+                            f"{DEPENDENCY_UNPLACED.clause()})[/yellow]"
                         )
                         _add_tree_children(branch, dep.get_unique_key(), children_map)
                 console.print(root_tree)
@@ -952,7 +1041,7 @@ def tree(global_):
                         click.echo(
                             f"{prefix}{_dep_display_name(dep)} "
                             "(could not place in tree; "
-                            "run apm install to resolve)"
+                            f"{DEPENDENCY_UNPLACED.clause()})"
                         )
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
@@ -1084,6 +1173,7 @@ def clean(dry_run: bool, yes: bool):
     ),
 )
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.UPDATE)
 def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
     """Update APM dependencies to latest git refs.
 
@@ -1110,12 +1200,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # Soft-deprecation (issue #1525): `apm update` is now a strict superset
     # of this command. Kept working for one release; removed in the next
     # breaking release.
-    _rich_warning(
-        "'apm deps update' is deprecated; use 'apm update' instead. "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
-        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
-        symbol="warning",
-    )
+    _rich_warning(deprecation_message("deps-update"), symbol="warning")
 
     logger = InstallLogger(verbose=verbose, partial=bool(packages))
 
@@ -1129,7 +1214,10 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = get_apm_dir(scope)
-    apm_yml_path = project_root / APM_YML_FILENAME
+    from ...deps.lockfile_generator import require_current_cli
+
+    require_current_cli(project_root, command="apm deps update")
+    apm_yml_path = manifest_file(project_root)
 
     if not apm_yml_path.exists():
         scope_hint = str(project_root) if global_ else "current directory"
@@ -1181,20 +1269,24 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     logger.start(f"Updating {noun}...")
 
+    from ...install.service import InstallService
+
     try:
-        install_result = _install_apm_dependencies(
-            apm_package,
-            update_refs=True,
-            verbose=verbose,
-            only_packages=only_pkgs,
-            force=force,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            auth_resolver=auth_resolver,
-            target=target,
-            scope=scope,
-            legacy_skill_paths=legacy_skill_paths,
-        )
+        # Update intent revalidates marketplace catalogs, as `apm update` does (#3961).
+        with InstallService.catalog_freshness(update_refs=True, refresh=False):
+            install_result = _install_apm_dependencies(
+                apm_package,
+                update_refs=True,
+                verbose=verbose,
+                only_packages=only_pkgs,
+                force=force,
+                parallel_downloads=parallel_downloads,
+                logger=logger,
+                auth_resolver=auth_resolver,
+                target=target,
+                scope=scope,
+                legacy_skill_paths=legacy_skill_paths,
+            )
     except Exception as e:
         logger.error(f"Update failed: {e}")
         if not verbose:
@@ -1254,7 +1346,7 @@ def info(package: str):
 
     if not apm_modules_path.exists():
         logger.error("No apm_modules/ directory found")
-        logger.progress("Run 'apm install' to install dependencies first")
+        logger.progress(DEPENDENCIES_NOT_INSTALLED.sentence())
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)

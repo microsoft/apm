@@ -12,6 +12,10 @@ import typing
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _try_symlink(link: Path, target: Path):
     """Create a symlink or skip the test on platforms that don't support it."""
@@ -253,7 +257,16 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         from apm_cli.integration import skill_integrator
 
         source = inspect.getsource(skill_integrator)
-        calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)]
+        tree = ast.parse(source)
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        # A filter bound to a local name counts only when every binding of that
+        # name is the canonical filter call (the adoption check reuses it).
+        bindings: dict[str, list[ast.AST]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        bindings.setdefault(target.id, []).append(node.value)
         member_copies = [
             node
             for node in calls
@@ -263,6 +276,10 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         for call in member_copies:
             with self.subTest(line=call.lineno):
                 ignore = next((kw.value for kw in call.keywords if kw.arg == "ignore"), None)
+                if isinstance(ignore, ast.Name):
+                    values = bindings.get(ignore.id, [])
+                    self.assertEqual(len(values), 1, ignore.id)
+                    ignore = values[0]
                 self.assertIsInstance(ignore, ast.Call)
                 self.assertIsInstance(ignore.func, ast.Name)
                 self.assertEqual(ignore.func.id, "_build_deployable_copy_ignore")
@@ -273,8 +290,12 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
             ),
             "Skill deployment must not bypass the canonical member-copy owner",
         )
-        self.assertIn("base_ignore = build_copy_ignore(", source)
-        self.assertIn("source_plan.copy_ignore(directory, contents)", source)
+        # The canonical filter lives beside build_copy_ignore in skill_support.
+        from apm_cli.integration import skill_support
+
+        support_source = inspect.getsource(skill_support)
+        self.assertIn("base_ignore = build_copy_ignore(", support_source)
+        self.assertIn("source_plan.copy_ignore(directory, contents)", support_source)
 
 
 class TestIgnoreNonContentSourceGuard(unittest.TestCase):

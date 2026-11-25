@@ -22,7 +22,7 @@ This command does **not** list installed packages, dependencies, or files under 
 If a script named `start` exists, it is marked as the default and runs when you call `apm run` with no script name.
 
 :::note[Coming from npm?]
-`apm list` is closer to `npm run` (with no arguments) than to `npm list`. There is no tree view of installed packages. To inspect what `apm install` placed on disk, look inside `apm_modules/` or read [`apm.lock.yaml`](../../lockfile-spec/).
+`apm list` is closer to `npm run` (with no arguments) than to `npm list`. To inspect installed packages, use [`apm deps list`](../deps/#apm-deps-list) or [`apm deps tree`](../deps/#apm-deps-tree).
 :::
 
 ## Options
@@ -85,4 +85,4 @@ Edit `apm.yml`, add at least one script, and re-run `apm list`.
 
 - [`apm run`](../run/) -- execute a listed script.
 - [`apm install`](../install/) -- install the dependencies your scripts invoke.
-- [Package anatomy](../../../concepts/package-anatomy/) -- where `scripts:` sits in the manifest.
+- [Package anatomy](../../../producer/create-a-package/) -- where `scripts:` sits in the manifest.

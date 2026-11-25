@@ -193,7 +193,7 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
 _SPELLING_ALIAS_CALLERS = {
     "src/apm_cli/integration/cleanup.py": "live_index.alias(stale_path, project_root)",
     "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
-    "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
+    "src/apm_cli/install/manifest_reconcile.py": "live_paths=[*files, *protected_values]",
     "src/apm_cli/deps/file_provenance.py": "alias = physical_alias(",
 }
 
@@ -739,6 +739,7 @@ def check_target_file_contraction(provider: FactsProvider) -> tuple[Violation, .
 
 
 _DEPLOYMENT_LEDGER = "src/apm_cli/core/deployment_ledger.py"
+_DEPLOYMENT_REANCHOR = "src/apm_cli/core/deployment_reanchor.py"
 
 
 _OWNER_ATTRIBUTES = frozenset({"owners", "active_owner", "deployment_ledger"})
@@ -997,7 +998,7 @@ def _skill_lockfile_root_findings(provider: FactsProvider, rule_id: str) -> list
         not re.search(
             r"with \(\s*contextlib\.nullcontext\(\)\s*if ctx\.lockfile_only\s*"
             r'else ctx\.integrators\["skill"\]\.ownership_snapshot\(\s*'
-            r"replay_lockfile=ctx\.existing_lockfile if ctx\.frozen else None,"
+            r"replay_lockfile=InstallService\.frozen_replay_lockfile\(ctx\),"
             r"\s*materialization_session=session,\s*\)\s*\):\s*"
             r'_run_phase\("integrate", _integrate_phase, ctx\)',
             "\n".join(pipeline.lines),
@@ -1122,7 +1123,7 @@ def _cleanup_claim_findings(provider: FactsProvider, rule_id: str) -> list[Viola
     )
     if (
         len(owner_calls) != 1
-        or not _present(facts, "if deployed_file not in surviving_files")
+        or not _present(facts, "deployment_claims=DeploymentClaims(live_files=surviving_files")
         or not _present(facts, "other_deployed = surviving_files - set(new_deployed)")
         or not all(
             _body_has(survivor_body, snippet)
@@ -1266,6 +1267,38 @@ def _local_bundle_findings(provider: FactsProvider, rule_id: str) -> list[Violat
     return findings
 
 
+_LOCKFILE_LOADER = "src/apm_cli/deps/lockfile.py"
+_ROW_PROJECTION_OWNER = "src/apm_cli/core/legacy_lock_evidence.py"
+_ROW_PROJECTION_MESSAGE = (
+    "Whether a lockfile load may skip per-row legacy projection is decided only by "
+    "DeploymentLedgerCodec.load_observes_per_row_projection"
+)
+
+
+def _row_projection_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Lockfile loads skip per-row ledger projection only on the codec's verdict."""
+    loader, loader_fail = _facts_for(provider, _LOCKFILE_LOADER, rule_id)
+    owner, owner_fail = _facts_for(provider, _ROW_PROJECTION_OWNER, rule_id)
+    if loader_fail or owner_fail:
+        return list(loader_fail) + list(owner_fail)
+    hardcoded = re.compile(r"\bproject_ledger\s*=\s*(?:False|0)\b")
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        facts = provider.file_facts(path)
+        if getattr(facts, "read_error", None) is not None:
+            continue
+        findings.extend(
+            _line_findings(
+                facts, path, rule_id, hardcoded, _ROW_PROJECTION_MESSAGE, respect_exempt=True
+            )
+        )
+    if not _present(loader, "DeploymentLedgerCodec.load_observes_per_row_projection(") or not all(
+        _present(owner, needle) for needle in ("cls.valid_owner_keys(", "cls._legacy_locator(")
+    ):
+        findings.append(_summary(rule_id, _DEPLOYMENT_LEDGER, _ROW_PROJECTION_MESSAGE))
+    return findings
+
+
 def _drift_membership_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
     """Drift deployment membership must route through DeploymentLedgerCodec."""
     drift, drift_fail = _facts_for(provider, "src/apm_cli/install/drift.py", rule_id)
@@ -1376,7 +1409,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "record.active_owner not in self._valid_owners",
             "self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]",
             "value = deployed_path_entry(path, self.root, targets)",
-            "deployed_path_entry(path, self.root, targets),",
+            "deployed_path_entry(path, self.root, targets, candidate, roots(self.root)),",
             "self._written[key] = value",
             "for key, value in self._written.items():",
             "record.active_owner == owner",
@@ -1387,6 +1420,9 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             'atomic_write_text(ignore, "*\\n", new_file_mode=0o600, create_only=True)',
             'self.identity_path, installation + "\\n", new_file_mode=0o600, create_only=True',
             "create_only=not self._state_present",
+            'take = getattr(integrator, "take_rendered_writes", None)',
+            "record_rendered_writes(None, integrator, targets=(), package_info=package_info)",
+            "DeploymentMaterializationSession.receipt_owner(package_info),",
         ),
         _SKILL_INTEGRATOR: (
             "on_member_written=written.append",
@@ -1395,9 +1431,11 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "session.record({path: written_hashes[entry(path)] for path in written}",
             "materialization_session.flush()",
             "self._materialization_session = None",
-            "removed_paths.append(target)",
+            "receipt_retirements=removed_paths,",
         ),
         _BASE_INTEGRATOR_OWNER: (
+            'self.__dict__.setdefault("_rendered_writes", []).append(path)',
+            'return self.__dict__.pop("_rendered_writes", [])',
             "baseline_hash(target_file)",
             "(baseline_hash is not None and expected is None)",
             "on_member_written(target_file)",
@@ -1416,7 +1454,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "receipt_retirements.extend(retired)",
         ),
         "src/apm_cli/install/phases/cleanup.py": (
-            "_run_cleanup(ctx, receipt_retirements)",
+            "_run_cleanup(ctx, receipt_retirements, frozen_disposition=frozen_disposition)",
             "finally:",
             "DeploymentMaterializationSession.retire_removed(",
             "receipt_retirements=receipt_retirements",
@@ -1429,12 +1467,32 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "finally:",
             "project_root, removed_skill_paths, user_scope=user_scope",
         ),
+        # The locked fast path records the outputs it wrote, as a live install does.
+        "src/apm_cli/install/diff_apply.py": (
+            "DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)",
+            "session.record(written, targets, owner)",
+            # The project bounds the fast apply's rollback (#5207).
+            "journaled_apply(project_root) as journal:",
+            "session.flush()",
+        ),
+        # MCP write evidence (#4737) borrows the session's binding and paths only.
+        "src/apm_cli/install/mcp/write_receipts.py": (
+            "session = DeploymentMaterializationSession(Path(project_root), scope, None)",
+            "if not session.binds(data):",
+            "data = self._session.binding()",
+        ),
         "src/apm_cli/commands/uninstall/cli.py": (
             "_persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)",
             "else:\n        if integration_cleanup.materialization_session is not None:",
             "integration_cleanup.materialization_session.bind_committed_claims(lockfile)",
         ),
     }
+    # A re-anchored owner keeps its receipts' hash history: same bytes, same writer (#4889).
+    requirements[_DEPLOYMENT_REANCHOR] = (
+        "class _ReanchorSession(DeploymentMaterializationSession):",
+        "or self._bindings.get(claim.locator.key) != expected",
+        "self._bindings[key] = [renamed.active_owner, self._claim_signature(value)]",
+    )
     for path, snippets in requirements.items():
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
@@ -1442,6 +1500,61 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
         if not failures and not all(snippet in text for snippet in snippets):
             findings.append(
                 _summary(rule_id, path, "Local materialization evidence must use the guarded owner")
+            )
+    # Every file-primitive writer reports its final-rendered writes, and the
+    # install service records them for each integrator call (#3701).
+    write_reports = {
+        "src/apm_cli/install/services.py": (
+            "with recorded_writes(integrators.skill, _integrator, [_target], package_info):",
+            "with recorded_writes(integrators.skill, integrators.skill, projection_targets,",
+        ),
+        **{
+            f"src/apm_cli/integration/{name}.py": ("note_rendered_write(",)
+            for name in (
+                "agent_integrator",
+                "canvas_integrator",
+                "command_integrator",
+                "hook_bundle",
+                "hook_integrator",
+                "instruction_integrator",
+                "kiro_hook_integrator",
+                "prompt_integrator",
+                "skill_integrator",
+            )
+        },
+    }
+    # Every lockfile-driven deletion needs deployment evidence and routes
+    # through the cleanup owner; no sync or migration deletes on its own (#3701).
+    write_reports.update(
+        {
+            "src/apm_cli/integration/cleanup.py": (
+                "    evidence: DeploymentEvidence,\n    recorded_hashes",
+                "verdict = evidence.verdict(stale_path, stale_target)",
+                "if evidence.verdict(child_rel, child) != AUTHORIZED:",
+            ),
+            _BASE_INTEGRATOR_OWNER: (
+                "from apm_cli.integration.cleanup import remove_synced_files",
+            ),
+            "src/apm_cli/integration/hook_integrator.py": (
+                "note_rendered_write(",
+                "cleanup = remove_synced_files(",
+            ),
+            "src/apm_cli/integration/skill_integrator.py": (
+                "note_rendered_write(",
+                "cleanup = remove_synced_files(",
+            ),
+            "src/apm_cli/install/skill_path_migration.py": (
+                "if not evidence.authorizes(plan.src_path, abs_path, rendered_as=plan.dst_path):",
+            ),
+        }
+    )
+    for path, snippets in write_reports.items():
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        text = "\n".join(_lines(facts))
+        if not failures and not all(snippet in text for snippet in snippets):
+            findings.append(
+                _summary(rule_id, path, "Final-rendered writes must be reported for receipts")
             )
     allowed = set(requirements)
     for path in _python_paths(provider, _SRC_PREFIX):
@@ -1481,6 +1594,7 @@ def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     findings.extend(_legacy_scope_findings(provider, rule_id))
     findings.extend(_state_mutation_findings(provider, rule_id))
     findings.extend(_local_bundle_findings(provider, rule_id))
+    findings.extend(_row_projection_findings(provider, rule_id))
     findings.extend(_drift_membership_findings(provider, rule_id))
     findings.extend(_scanner_membership_findings(provider, rule_id))
     findings.extend(_membership_owner_findings(provider, rule_id))

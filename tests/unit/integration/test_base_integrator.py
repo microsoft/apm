@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.primitives.discovery import discover_primitives  # noqa: F401
+from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 # ---------------------------------------------------------------------------
 # IntegrationResult
@@ -242,6 +244,26 @@ class TestValidateDeployPath:
     def test_codex_hooks_json_valid(self):
         assert BaseIntegrator.validate_deploy_path(".codex/hooks.json", self.root) is True
 
+    def test_cowork_final_link_allowed_only_with_parent_contained(self, tmp_path, monkeypatch):
+        """cowork:// follows the project rule for final links: contain the parent (#5022)."""
+        cowork = tmp_path / "cowork-skills"
+        (cowork / "alpha").mkdir(parents=True)
+        outside = tmp_path / "outside"
+        (outside / "refs").mkdir(parents=True)
+        (outside / "notes.md").write_text("outside\n", encoding="utf-8")
+        try:
+            (cowork / "alpha" / "notes.md").symlink_to(outside / "notes.md")
+            (cowork / "alpha" / "refs").symlink_to(outside / "refs", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+        monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+        link, nested = "cowork://skills/alpha/notes.md", "cowork://skills/alpha/refs/guide.md"
+
+        assert BaseIntegrator.validate_deploy_path(link, self.root) is False
+        assert BaseIntegrator.validate_deploy_path(link, self.root, allow_final_symlink=True)
+        assert not BaseIntegrator.validate_deploy_path(nested, self.root, allow_final_symlink=True)
+        assert (outside / "notes.md").read_text(encoding="utf-8") == "outside\n"
+
 
 # ---------------------------------------------------------------------------
 # partition_bucket_key
@@ -249,29 +271,22 @@ class TestValidateDeployPath:
 
 
 class TestPartitionBucketKey:
-    def test_prompts_copilot_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("prompts", "copilot") == "prompts"
-
-    def test_agents_copilot_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "copilot") == "agents_github"
-
-    def test_instructions_copilot_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "copilot") == "instructions"
-
-    def test_instructions_cursor_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "cursor") == "rules_cursor"
-
-    def test_instructions_claude_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "claude") == "rules_claude"
-
-    def test_commands_claude_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("commands", "claude") == "commands"
-
-    def test_no_alias_falls_through(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "claude") == "agents_claude"
-
-    def test_no_alias_opencode(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "opencode") == "agents_opencode"
+    @pytest.mark.parametrize(
+        ("prim_name", "target", "expected"),
+        [
+            ("prompts", "copilot", "prompts"),
+            ("agents", "copilot", "agents_github"),
+            ("instructions", "copilot", "instructions"),
+            ("instructions", "cursor", "rules_cursor"),
+            ("instructions", "claude", "rules_claude"),
+            ("commands", "claude", "commands"),
+            ("agents", "claude", "agents_claude"),
+            ("agents", "cursor", "agents_cursor"),
+            ("agents", "opencode", "agents_opencode"),
+        ],
+    )
+    def test_bucket_key(self, prim_name, target, expected):
+        assert BaseIntegrator.partition_bucket_key(prim_name, target) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -306,11 +321,6 @@ class TestPartitionManagedFiles:
         mf = {".opencode/agents/foo.md"}
         result = BaseIntegrator.partition_managed_files(mf)
         assert ".opencode/agents/foo.md" in result["agents_opencode"]
-
-    def test_skills_cross_target_bucket(self):
-        mf = {".agents/skills/my-skill/skill.md"}
-        result = BaseIntegrator.partition_managed_files(mf)
-        assert ".agents/skills/my-skill/skill.md" in result["skills"]
 
     def test_hooks_cross_target_bucket(self):
         mf = {".github/hooks/pre-tool-use.sh"}
@@ -464,14 +474,26 @@ class TestSyncRemoveFiles:
     def test_removes_matching_managed_file(self):
         self._make_file(".github/prompts/foo.prompt.md")
         mf = {".github/prompts/foo.prompt.md"}
-        stats = BaseIntegrator.sync_remove_files(self.root, mf, ".github/prompts/")
+        stats = BaseIntegrator.sync_remove_files(
+            self.root, mf, ".github/prompts/", evidence=receipted_evidence(self.root)
+        )
         assert stats["files_removed"] == 1
         assert not (self.root / ".github/prompts/foo.prompt.md").exists()
+
+    def test_keeps_managed_file_without_evidence(self):
+        """A lockfile-listed file alone is never deleted (#3701)."""
+        self._make_file(".github/prompts/foo.prompt.md")
+        mf = {".github/prompts/foo.prompt.md"}
+        stats = BaseIntegrator.sync_remove_files(self.root, mf, ".github/prompts/", evidence=None)
+        assert stats["files_removed"] == 0
+        assert (self.root / ".github/prompts/foo.prompt.md").exists()
 
     def test_skips_non_matching_prefix(self):
         self._make_file(".github/prompts/foo.prompt.md")
         mf = {".github/prompts/foo.prompt.md"}
-        stats = BaseIntegrator.sync_remove_files(self.root, mf, ".claude/rules/")
+        stats = BaseIntegrator.sync_remove_files(
+            self.root, mf, ".claude/rules/", evidence=receipted_evidence(self.root)
+        )
         assert stats["files_removed"] == 0
         assert (self.root / ".github/prompts/foo.prompt.md").exists()
 
@@ -482,12 +504,16 @@ class TestSyncRemoveFiles:
             ".github/prompts/a.prompt.md",
             ".github/prompts/b.prompt.md",
         }
-        stats = BaseIntegrator.sync_remove_files(self.root, mf, ".github/prompts/")
+        stats = BaseIntegrator.sync_remove_files(
+            self.root, mf, ".github/prompts/", evidence=receipted_evidence(self.root)
+        )
         assert stats["files_removed"] == 2
 
     def test_skips_nonexistent_file(self):
         mf = {".github/prompts/missing.md"}
-        stats = BaseIntegrator.sync_remove_files(self.root, mf, ".github/prompts/")
+        stats = BaseIntegrator.sync_remove_files(
+            self.root, mf, ".github/prompts/", evidence=no_evidence(self.root)
+        )
         assert stats["files_removed"] == 0
         assert stats["errors"] == 0
 
@@ -504,12 +530,13 @@ class TestSyncRemoveFiles:
             ".github/prompts/",
             legacy_glob_dir=prompts_dir,
             legacy_glob_pattern="*-apm.prompt.md",
+            evidence=None,
         )
         assert stats["files_removed"] == 2
         assert (prompts_dir / "user-custom.md").exists()
 
     def test_managed_files_none_no_legacy_is_noop(self):
-        stats = BaseIntegrator.sync_remove_files(self.root, None, ".github/prompts/")
+        stats = BaseIntegrator.sync_remove_files(self.root, None, ".github/prompts/", evidence=None)
         assert stats["files_removed"] == 0
         assert stats["errors"] == 0
 
@@ -517,7 +544,9 @@ class TestSyncRemoveFiles:
         """validate_deploy_path rejects paths with '..'."""
         evil = "../evil.md"
         mf = {evil}
-        stats = BaseIntegrator.sync_remove_files(self.root, mf, "../")
+        stats = BaseIntegrator.sync_remove_files(
+            self.root, mf, "../", evidence=receipted_evidence(self.root)
+        )
         assert stats["files_removed"] == 0
 
 
@@ -884,7 +913,7 @@ class TestInitLinkResolverLocalScoping:
 
         bi = BaseIntegrator()
 
-        with patch("apm_cli.primitives.discovery.os.walk", side_effect=spy_walk):
+        with patch("os.walk", side_effect=spy_walk):
             bi.init_link_resolver(*local_context)
 
         assert bi.link_resolver is not None
@@ -1074,6 +1103,7 @@ class TestSyncRemoveFilesCowork:
                 {"cowork://skills/my-skill/SKILL.md"},
                 "cowork://",
                 targets=[cowork_target],
+                evidence=receipted_evidence(skill_md, deploy_root=project_root),
             )
         assert not skill_md.exists()
         assert stats["files_removed"] == 1
@@ -1091,6 +1121,7 @@ class TestSyncRemoveFilesCowork:
                 {"cowork://skills/nonexistent/SKILL.md"},
                 "cowork://",
                 targets=[cowork_target],
+                evidence=no_evidence(project_root),
             )
         assert stats["files_removed"] == 0
         assert stats["errors"] == 0
@@ -1108,9 +1139,11 @@ class TestSyncRemoveFilesCowork:
                 {"cowork://skills/my-skill/SKILL.md"},
                 "cowork://",
                 targets=[cowork_target],
+                evidence=no_evidence(project_root),
             )
         assert stats["files_removed"] == 0
-        assert stats["errors"] == 0
+        # The unresolvable entry is retained for a later run with a root (#3701).
+        assert stats["errors"] == 1
 
     def test_relative_path_entries_unaffected(self, tmp_path: Path) -> None:
         target_file = tmp_path / ".github" / "prompts" / "foo.prompt.md"
@@ -1120,6 +1153,7 @@ class TestSyncRemoveFilesCowork:
             tmp_path,
             {".github/prompts/foo.prompt.md"},
             ".github/prompts/",
+            evidence=receipted_evidence(tmp_path),
         )
         assert not target_file.exists()
         assert stats["files_removed"] == 1
@@ -1189,6 +1223,7 @@ class TestSyncRemoveFilesCoworkResolverCalledOnce:
                 paths,
                 "cowork://",
                 targets=[cowork_target],
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
             )
 
         mock_resolve.assert_called_once()
@@ -1218,6 +1253,7 @@ class TestSyncRemoveFilesCoworkResolverCalledOnce:
                 paths,
                 "cowork://",
                 targets=[cowork_target],
+                evidence=no_evidence(project_root),
             )
 
         mock_resolve.assert_called_once()
@@ -1236,6 +1272,7 @@ class TestSyncRemoveFilesCoworkResolverCalledOnce:
                 project_root,
                 {".github/prompts/a.prompt.md"},
                 ".github/prompts/",
+                evidence=receipted_evidence(project_root),
             )
 
         mock_resolve.assert_not_called()
@@ -1246,112 +1283,79 @@ class TestSyncRemoveFilesCoworkResolverCalledOnce:
 # ---------------------------------------------------------------------------
 
 
+def _capture_sync_warnings(monkeypatch) -> list[str]:
+    """Record the cleanup diagnostics sync_remove_files renders."""
+    messages: list[str] = []
+
+    def _record(self, *_a, **_kw):
+        messages.extend(d.message for d in self._diagnostics)
+
+    monkeypatch.setattr(DiagnosticCollector, "render_summary", _record)
+    return messages
+
+
 class TestSyncRemoveFilesOrphanWarning:
     """P4: when cowork resolver returns None the function must emit a
-    one-time warning with the count of skipped orphan entries."""
+    one-time warning with the count of skipped orphan entries.
 
-    def test_orphan_warning_emitted_with_logger(self, tmp_path: Path) -> None:
+    Lockfile-listed removals route through the cleanup owner (#3701), so
+    the warning is a cleanup diagnostic rendered by sync_remove_files.
+    """
+
+    def test_orphan_warning_emitted_once_with_count(self, tmp_path: Path, monkeypatch) -> None:
         project_root = tmp_path / "project"
         project_root.mkdir()
         cowork_target = _make_cowork_target(tmp_path)
-        logger = MagicMock()
+        messages = _capture_sync_warnings(monkeypatch)
 
         paths = {f"cowork://skills/skill-{i}/SKILL.md" for i in range(3)}
 
-        with (
-            patch(
-                "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
-                return_value=None,
-            ),
-            patch.object(
-                BaseIntegrator,
-                "validate_deploy_path",
-                return_value=True,
-            ),
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
         ):
             BaseIntegrator.sync_remove_files(
                 project_root,
                 paths,
                 "cowork://",
                 targets=[cowork_target],
-                logger=logger,
+                evidence=no_evidence(project_root),
             )
 
-        logger.warning.assert_called_once()
-        msg = logger.warning.call_args[0][0]
-        assert "3" in msg
-        assert "orphaned lockfile" in msg
+        cowork_msgs = [m for m in messages if "OneDrive path not detected" in m]
+        assert len(cowork_msgs) == 1
+        msg = cowork_msgs[0]
+        assert "3 stale lockfile entries" in msg
         assert "APM_COPILOT_COWORK_SKILLS_DIR" in msg
         assert "apm config set copilot-cowork-skills-dir" in msg
 
-    def test_orphan_warning_singular_for_one_entry(self, tmp_path: Path) -> None:
+    def test_orphan_warning_singular_for_one_entry(self, tmp_path: Path, monkeypatch) -> None:
         project_root = tmp_path / "project"
         project_root.mkdir()
         cowork_target = _make_cowork_target(tmp_path)
-        logger = MagicMock()
+        messages = _capture_sync_warnings(monkeypatch)
 
-        with (
-            patch(
-                "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
-                return_value=None,
-            ),
-            patch.object(
-                BaseIntegrator,
-                "validate_deploy_path",
-                return_value=True,
-            ),
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
         ):
             BaseIntegrator.sync_remove_files(
                 project_root,
                 {"cowork://skills/only-one/SKILL.md"},
                 "cowork://",
                 targets=[cowork_target],
-                logger=logger,
+                evidence=no_evidence(project_root),
             )
 
-        logger.warning.assert_called_once()
-        msg = logger.warning.call_args[0][0]
-        assert "1 orphaned lockfile entry" in msg
+        assert any("1 stale lockfile entry " in m for m in messages)
 
-    def test_orphan_warning_fallback_to_rich_warning(self, tmp_path: Path) -> None:
-        """Without a logger the warning routes through _rich_warning."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        cowork_target = _make_cowork_target(tmp_path)
-
-        with (
-            patch(
-                "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
-                return_value=None,
-            ),
-            patch.object(
-                BaseIntegrator,
-                "validate_deploy_path",
-                return_value=True,
-            ),
-            patch(
-                "apm_cli.integration.base_integrator._rich_warning",
-            ) as mock_warn,
-        ):
-            BaseIntegrator.sync_remove_files(
-                project_root,
-                {"cowork://skills/a/SKILL.md", "cowork://skills/b/SKILL.md"},
-                "cowork://",
-                targets=[cowork_target],
-            )
-
-        mock_warn.assert_called_once()
-        msg = mock_warn.call_args[0][0]
-        assert "2" in msg
-        assert "orphaned lockfile" in msg
-
-    def test_no_orphan_warning_when_resolver_succeeds(self, tmp_path: Path) -> None:
+    def test_no_orphan_warning_when_resolver_succeeds(self, tmp_path: Path, monkeypatch) -> None:
         """No warning emitted when the cowork root resolves successfully."""
         cowork_root = tmp_path / "cowork-skills"
         project_root = tmp_path / "project"
         project_root.mkdir()
         cowork_target = _make_cowork_target(cowork_root)
-        logger = MagicMock()
+        messages = _capture_sync_warnings(monkeypatch)
 
         skill_dir = cowork_root / "my-skill"
         skill_dir.mkdir(parents=True)
@@ -1366,24 +1370,25 @@ class TestSyncRemoveFilesOrphanWarning:
                 {"cowork://skills/my-skill/SKILL.md"},
                 "cowork://",
                 targets=[cowork_target],
-                logger=logger,
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
             )
 
-        logger.warning.assert_not_called()
+        assert messages == []
+        assert not (skill_dir / "SKILL.md").exists()
 
-    def test_no_orphan_warning_without_cowork_paths(self, tmp_path: Path) -> None:
+    def test_no_orphan_warning_without_cowork_paths(self, tmp_path: Path, monkeypatch) -> None:
         """No warning emitted when no cowork:// paths are present."""
         project_root = tmp_path / "project"
         project_root.mkdir()
         (project_root / ".github" / "prompts").mkdir(parents=True)
         (project_root / ".github" / "prompts" / "a.prompt.md").write_text("x")
-        logger = MagicMock()
+        messages = _capture_sync_warnings(monkeypatch)
 
         BaseIntegrator.sync_remove_files(
             project_root,
             {".github/prompts/a.prompt.md"},
             ".github/prompts/",
-            logger=logger,
+            evidence=receipted_evidence(project_root),
         )
 
-        logger.warning.assert_not_called()
+        assert messages == []

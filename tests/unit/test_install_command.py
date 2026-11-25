@@ -16,6 +16,8 @@ from apm_cli.cli import cli
 from apm_cli.core.scope import InstallScope
 from apm_cli.models.results import InstallResult
 
+pytestmark = pytest.mark.component
+
 
 class TestInstallCommandAutoBootstrap:
     """Test cases for apm install command auto-bootstrap feature."""
@@ -499,9 +501,12 @@ class TestInstallCommandAutoBootstrap:
 
             # Should show what would be added
             assert result.exit_code == 0
-            assert "Would add" in result.output or "Dry run" in result.output
-            # Dry-run preserves the bootstrap configuration for the next run.
-            assert Path("apm.yml").exists()
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Created apm.yml" not in result.output
+            # Dry-run plans against a temporary manifest and writes nothing (#3836).
+            assert not Path("apm.yml").exists()
+            assert not Path("apm.lock.yaml").exists()
+            assert not Path("apm_modules").exists()
 
     def test_positional_local_package_dry_run_previews_validated_addition(self):
         """Dry-run renders a validated local addition without changing the project."""
@@ -529,10 +534,58 @@ class TestInstallCommandAutoBootstrap:
             assert not Path("apm_modules").exists()
             assert not Path(".github").exists()
 
-    def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
-        """Dry-run renders and counts only the requested positional package."""
+    def test_local_package_dry_run_without_manifest_writes_nothing(self):
+        """Project-scope dry-run bootstrap plans against a temp manifest (#3836)."""
         with self._chdir_tmp():
-            for name in ("existing-package", "requested-package"):
+            local_package = Path("local-package")
+            local_package.mkdir()
+            (local_package / "apm.yml").write_text(
+                "name: local-package\nversion: 1.0.0\n",
+                encoding="utf-8",
+            )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Dry run: Would set targets: claude (in apm.yml)" in result.output
+            assert "Created apm.yml" not in result.output
+            assert "./local-package" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["local-package"]
+
+    def test_dry_run_without_manifest_resolves_local_paths_from_project(self):
+        """The temp preview manifest must not move local-path resolution (#3836)."""
+        with self._chdir_tmp():
+            for name, deps in (
+                ("local-package", "dependencies:\n  apm:\n    - ../dep2\n"),
+                ("dep2", ""),
+            ):
+                Path(name).mkdir()
+                (Path(name) / "apm.yml").write_text(
+                    f"name: {name}\nversion: 1.0.0\n{deps}", encoding="utf-8"
+                )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "../dep2 -> install" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["dep2", "local-package"]
+
+    def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
+        """Dry-run names the requested package and what the partial install locks (#4198).
+
+        A locked unrequested dependency stays out of the preview; a declared
+        local dependency the lock lacks is named, because the real partial
+        install locks it too.
+        """
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        with self._chdir_tmp():
+            for name in ("locked-package", "unlocked-package", "requested-package"):
                 package = Path(name)
                 package.mkdir()
                 (package / "apm.yml").write_text(
@@ -544,10 +597,21 @@ class TestInstallCommandAutoBootstrap:
                 "version: 1.0.0\n"
                 "dependencies:\n"
                 "  apm:\n"
-                "    - path: ./existing-package\n",
+                "    - path: ./locked-package\n"
+                "    - path: ./unlocked-package\n",
                 encoding="utf-8",
             )
+            lock = LockFile()
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="_local/locked-package",
+                    source="local",
+                    local_path="./locked-package",
+                )
+            )
+            Path("apm.lock.yaml").write_text(lock.to_yaml(), encoding="utf-8")
             manifest_before = Path("apm.yml").read_bytes()
+            lock_before = Path("apm.lock.yaml").read_bytes()
 
             result = self.runner.invoke(
                 cli,
@@ -555,10 +619,12 @@ class TestInstallCommandAutoBootstrap:
             )
 
             assert result.exit_code == 0, result.output
-            assert "APM dependencies (1):" in result.output
+            assert "APM dependencies (2):" in result.output
             assert "./requested-package" in result.output
-            assert "./existing-package" not in result.output
+            assert "./unlocked-package" in result.output
+            assert "./locked-package" not in result.output
             assert Path("apm.yml").read_bytes() == manifest_before
+            assert Path("apm.lock.yaml").read_bytes() == lock_before
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     def test_positional_dry_run_previews_ref_update_without_persisting(
@@ -618,14 +684,18 @@ class TestValidationFailureReasonMessages:
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_validation_failure_without_verbose_includes_verbose_hint(self, mock_validate):
-        """When validation fails without --verbose, reason should suggest --verbose."""
+        """Without --verbose the reason names host and credential, then one runnable step."""
         with self._chdir_tmp():
             # Create apm.yml so we exercise the validation path
             Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
             result = self.runner.invoke(cli, ["install", "owner/repo"])
             # Normalize terminal line-wrapping before checking
             output = " ".join(result.output.split())
-            assert "run with --verbose for auth details" in output
+            assert (
+                "[x] owner/repo -- not accessible or doesn't exist "
+                "(host: github.com, no credential sent). "
+                "Run 'apm install --verbose owner/repo' to see each probe and credential."
+            ) in output
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_validation_failure_with_verbose_omits_verbose_hint(self, mock_validate):
@@ -634,7 +704,7 @@ class TestValidationFailureReasonMessages:
             Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
             result = self.runner.invoke(cli, ["install", "owner/repo", "--verbose"])
             assert "not accessible or doesn't exist" in result.output
-            assert "run with --verbose for auth details" not in result.output
+            assert "Run 'apm install --verbose" not in " ".join(result.output.split())
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_failure_names_all_probes(self, mock_validate):
@@ -666,7 +736,7 @@ class TestValidationFailureReasonMessages:
             # user is already in verbose mode.
             assert "run with --verbose for the full probe log" not in output
 
-    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.install.repository_access._uses_clone_root_probe", return_value=True)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_clone_root_probe_omits_probe_chain(self, mock_validate, mock_probe):
         with self._chdir_tmp():
@@ -676,8 +746,8 @@ class TestValidationFailureReasonMessages:
             assert "all probes failed" not in output
             assert "not accessible or doesn't exist" in output
 
-    @patch("apm_cli.commands.install._initial_scheme", return_value="ssh")
-    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.install.repository_access._initial_scheme", return_value="ssh")
+    @patch("apm_cli.install.repository_access._uses_clone_root_probe", return_value=True)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_ssh_probe_names_ssh_failure(
         self, mock_validate, mock_probe, mock_scheme
@@ -716,7 +786,7 @@ class TestValidationFailureReasonMessages:
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,
     )
-    @patch("apm_cli.install.validation.requests.get")
+    @patch("apm_cli.install.validation._github_api_get")
     def test_verbose_validation_failure_calls_build_error_context(self, mock_get, _mock_cred):
         """When GitHub validation fails in verbose mode, build_error_context should be invoked."""
         mock_get.return_value = MagicMock(ok=False, status_code=404, reason="Not Found", headers={})
@@ -1193,7 +1263,7 @@ class TestInstallGlobalFlag:
             os.chdir(str(repo_root))
 
     def test_global_flag_shows_scope_info(self):
-        """--global flag should display user scope info message and unsupported target warning."""
+        """--global shows user scope info, without warnings about unselected targets."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
@@ -1204,8 +1274,8 @@ class TestInstallGlobalFlag:
                     result = self.runner.invoke(cli, ["install", "--global"])
                 assert result.exit_code == 1
                 assert "user scope" in result.output.lower() or "~/.apm/" in result.output
-                # Should warn about unsupported targets
-                assert "cursor" in result.output.lower()
+                # No target is selected yet, so no unrelated-target warning (#3994).
+                assert "user scope does not deploy" not in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
 
@@ -1223,8 +1293,8 @@ class TestInstallGlobalFlag:
                 assert (fake_home / ".apm" / "apm_modules").is_dir()
                 assert result.exit_code == 1  # No packages or manifest provided
                 assert "user scope" in result.output.lower() or "~/.apm/" in result.output
-                # Should warn about unsupported targets
-                assert "cursor" in result.output.lower()
+                # No target is selected yet, so no unrelated-target warning (#3994).
+                assert "user scope does not deploy" not in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
 
@@ -1287,182 +1357,6 @@ class TestInstallGlobalFlag:
 # ---------------------------------------------------------------------------
 # Generic-host SSH-first validation tests
 # ---------------------------------------------------------------------------
-
-
-class TestGenericHostSshFirstValidation:
-    """Tests for the SSH-first ls-remote logic added for generic (non-GitHub/ADO) hosts."""
-
-    def _make_completed_process(self, returncode, stderr=""):
-        """Return a minimal subprocess.CompletedProcess-like mock."""
-        mock = MagicMock()
-        mock.returncode = returncode
-        mock.stderr = stderr
-        mock.stdout = ""
-        return mock
-
-    @patch("subprocess.run")
-    def test_generic_host_tries_ssh_first_and_succeeds(self, mock_run):
-        """SSH URL is tried first for generic hosts and used when it succeeds."""
-        from apm_cli.commands.install import _validate_package_exists
-
-        # SSH probe succeeds on the first call
-        mock_run.return_value = self._make_completed_process(returncode=0)
-
-        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
-
-        assert result is True
-        # subprocess.run must have been called at least once
-        assert mock_run.call_count >= 1
-        # First call must use the SSH URL
-        first_call_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org" in arg for arg in first_call_cmd), (
-            f"Expected SSH URL in first ls-remote call, got: {first_call_cmd}"
-        )
-
-    @patch("subprocess.run")
-    def test_explicit_ssh_url_does_not_fall_back_to_https(self, mock_run):
-        """Strict-by-default (issue #992): explicit SSH URLs must NOT silently
-        fall back to HTTPS, mirroring ``_clone_with_fallback`` semantics. The
-        legacy permissive chain stays available behind
-        ``APM_ALLOW_PROTOCOL_FALLBACK=1``."""
-        from apm_cli.commands.install import _validate_package_exists
-
-        # SSH probe fails; previously this would have silently retried HTTPS.
-        mock_run.return_value = self._make_completed_process(
-            returncode=128, stderr="ssh: connect to host"
-        )
-
-        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
-
-        assert result is False
-        assert mock_run.call_count == 1, (
-            f"explicit ssh:// must be strict; got {[c[0][0] for c in mock_run.call_args_list]!r}"
-        )
-        first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org:" in arg for arg in first_cmd), (
-            f"Expected SSH URL in only call, got: {first_cmd}"
-        )
-
-    @patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "1"})
-    @patch("subprocess.run")
-    def test_explicit_ssh_falls_back_to_https_with_allow_fallback_env(self, mock_run):
-        """Legacy permissive chain restored when the env opt-in is set."""
-        from urllib.parse import urlsplit
-
-        from apm_cli.commands.install import _validate_package_exists
-
-        mock_run.side_effect = [
-            self._make_completed_process(returncode=128, stderr="ssh: connect to host"),
-            self._make_completed_process(returncode=0),
-        ]
-
-        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
-
-        assert result is True
-        assert mock_run.call_count == 2
-        first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org:" in arg for arg in first_cmd)
-        second_cmd = mock_run.call_args_list[1][0][0]
-        https_arg_found = any(
-            urlsplit(arg).scheme == "https" and urlsplit(arg).netloc == "git.example.org"
-            for arg in second_cmd
-        )
-        assert https_arg_found, (
-            f"Expected https://git.example.org URL in second call, got: {second_cmd}"
-        )
-
-    @patch("subprocess.run")
-    def test_generic_host_returns_false_when_explicit_ssh_fails(self, mock_run):
-        """Strict mode: a single failed SSH probe is the only attempt."""
-        from apm_cli.commands.install import _validate_package_exists
-
-        mock_run.return_value = self._make_completed_process(
-            returncode=128, stderr="fatal: could not read Username"
-        )
-
-        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
-
-        assert result is False
-        assert mock_run.call_count == 1  # strict: SSH only, no HTTPS retry
-
-    @patch("subprocess.run")
-    def test_explicit_http_generic_host_tries_http_first(self, mock_run):
-        """Explicit HTTP must probe HTTP before any SSH fallback."""
-        from urllib.parse import urlsplit
-
-        from apm_cli.commands.install import _validate_package_exists
-
-        mock_run.return_value = self._make_completed_process(returncode=0)
-
-        result = _validate_package_exists(
-            "http://gitlab.company.internal/acme/rules.git", verbose=False
-        )
-
-        assert result is True
-        assert mock_run.call_count == 1
-        first_cmd = mock_run.call_args_list[0][0][0]
-        # Parse each arg as a URL and check scheme + netloc explicitly to
-        # avoid substring false-positives (e.g. the hostname appearing in a
-        # path segment or query value on an otherwise-SSH URL).
-        http_arg_found = False
-        for arg in first_cmd:
-            parts = urlsplit(arg)
-            if parts.scheme == "http" and parts.netloc == "gitlab.company.internal":
-                http_arg_found = True
-                break
-        assert http_arg_found, (
-            f"Expected http://gitlab.company.internal URL in first call, got: {first_cmd}"
-        )
-        assert all("git@" not in arg for arg in first_cmd), (
-            f"Expected no SSH URL in first call, got: {first_cmd}"
-        )
-
-    @patch("subprocess.run")
-    def test_github_host_skips_ssh_attempt(self, mock_run):
-        """GitHub.com repositories do NOT go through the SSH-first ls-remote path."""
-
-        from apm_cli.commands.install import _validate_package_exists
-
-        with patch("apm_cli.install.validation.requests.get") as mock_get:
-            mock_get.return_value = MagicMock(
-                ok=False, status_code=404, reason="Not Found", headers={}
-            )
-            result = _validate_package_exists("owner/repo", verbose=False)
-
-        assert result is False
-        # No ls-remote call should have been made for a github.com host
-        ls_remote_calls = [
-            call
-            for call in mock_run.call_args_list
-            if "ls-remote" in (call[0][0] if call[0] else [])
-        ]
-        assert len(ls_remote_calls) == 0, (
-            f"Expected no ls-remote calls for github.com, got: {ls_remote_calls}"
-        )
-
-    @patch("subprocess.run")
-    def test_ghes_host_skips_ssh_attempt(self, mock_run):
-        """A GHES host is treated as GitHub, not generic SSH probe is skipped."""
-        from apm_cli.commands.install import _validate_package_exists
-
-        mock_run.return_value = self._make_completed_process(returncode=0)
-
-        result = _validate_package_exists("company.ghe.com/team/internal-repo", verbose=False)
-
-        assert result is True
-        ls_remote_calls = [
-            call
-            for call in mock_run.call_args_list
-            if "ls-remote" in (call[0][0] if call[0] else [])
-        ]
-        assert len(ls_remote_calls) == 1, (
-            f"Expected exactly 1 ls-remote call for GHES host, got: {ls_remote_calls}"
-        )
-        only_cmd = ls_remote_calls[0][0][0]
-        # Must use HTTPS, not SSH
-        assert all("git@" not in arg for arg in only_cmd), (
-            f"Expected HTTPS-only URL for GHES host, got: {only_cmd}"
-        )
 
 
 class TestExplicitTargetDirCreation:
@@ -1542,7 +1436,7 @@ class TestContentHashFallback:
             (pkg_dir / "file.txt").write_text("hello")
             content_hash = compute_package_hash(pkg_dir)
 
-            assert verify_package_hash(pkg_dir, content_hash) is True
+            assert verify_package_hash(pkg_dir, content_hash, framed=True) is True
 
     def test_hash_mismatch_triggers_redownload(self):
         """Mismatched content hash on real files returns False."""
@@ -1553,7 +1447,7 @@ class TestContentHashFallback:
             pkg_dir.mkdir()
             (pkg_dir / "file.txt").write_text("original")
 
-            assert verify_package_hash(pkg_dir, "sha256:badhash") is False
+            assert verify_package_hash(pkg_dir, "sha256:badhash", framed=True) is False
 
     def test_should_skip_redownload_true_when_hash_matches_and_dir_exists(self):
         """Production helper returns True when content_hash matches an existing dir."""
@@ -1640,7 +1534,8 @@ class TestAllowInsecureFlag:
         assert "use --allow-insecure for http:// packages" in normalized
         assert "--allow-insecure-host HOSTNAME" in result.output
         assert "Git source, ref, host provider, transport, and MCP config state" in normalized
-        assert "Use 'apm audit' for on-disk integrity." in normalized
+        assert "deployed files do not match the hashes it records" in normalized
+        assert "Use 'apm audit' for on-disk integrity." not in normalized
 
     def test_allow_insecure_host_rejects_non_hostname(self):
         """The explicit transitive host option only accepts bare hostnames."""
@@ -1818,186 +1713,6 @@ class TestAllowInsecureFlag:
         from apm_cli.commands.install import _check_insecure_dependencies
 
         _check_insecure_dependencies([], False, MagicMock())
-
-
-class TestInsecureDependencyWarnings:
-    """Tests for install-time insecure dependency warnings."""
-
-    def test_collect_insecure_dependency_infos_marks_direct_dependency(self):
-        """Direct HTTP dependencies are collected without parent provenance."""
-        from apm_cli.commands.install import (
-            _collect_insecure_dependency_infos,
-            _InsecureDependencyInfo,
-        )
-        from apm_cli.models.dependency.reference import DependencyReference
-
-        dep = DependencyReference.parse("http://mirror.example.com/acme/rules")
-        tree = MagicMock()
-        tree.get_node.return_value = None
-        graph = MagicMock(dependency_tree=tree)
-
-        infos = _collect_insecure_dependency_infos([dep], graph)
-
-        assert infos == [
-            _InsecureDependencyInfo(
-                url="http://mirror.example.com/acme/rules",
-                is_transitive=False,
-                introduced_by=None,
-            )
-        ]
-
-    def test_collect_insecure_dependency_infos_marks_transitive_dependency(self):
-        """Transitive HTTP dependencies carry introducer information."""
-        from apm_cli.commands.install import _collect_insecure_dependency_infos
-        from apm_cli.models.dependency.reference import DependencyReference
-
-        dep = DependencyReference.parse("http://mirror.example.com/acme/transitive")
-        parent_ref = DependencyReference.parse("owner/root-package")
-        parent_node = types.SimpleNamespace(dependency_ref=parent_ref)
-        node = types.SimpleNamespace(parent=parent_node)
-        tree = MagicMock()
-        tree.get_node.return_value = node
-        graph = MagicMock(dependency_tree=tree)
-
-        infos = _collect_insecure_dependency_infos([dep], graph)
-
-        assert len(infos) == 1
-        assert infos[0].url == "http://mirror.example.com/acme/transitive"
-        assert infos[0].is_transitive is True
-        assert infos[0].introduced_by == "owner/root-package"
-
-    def test_format_insecure_dependency_warning_for_transitive_dep(self):
-        """Transitive warning strings include the introducer."""
-        from apm_cli.commands.install import (
-            _format_insecure_dependency_warning,
-            _InsecureDependencyInfo,
-        )
-
-        message = _format_insecure_dependency_warning(
-            _InsecureDependencyInfo(
-                url="http://mirror.example.com/acme/transitive",
-                is_transitive=True,
-                introduced_by="owner/root-package",
-            )
-        )
-
-        assert "Insecure HTTP fetch (unencrypted)" in message
-        assert "http://mirror.example.com/acme/transitive" in message
-        assert "transitive, introduced by owner/root-package" in message
-
-
-class TestTransitiveInsecureDependencyGuard:
-    """Tests for host-based consent around transitive insecure dependencies."""
-
-    def test_transitive_guard_blocks_unapproved_host(self):
-        """Transitive insecure deps are blocked when their host is not approved."""
-        from apm_cli.commands.install import (
-            _guard_transitive_insecure_dependencies,
-            _InsecureDependencyInfo,
-        )
-        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
-
-        logger = MagicMock()
-
-        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
-            _guard_transitive_insecure_dependencies(
-                [
-                    _InsecureDependencyInfo(
-                        url="http://mirror.example.com/acme/transitive",
-                        is_transitive=True,
-                        introduced_by="owner/root-package",
-                    )
-                ],
-                logger,
-                allow_insecure=False,
-                allow_insecure_hosts=(),
-            )
-
-        message = str(exc_info.value)
-        assert message.startswith("Re-run with --allow-insecure-host mirror.example.com")
-        assert "unapproved host(s): mirror.example.com" in message
-
-    def test_transitive_guard_allows_same_host_as_direct_insecure_dependency(self):
-        """A direct insecure dependency host also permits transitive deps on that host."""
-        from apm_cli.commands.install import (
-            _guard_transitive_insecure_dependencies,
-            _InsecureDependencyInfo,
-        )
-
-        logger = MagicMock()
-
-        _guard_transitive_insecure_dependencies(
-            [
-                _InsecureDependencyInfo(
-                    url="http://mirror.example.com/acme/direct",
-                    is_transitive=False,
-                    introduced_by=None,
-                ),
-                _InsecureDependencyInfo(
-                    url="http://mirror.example.com/acme/transitive",
-                    is_transitive=True,
-                    introduced_by="owner/root-package",
-                ),
-            ],
-            logger,
-            allow_insecure=True,
-            allow_insecure_hosts=(),
-        )
-
-    def test_transitive_guard_accepts_explicit_host(self):
-        """Explicitly allowed hosts permit transitive insecure dependencies."""
-        from apm_cli.commands.install import (
-            _guard_transitive_insecure_dependencies,
-            _InsecureDependencyInfo,
-        )
-
-        logger = MagicMock()
-
-        _guard_transitive_insecure_dependencies(
-            [
-                _InsecureDependencyInfo(
-                    url="http://mirror.example.com/acme/transitive",
-                    is_transitive=True,
-                    introduced_by="owner/root-package",
-                )
-            ],
-            logger,
-            allow_insecure=False,
-            allow_insecure_hosts=("mirror.example.com",),
-        )
-
-    def test_transitive_guard_blocks_different_host_without_explicit_allowance(self):
-        """A direct insecure host does not permit transitive deps on other hosts."""
-        from apm_cli.commands.install import (
-            _guard_transitive_insecure_dependencies,
-            _InsecureDependencyInfo,
-        )
-        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
-
-        logger = MagicMock()
-
-        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
-            _guard_transitive_insecure_dependencies(
-                [
-                    _InsecureDependencyInfo(
-                        url="http://my-server.example.com/acme/direct",
-                        is_transitive=False,
-                        introduced_by=None,
-                    ),
-                    _InsecureDependencyInfo(
-                        url="http://mirror.example.com/acme/transitive",
-                        is_transitive=True,
-                        introduced_by="owner/root-package",
-                    ),
-                ],
-                logger,
-                allow_insecure=True,
-                allow_insecure_hosts=(),
-            )
-
-        message = str(exc_info.value)
-        assert message.startswith("Re-run with --allow-insecure-host mirror.example.com")
-        assert "unapproved host(s): mirror.example.com" in message
 
 
 # ---------------------------------------------------------------------------
@@ -2186,6 +1901,7 @@ class TestInstallMcpFlag:
                 return_value=["apm", "install", "--mcp", ref],
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
             assert result.exit_code == 0, result.output
@@ -2208,6 +1924,7 @@ class TestInstallMcpFlag:
                 return_value=["apm", "install", "--mcp", ref],
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as mock_integ,
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", new=mock_integ),
         ):
             mock_integ.install.side_effect = boom
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
@@ -2276,10 +1993,11 @@ class TestInstallMcpFlag:
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
             patch(
-                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                "apm_cli.integration.mcp_user_scope_runtimes.discover_user_scope_mcp_runtimes",
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as integrator,
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", new=integrator),
         ):
             result = self.runner.invoke(cli, argv[1:])
 
@@ -2304,12 +2022,15 @@ class TestInstallMcpFlag:
         assert install_call.kwargs["target_decision"].value == ["claude"]
         assert install_call.kwargs["target_decision"].source == "auto-detect"
 
-    def test_global_mcp_rejects_workspace_only_target_before_manifest_write(
+    def test_global_mcp_deprecated_vscode_target_selects_global_copilot(
         self, tmp_path, monkeypatch
     ):
+        """vscode is a deprecated alias of copilot, which is global-capable (#3866)."""
+        from apm_cli.core import target_detection
+
+        # The flag warning fires once per process; re-arm it for this invocation.
+        monkeypatch.setattr(target_detection, "_deprecated_flag_aliases_warned", set())
         fake_home = tmp_path / "home"
-        user_apm_dir = fake_home / ".apm"
-        user_manifest = user_apm_dir / "apm.yml"
         project = tmp_path / "project"
         project.mkdir()
         monkeypatch.chdir(project)
@@ -2330,15 +2051,19 @@ class TestInstallMcpFlag:
         with (
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
         ):
             result = self.runner.invoke(cli, argv[1:])
 
-        assert result.exit_code == 2, (result.output, result.exception)
-        assert "enable selected experimental targets" not in result.output
-        assert "vscode; source: --target flag" in result.output
-        assert "choose a global-capable --target" in result.output
-        assert "Skipped workspace-only runtimes" not in result.output
-        assert not user_manifest.exists()
+        assert result.exit_code == 0, (result.output, result.exception)
+        decision = run_mcp_install.call_args.kwargs["target_decision"]
+        assert decision.source == "--target flag"
+        assert decision.canonical_targets == ("copilot",)
+        assert decision.runtime_targets == ("copilot",)
+        output = " ".join(result.output.split())
+        assert "replace `vscode` with `copilot`" in output
+        assert "choose a global-capable --target" not in output
+        assert "Skipped workspace-only runtimes" not in output
 
     def test_global_mcp_accepts_explicit_hermes_target(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
@@ -2381,11 +2106,11 @@ class TestInstallMcpFlag:
             }
         ]
 
-    def test_global_mcp_rejects_unsupported_saved_target_without_fallback(
+    def test_global_mcp_saved_vscode_target_selects_copilot_without_fallback(
         self, tmp_path, monkeypatch
     ):
+        """A saved deprecated vscode default selects copilot, not auto-detected claude."""
         fake_home = tmp_path / "home"
-        user_manifest = fake_home / ".apm" / "apm.yml"
         project = tmp_path / "project"
         project.mkdir()
         (project / ".claude").mkdir()
@@ -2404,17 +2129,18 @@ class TestInstallMcpFlag:
 
         with (
             patch.object(Path, "home", return_value=fake_home),
-            patch("apm_cli.config.get_install_target", return_value="vscode"),
+            patch("apm_cli.config.get_config", return_value={"install_target": "vscode"}),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
         ):
             result = self.runner.invoke(cli, argv[1:])
 
-        assert result.exit_code == 2
-        assert "enable selected experimental targets" not in result.output
-        assert "vscode; source: apm config target" in result.output
-        assert "choose a global-capable --target" in result.output
+        assert result.exit_code == 0, (result.output, result.exception)
+        decision = run_mcp_install.call_args.kwargs["target_decision"]
+        assert decision.source == "apm config target"
+        assert decision.canonical_targets == ("copilot",)
+        assert decision.runtime_targets == ("copilot",)
         assert "Skipped workspace-only runtimes" not in result.output
-        assert not user_manifest.exists()
 
     def test_global_mcp_filters_mixed_target_set_before_dispatch(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
@@ -2462,11 +2188,12 @@ class TestInstallMcpFlag:
         assert result.exit_code == 0, result.output
         assert excluded.exit_code == 0, excluded.output
         first_call, excluded_call = run_mcp_install.call_args_list
+        # The deprecated vscode alias selects global-capable copilot (#3866).
         decision = first_call.kwargs["target_decision"]
-        assert decision.value == ["claude"]
-        assert first_call.kwargs["initial_manifest_config"]["targets"] == ["claude"]
+        assert decision.value == ["copilot", "claude"]
+        assert first_call.kwargs["initial_manifest_config"]["targets"] == ["copilot", "claude"]
         assert excluded_call.kwargs["target_decision"].value == ["claude"]
-        assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
+        assert "Skipped workspace-only runtimes" not in result.output
         assert "Skipped workspace-only runtimes" not in excluded.output
 
     def test_global_mcp_bootstrap_config_omits_git_author(self, tmp_path, monkeypatch):
@@ -2562,7 +2289,7 @@ class TestInstallMcpFlag:
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
             patch(
-                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                "apm_cli.integration.mcp_user_scope_runtimes.discover_user_scope_mcp_runtimes",
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
@@ -2930,6 +2657,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -2959,6 +2687,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -2985,6 +2714,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -3146,6 +2876,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
             patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}),
         ):
             result = self.runner.invoke(
@@ -3230,6 +2961,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -3247,3 +2979,28 @@ class TestInstallMcpFlag:
             mcp = yaml.safe_load((tmp / "apm.yml").read_text())["dependencies"]["mcp"][0]
             assert mcp["version"] == "1.2.3"
             assert mcp["registry"] == "https://mcp.example.com"
+
+
+def test_marketplace_origin_check_reads_a_legacy_lockfile(tmp_path, monkeypatch):
+    """#3959: before migration, a legacy apm.lock still feeds the origin check."""
+    from apm_cli.commands.install import _scoped_lockfile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="acme/alpha",
+            discovered_via="official",
+            marketplace_plugin_name="alpha",
+            source_url="https://github.com/acme/catalog",
+        )
+    )
+    (tmp_path / "apm.lock").write_text(lock.to_yaml(), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    legacy = _scoped_lockfile(None)
+
+    assert legacy is not None
+    assert [dep.source_url for dep in legacy.marketplace_rows("official", "alpha")] == [
+        "https://github.com/acme/catalog"
+    ]

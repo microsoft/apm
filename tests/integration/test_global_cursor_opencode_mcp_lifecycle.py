@@ -124,8 +124,11 @@ def test_installed_global_prune_preserves_skipped_foreign_name(
     before = _workspace(scenario)
     foreign = {"command": ["mine"], "enabled": False}
     _seed(scenario, target, {"foreign": foreign})
-    _write_root(scenario, [_server("foreign"), _server("managed")])
     install = ("install", "-g", "--target", target, "--no-policy")
+    _write_root(scenario, [_server("managed")])
+    assert scenario.run(*install).returncode == 0
+    # An unrecorded colliding server is refused before any write (#4268).
+    _write_root(scenario, [_server("foreign"), _server("managed")])
     _conflict(scenario.run(*install), "foreign")
     assert scenario.lock().mcp_target_servers == {target: ["managed"]}
     _write_root(scenario, [_server("foreign", "new-source-value"), _server("managed")])
@@ -154,12 +157,13 @@ def test_installed_global_prune_intersects_each_targets_ownership(
     _seed(scenario, "cursor", {})
     _seed(scenario, "opencode", {"obsolete": foreign})
     _write_root(scenario, [_server("obsolete"), _server("keep")])
+    # Owned on cursor first; the opencode collision then refuses before any
+    # write (#4741), so the lock keeps only the cursor claims.
+    first = scenario.run("install", "-g", "--target", "cursor", "--no-policy")
+    assert first.returncode == 0, first.stdout + first.stderr
     install = ("install", "-g", "--target", "cursor,opencode", "--no-policy")
     _conflict(scenario.run(*install), "obsolete")
-    assert scenario.lock().mcp_target_servers == {
-        "cursor": ["keep", "obsolete"],
-        "opencode": ["keep"],
-    }
+    assert scenario.lock().mcp_target_servers == {"cursor": ["keep", "obsolete"]}
     _write_root(scenario, [_server("keep")])
     assert scenario.run(*install).returncode == 0
     assert "obsolete" not in _servers(scenario, "cursor")
@@ -257,9 +261,11 @@ def test_installed_global_mcp_refusal_preserves_owned_state(
         if unsafe == "unreadable":
             config.chmod(0o600)
     assert failed.returncode != 0, failed.stdout + failed.stderr
-    assert target in failed.stdout.lower()
-    assert "failed" in failed.stdout.lower()
-    assert "original install command" in failed.stdout
+    output = (failed.stdout + failed.stderr).lower()
+    assert target in output
+    assert "failed" in output
+    # The runtime failure summary is an error line: stderr (RA-004).
+    assert "original install command" in failed.stderr
     guidance = {
         "unreadable": "fix the file's permissions or encoding, or add this server manually",
         "invalid-map": "fix the file or add this server manually",

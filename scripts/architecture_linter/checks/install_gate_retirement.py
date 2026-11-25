@@ -1,0 +1,111 @@
+"""Guard: update and uninstall retire what the gates no longer allow, as install does.
+
+``install/exec_gate.py::gate_retirements`` is the one owner of gate
+monotonicity on the paths that skip install's own gate (#4444, #4445, #4446):
+it judges org-policy dependency denies with ``policy_denied_locked_packages``
+and recorded MCP servers with install's ``McpAdmission.for_project`` through
+``CurrentMcpConfigView.consent_problems``. ``apm update`` asks it from its plan
+callback, and the uninstall MCP cleanup asks it too, then derives its surviving
+servers with the same admission, never an admit-all admission. Uninstall also
+asks it which survivors' hooks are retired (``locked_hooks_retired``, install's
+executables verdict) and redeploys those survivors in full.
+
+The uninstall warning names the retired kinds only through the kinds owner
+(#4816): ``locked_hooks_retired`` derives them with ``_retired_kinds``, which
+filters by recorded deployment evidence through ``rebuild_retired_kinds``;
+uninstall words them with ``retired_kinds_warnings`` and
+``exec_kinds_phrase`` (install's labels), never a hard-coded label.
+"""
+
+from __future__ import annotations
+
+from scripts.architecture_linter.checks.install_deployment_shared import _facts_for, _summary
+from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.models import Violation
+
+GUARD_GATE_RETIREMENT = "install-deployment-gate-retirement"
+_OWNER = "src/apm_cli/install/exec_gate.py"
+_UPDATE = "src/apm_cli/commands/update.py"
+_UNINSTALL = "src/apm_cli/commands/uninstall/engine.py"
+_UNINSTALL_CLI = "src/apm_cli/commands/uninstall/cli.py"
+_PLAN = "src/apm_cli/install/plan_admission.py"
+_KINDS = "src/apm_cli/security/exec_kinds.py"
+
+# (path, function, call qualname suffix that must appear inside it)
+_REQUIRED = (
+    (_OWNER, "gate_retirements", "policy_denied_locked_packages"),
+    (_OWNER, "gate_retirements", "McpAdmission.for_project"),
+    (_OWNER, "gate_retirements", "consent_problems"),
+    (_OWNER, "gate_retirements", "locked_hooks_retired"),
+    (_OWNER, "locked_hooks_retired", "current_exec_decision"),
+    (_OWNER, "locked_hooks_retired", "_retired_kinds"),
+    (_PLAN, "_retired_kinds", "rebuild_retired_kinds"),
+    (_KINDS, "retired_kinds_warnings", "exec_kinds_phrase"),
+    (_KINDS, "exec_kinds_phrase", "EXEC_KIND_LABELS.get"),
+    (_UPDATE, "_gate_retirements_pending", "gate_retirements"),
+    (_UPDATE, "_plan_callback", "_gate_retirements_pending"),
+    (_UNINSTALL, "_cleanup_stale_mcp", "gate_retirements"),
+    (_UNINSTALL, "_cleanup_stale_mcp", "McpAdmission.for_project"),
+    (_UNINSTALL, "gate_retired_hook_survivors", "gate_retirements"),
+    (_UNINSTALL, "gate_retired_hook_survivors", "retired_kinds_warnings"),
+    (_UNINSTALL_CLI, "uninstall", "gate_retired_hook_survivors"),
+)
+_FORBIDDEN = ((_UNINSTALL, "_cleanup_stale_mcp", "McpAdmission.admit_all"),)
+# A kind-retirement warning worded outside the kinds owner (#4816).
+_HARD_CODED_KIND_WARNING = "are no longer allowed"
+
+
+def _calls_in(facts: object, function: str) -> set[str] | None:
+    ranges = [
+        (item.line, item.end_line)
+        for item in getattr(facts, "definitions", ())
+        if item.name == function and item.kind in ("function", "async_function")
+    ]
+    if not ranges:
+        return None
+    return {
+        call.qualname
+        for call in getattr(facts, "calls", ())
+        if any(low <= call.line <= high for low, high in ranges)
+    }
+
+
+def _has(calls: set[str], needle: str) -> bool:
+    return any(call == needle or call.endswith(f".{needle}") for call in calls)
+
+
+def check_gate_retirement(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Update and uninstall judge gate retirement through the one owner."""
+    rule = GUARD_GATE_RETIREMENT
+    findings: list[Violation] = []
+    for path, function, needle in (*_REQUIRED, *_FORBIDDEN):
+        facts, failures = _facts_for(provider, path, rule)
+        if failures:
+            findings.extend(failures)
+            continue
+        calls = _calls_in(facts, function)
+        if calls is None:
+            findings.append(_summary(rule, path, f"{function} not found"))
+            continue
+        required = (path, function, needle) in _REQUIRED
+        if _has(calls, needle) is not required:
+            verb = "must call" if required else "must not call"
+            findings.append(_summary(rule, path, f"{function} {verb} {needle}"))
+    findings.extend(_hard_coded_kind_warnings(provider, rule))
+    return tuple(dict.fromkeys(findings))
+
+
+def _hard_coded_kind_warnings(provider: FactsProvider, rule: str) -> list[Violation]:
+    """Uninstall never words a kind retirement itself; exec_kinds does (#4816)."""
+    facts, failures = _facts_for(provider, _UNINSTALL, rule)
+    if failures:
+        return list(failures)
+    # Literal facts hold adjacent string literals already joined by the parser.
+    texts = (
+        *getattr(facts, "lines", ()),
+        *(literal.value_repr for literal in getattr(facts, "literals", ())),
+    )
+    if any(_HARD_CODED_KIND_WARNING in text for text in texts):
+        message = f"hard-coded '{_HARD_CODED_KIND_WARNING}' warning; use retired_kinds_warnings"
+        return [_summary(rule, _UNINSTALL, message)]
+    return []

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from .object_fields import apply_optional_dependency_fields
+from .subsets import EdgeSelection, merge_edge_selections
 
 if TYPE_CHECKING:
     from ..apm_package import APMPackage
@@ -195,11 +196,53 @@ class ReplacementBinding:
 
     def retain_parents(self, parent_keys: set[str]) -> bool:
         """Prune removed dependency requests without changing chosen ownership."""
-        retained = {
-            request: None
-            for request in self.requests
-            if request.parent is None or request.parent in parent_keys
-        }
+        return self._retain(lambda parent: parent is None or parent in parent_keys)
+
+    def retain_parents_or_root(self, parent_keys: set[str]) -> bool:
+        """Prune removed requests; anchor at the root when no parent survives (#4851).
+
+        A file claim uninstall could not remove outlives every removed parent;
+        one root request (the first recorded edge's selection) keeps its
+        evidence valid until the next run retires the claim.
+        """
+        if any(
+            request.parent is None or request.parent in parent_keys for request in self.requests
+        ):
+            return self.retain_parents(parent_keys)
+        first = next(iter(self.requests))
+        self.requests = {replace(first, parent=None): None}
+        return True
+
+    def drop_root_requests(self) -> bool:
+        """Forget the project's own requests once its declaration is gone (#4749).
+
+        Requests from surviving parents stay, so the binding keeps the edges
+        that still need the selected source, and the node's selection becomes
+        what those edges select, as :meth:`from_dict` derives it.
+        """
+        changed = self._retain(lambda parent: parent is not None)
+        if changed:
+            self._select_from_requests()
+        return changed
+
+    def _select_from_requests(self) -> None:
+        """Give the node the merged selection of its recorded requests (#3735)."""
+        if len(self.requests) == 1:
+            (request,) = self.requests
+            skills, targets = request.skills, request.targets
+        else:
+            merged = merge_edge_selections(
+                EdgeSelection((), request.skills, request.targets) for request in self.requests
+            )
+            skills, targets = merged.skill_subset, merged.target_subset
+        self.original = replace(
+            self.original,
+            skill_subset=None if skills is None else list(skills),
+            target_subset=None if targets is None else list(targets),
+        )
+
+    def _retain(self, keep) -> bool:
+        retained = {request: None for request in self.requests if keep(request.parent)}
         if not retained:
             raise ReplacementConfigError(
                 f"Replacement {self.original.get_unique_key()} has no surviving original request"
@@ -258,6 +301,9 @@ class ReplacementBinding:
             if not binding.requests:
                 binding.original = replace(edge, alias=original.alias)
             binding.record(edge, request["parent"], request["dev"])
+        if len(binding.requests) > 1:
+            # The node carries the merged selection of every incoming edge (#3735).
+            binding._select_from_requests()
         return binding
 
     def local_source_path(self, consumer_root: Path | None = None) -> Path:
@@ -289,7 +335,6 @@ class ReplacementIndex:
         self._rules = list(rules)
         self._by_key: dict[tuple[str, int | None, str, str | None], ReplacementRule] = {}
         self._bindings: dict[tuple[str, int | None, str, str | None], ReplacementBinding] = {}
-        self._slots: dict[str, str] = {}
         self._identities: dict[str, str] = {}
         for rule in self._rules:
             key = rule.selector.key
@@ -333,17 +378,16 @@ class ReplacementIndex:
         """Apply the consumer's table once, before graph deduplication/admission."""
         if not self._rules or dep.replacement is not None:
             return dep
+        # Distinct packages sharing one directory are rejected by
+        # MaterializationSlots for every graph, with or without rules (#3696).
         identity = dep.get_identity()
-        slot = dep.get_install_path(modules_dir)
-        key = dep.get_unique_key()
-        for occupied, entry in ((self._slots, slot.as_posix()), (self._identities, key)):
-            previous = occupied.setdefault(entry, identity)
-            if previous != identity:
-                raise ReplacementCollisionError(
-                    f"Replacement graph identities {previous!r} and {identity!r} "
-                    f"share the existing materialization slot {slot}. "
-                    "Use distinct original package identities and destinations."
-                )
+        previous = self._identities.setdefault(dep.get_unique_key(), identity)
+        if previous != identity:
+            raise ReplacementCollisionError(
+                f"Replacement graph identities {previous!r} and {identity!r} "
+                "share one original package identity. "
+                "Use distinct original package identities."
+            )
         rule = self.lookup(dep)
         if rule is None:
             return dep
@@ -578,13 +622,14 @@ def build_replacement_index(rules: list[ReplacementRule]) -> ReplacementIndex:
 
 
 def project_manifest_dependencies(
-    manifest: APMPackage, *, modules_dir: Path | None = None
+    manifest: APMPackage, *, modules_dir: Path | None = None, include_dev: bool = True
 ) -> list[DependencyReference]:
     """Project direct root declarations without changing manifest ownership."""
-    groups = (
+    groups: tuple[tuple[bool, list[DependencyReference]], ...] = (
         (False, manifest.get_apm_dependencies()),
-        (True, manifest.get_dev_apm_dependencies()),
     )
+    if include_dev:
+        groups += ((True, manifest.get_dev_apm_dependencies()),)
     if not manifest.replace_rules:
         return [dep for _, dependencies in groups for dep in dependencies]
     root = Path(manifest.source_path or manifest.package_path).resolve()

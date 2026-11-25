@@ -24,9 +24,10 @@ from apm_cli.marketplace.reconcile import (
 from apm_cli.marketplace.user_manifest import (
     DeclaredMarketplace,
     parse_declared_marketplaces,
-    validate_marketplaces_declaration,
 )
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+
+pytestmark = pytest.mark.component
 
 
 @pytest.fixture(autouse=True)
@@ -136,45 +137,27 @@ class TestParseDeclaredMarketplaces:
         assert user_manifest.as_posix() in str(exc.value)
 
 
-class TestScopeRejection:
-    def test_project_manifest_is_rejected_naming_user_manifest(self, tmp_path, user_manifest):
+class TestManifestDeclaration:
+    def test_project_manifest_declaration_is_parsed(self, tmp_path, capsys):
         project = tmp_path / "proj"
         project.mkdir()
         apm_yml = project / "apm.yml"
         _write_manifest(apm_yml, [{"name": "acme", "source": "acme-org/m"}])
-        with pytest.raises(ValueError) as exc:
+        pkg = APMPackage.from_apm_yml(apm_yml)
+        assert pkg.marketplaces == (DeclaredMarketplace("acme", "acme-org/m"),)
+        assert "Unknown top-level" not in capsys.readouterr().out
+
+    def test_project_manifest_shape_errors_surface_on_parse(self, tmp_path):
+        apm_yml = tmp_path / "apm.yml"
+        _write_manifest(apm_yml, [{"name": "acme"}])
+        with pytest.raises(ValueError, match="'name' and 'source' are required"):
             APMPackage.from_apm_yml(apm_yml)
-        message = str(exc.value)
-        assert "Project and package manifests cannot declare marketplaces" in message
-        assert user_manifest.as_posix() in message
-        assert "apm install -g" in message
-
-    def test_empty_key_is_still_rejected_outside_user_manifest(self, tmp_path):
-        with pytest.raises(ValueError, match="cannot declare marketplaces"):
-            validate_marketplaces_declaration({"marketplaces": None}, tmp_path / "apm.yml")
-
-    def test_dependency_manifest_is_rejected(self, _isolate_user_root):
-        dep = _isolate_user_root / ".apm" / "apm_modules" / "o" / "r"
-        dep.mkdir(parents=True)
-        _write_manifest(dep / "apm.yml", [{"name": "acme", "source": "acme-org/m"}])
-        with pytest.raises(ValueError, match="cannot declare marketplaces"):
-            APMPackage.from_apm_yml(dep / "apm.yml")
 
     def test_user_manifest_parses_without_unknown_key_warning(self, user_manifest, capsys):
         _write_manifest(user_manifest, [{"name": "acme", "source": "acme-org/m"}])
         pkg = APMPackage.from_apm_yml(user_manifest)
         assert pkg.name == "me"
         assert "Unknown top-level" not in capsys.readouterr().out
-
-    def test_user_manifest_follows_apm_home(self, tmp_path, monkeypatch):
-        apm_home = tmp_path / "custom-apm-home"
-        apm_home.mkdir()
-        monkeypatch.setenv("APM_HOME", str(apm_home))
-        declared = {"marketplaces": [{"name": "acme", "source": "acme-org/m"}]}
-        validate_marketplaces_declaration(declared, apm_home / "apm.yml")
-        with pytest.raises(ValueError) as exc:
-            validate_marketplaces_declaration(declared, tmp_path / "home" / ".apm" / "apm.yml")
-        assert (apm_home / "apm.yml").as_posix() in str(exc.value)
 
     def test_user_manifest_shape_errors_surface_on_parse(self, user_manifest):
         _write_manifest(user_manifest, [{"name": "acme"}])
@@ -285,6 +268,21 @@ class TestReconcile:
         report = reconcile_user_marketplaces(user_manifest, logger=MagicMock())
         assert report.removed == ["acme"]
         assert registry_mod.marketplace_names() == []
+
+    def test_two_manifest_aliases_for_one_catalog_warn_once(self, user_manifest, probe):
+        _write_manifest(
+            user_manifest,
+            [
+                {"name": "acme", "source": "https://github.com/acme-org/m"},
+                {"name": "acme-mirror", "source": "https://github.com/acme-org/m.git"},
+            ],
+        )
+        logger = MagicMock()
+        report = reconcile_user_marketplaces(user_manifest, logger=logger)
+        assert sorted(report.registered) == ["acme", "acme-mirror"]
+        warnings = [c.args[0] for c in logger.warning.call_args_list if "same catalog" in c.args[0]]
+        assert len(warnings) == 1
+        assert "'acme'" in warnings[0] and "'acme-mirror'" in warnings[0]
 
     def test_manual_name_conflict_is_reported_not_overwritten(self, user_manifest, probe):
         registry_mod.add_marketplace(MarketplaceSource(name="acme", owner="manual", repo="r"))

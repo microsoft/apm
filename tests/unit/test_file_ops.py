@@ -92,7 +92,7 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             result = _retry_on_lock(flaky, "test op", max_retries=5)
 
         assert result == "ok"
@@ -104,7 +104,7 @@ class TestRetryOnLock:
         def always_fail():
             raise exc
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), pytest.raises(OSError, match="busy"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"), pytest.raises(OSError, match="busy"):
             _retry_on_lock(always_fail, "test op", max_retries=2)
 
     def test_non_transient_error_raises_immediately(self):
@@ -134,7 +134,7 @@ class TestRetryOnLock:
             return "ok"
 
         with patch(
-            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+            "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda d: sleep_calls.append(d)
         ):
             _retry_on_lock(
                 fail_three_times,
@@ -163,7 +163,7 @@ class TestRetryOnLock:
             return "ok"
 
         with patch(
-            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+            "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda d: sleep_calls.append(d)
         ):
             _retry_on_lock(
                 fail_many,
@@ -194,7 +194,7 @@ class TestRetryOnLock:
             nonlocal cleanup_calls
             cleanup_calls += 1
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             _retry_on_lock(fail_once, "test", before_retry=cleanup, max_retries=3)
 
         assert cleanup_calls == 1
@@ -213,7 +213,7 @@ class TestRetryOnLock:
         def bad_cleanup():
             raise OSError("cleanup failed")
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             result = _retry_on_lock(
                 fail_once,
                 "test",
@@ -233,7 +233,10 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), patch.dict(os.environ, {"APM_DEBUG": "1"}):
+        with (
+            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch.dict(os.environ, {"APM_DEBUG": "1"}),
+        ):
             _retry_on_lock(
                 fail_once,
                 "SENSITIVE_PATH_SENTINEL",
@@ -320,8 +323,8 @@ class TestRobustRmtree:
             return original_rmtree(*args, **kwargs)
 
         with (
-            patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=flaky_rmtree),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("shutil.rmtree", side_effect=flaky_rmtree),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             robust_rmtree(d)
 
@@ -376,8 +379,8 @@ class TestRobustCopytree:
             return original_copytree(*args, **kwargs)
 
         with (
-            patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("shutil.copytree", side_effect=flaky_copytree),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             result = robust_copytree(src, dst)
 
@@ -411,9 +414,9 @@ class TestRobustCopytree:
             return original_rmtree(*args, **kwargs)
 
         with (
-            patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree),
-            patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=spy_rmtree),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("shutil.copytree", side_effect=flaky_copytree),
+            patch("shutil.rmtree", side_effect=spy_rmtree),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             robust_copytree(src, dst, dirs_exist_ok=True)
 
@@ -462,7 +465,7 @@ class TestRobustCopy2:
 
         with (
             patch("apm_cli.utils.file_ops._reflink_copy_file", side_effect=flaky_reflink_copy),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             result = robust_copy2(src, dst)  # noqa: F841
 
@@ -515,7 +518,7 @@ class TestRobustReplace:
 
         with (
             patch.object(Path, "replace", flaky_replace),
-            patch("apm_cli.utils.file_ops.time.sleep") as sleep,
+            patch("apm_cli.utils.file_ops._retry_sleep") as sleep,
         ):
             robust_replace(src, dst)
 
@@ -525,7 +528,7 @@ class TestRobustReplace:
 
     def test_non_transient_error_raises_immediately(self, tmp_path):
         with (
-            patch("apm_cli.utils.file_ops.time.sleep") as sleep,
+            patch("apm_cli.utils.file_ops._retry_sleep") as sleep,
             pytest.raises(FileNotFoundError),
         ):
             robust_replace(tmp_path / "missing", tmp_path / "dest")
@@ -553,6 +556,148 @@ class TestOnReadonlyRetry:
         """If chmod+retry fails, the callback should not raise."""
         # Pass a path that doesn't exist -- should silently fail
         _on_readonly_retry(os.unlink, str(tmp_path / "nonexistent"), None)
+
+
+_SYMLINKS = pytest.mark.skipif(
+    sys.platform == "win32", reason="symlink creation needs a privilege on Windows"
+)
+
+
+def _read_only_dir(path: Path) -> int:
+    path.mkdir()
+    (path / "keep.txt").write_text("kept", encoding="utf-8")
+    path.chmod(stat.S_IREAD | stat.S_IEXEC)
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+class TestRmtreeNeverFollowsALink:
+    """Clearing read-only bits never reaches through a link to its target."""
+
+    @_SYMLINKS
+    def test_a_link_root_is_removed_and_its_target_keeps_mode_and_contents(self, tmp_path):
+        target = tmp_path / "target"
+        mode = _read_only_dir(target)
+        link = tmp_path / "link"
+        link.symlink_to(target, target_is_directory=True)
+        try:
+            robust_rmtree(link)
+
+            assert not link.is_symlink() and not link.exists()
+            assert stat.S_IMODE(target.stat().st_mode) == mode
+            assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRWXU)
+
+    @_SYMLINKS
+    @pytest.mark.parametrize("suffix", [os.sep, f"{os.sep}.{os.sep}", f"{os.sep}.{os.sep}."])
+    def test_a_link_root_named_with_a_trailing_separator_is_removed_itself(self, tmp_path, suffix):
+        target = tmp_path / "target"
+        mode = _read_only_dir(target)
+        link = tmp_path / "link"
+        link.symlink_to(target, target_is_directory=True)
+        try:
+            robust_rmtree(str(link) + suffix)
+
+            assert not link.is_symlink() and not link.exists()
+            assert stat.S_IMODE(target.stat().st_mode) == mode
+            assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRWXU)
+
+    @_SYMLINKS
+    def test_a_link_whose_removal_failed_is_removed_not_made_writable(self, tmp_path):
+        target = tmp_path / "target.txt"
+        target.write_text("kept", encoding="utf-8")
+        target.chmod(stat.S_IREAD)
+        read_only = stat.S_IMODE(target.stat().st_mode)
+        link = tmp_path / "link.txt"
+        link.symlink_to(target)
+        try:
+            _on_readonly_retry(os.unlink, str(link), None)
+
+            assert not link.is_symlink()
+            assert stat.S_IMODE(target.stat().st_mode) == read_only
+            assert target.read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    def test_a_nested_read_only_file_is_still_removed(self, tmp_path):
+        tree = tmp_path / "tree"
+        (tree / "objects" / "pack").mkdir(parents=True)
+        pack = tree / "objects" / "pack" / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+
+        robust_rmtree(tree)
+
+        assert not tree.exists()
+
+    def test_windows_without_no_follow_chmod_still_removes_a_read_only_pack(
+        self, tmp_path, monkeypatch
+    ):
+        pack = tmp_path / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+        chmod = os.chmod
+
+        def no_follow_unavailable(path, mode, *, follow_symlinks=True):
+            if not follow_symlinks:
+                raise NotImplementedError("chmod: follow_symlinks unavailable on this platform")
+            chmod(path, mode)
+
+        monkeypatch.setattr(os, "chmod", no_follow_unavailable)
+        monkeypatch.setattr(os, "name", "nt")
+        _on_readonly_retry(os.unlink, str(pack), None)
+        monkeypatch.undo()
+
+        assert not pack.exists()
+
+    def test_without_no_follow_chmod_elsewhere_the_mode_is_left_alone(self, tmp_path, monkeypatch):
+        pack = tmp_path / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+        read_only = stat.S_IMODE(pack.stat().st_mode)
+
+        def no_follow_unavailable(path, mode, *, follow_symlinks=True):
+            raise NotImplementedError("chmod: follow_symlinks unavailable on this platform")
+
+        monkeypatch.setattr(os, "chmod", no_follow_unavailable)
+        monkeypatch.setattr(os, "name", "posix")
+        with pytest.raises(OSError, match="link"):
+            _on_readonly_retry(os.unlink, str(pack), None)
+        monkeypatch.undo()
+
+        assert pack.exists()
+        assert stat.S_IMODE(pack.stat().st_mode) == read_only
+        pack.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="directory junctions are Windows-only")
+    def test_a_junction_inside_a_read_only_tree_leaves_its_target_alone(self, tmp_path):
+        """#5085: removing a tree never reaches through a junction to clear read-only bits."""
+        import _winapi
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        kept = outside / "kept.txt"
+        kept.write_text("kept", encoding="utf-8")
+        kept.chmod(stat.S_IREAD)
+        tree = tmp_path / "tree"
+        (tree / "objects" / "pack").mkdir(parents=True)
+        pack = tree / "objects" / "pack" / "pack-1.pack"
+        pack.write_bytes(b"pack")
+        pack.chmod(stat.S_IREAD)
+        _winapi.CreateJunction(str(outside), str(tree / "objects" / "linked"))
+        modes = {path.name: stat.S_IMODE(path.stat().st_mode) for path in (outside, kept)}
+        try:
+            robust_rmtree(tree)
+
+            assert not tree.exists()
+            assert kept.read_text(encoding="utf-8") == "kept"
+            assert {path.name: stat.S_IMODE(path.stat().st_mode) for path in (outside, kept)} == (
+                modes
+            )
+        finally:
+            kept.chmod(stat.S_IREAD | stat.S_IWRITE)
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +734,7 @@ class TestRmtreeIntegration:
         """_rmtree should not raise (ignore_errors=True)."""
         from apm_cli.deps.github_downloader import _rmtree
 
-        with patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=PermissionError("denied")):
+        with patch("shutil.rmtree", side_effect=PermissionError("denied")):
             # Should not raise
             _rmtree(str(tmp_path / "nonexistent-apm-test-dir"))
 

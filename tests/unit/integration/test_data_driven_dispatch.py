@@ -20,6 +20,8 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ------------------------------------------------------------------
 # Helpers
@@ -112,11 +114,13 @@ def _dispatch(targets, project_root: Path, integrators=None):
     return _integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=targets,
         force=False,
         managed_files=set(),
         diagnostics=None,
         integrators=_to_bundle(integrators),
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     ), integrators
 
 
@@ -466,6 +470,7 @@ class TestSyntheticTargetProfile:
             apm_package,
             self.root,
             managed_files=managed,
+            evidence=receipted_evidence(self.root),
         )
 
         # The .newcode files should be removed

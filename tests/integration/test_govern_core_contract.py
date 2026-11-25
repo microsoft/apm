@@ -756,7 +756,8 @@ def test_real_govern_core_contract(
     assert hash_check["details"]
 
     assert govern_receipt.pinned_governed_install.returncode == 1
-    assert "dependency-pinned-constraint" in govern_receipt.pinned_governed_install.stdout
+    # Policy refusals print on stderr (#3967, #3992).
+    assert "dependency-pinned-constraint" in govern_receipt.pinned_governed_install.stderr
     assert govern_receipt.pinned_lock_after == govern_receipt.pinned_lock_before
     assert_unchanged(
         govern_receipt.pinned_snapshot_before,
@@ -805,7 +806,8 @@ def test_real_govern_core_contract(
     assert govern_receipt.consumer_audit["summary"]["failed"] == 0
     assert _checks(govern_receipt.consumer_audit)["dependency-content-hashes"]["passed"] is True
     assert govern_receipt.lockless_blocked_install.returncode == 1
-    assert "org policy requires integrity hashes" in govern_receipt.lockless_blocked_install.stdout
+    blocked = govern_receipt.lockless_blocked_install
+    assert "org policy requires integrity hashes" in blocked.stdout + blocked.stderr
     assert_unchanged(
         govern_receipt.lockless_before,
         govern_receipt.lockless_after_block,

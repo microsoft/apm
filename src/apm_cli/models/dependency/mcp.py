@@ -1,7 +1,6 @@
 """MCP dependency model."""
 
 import json
-import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -10,6 +9,22 @@ from urllib.parse import urlparse
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.github_host import has_parser_dependent_url_chars
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+from .server_names import validate_server_name
+from .subsets import parse_target_subset
+
+# Passthrough warnings already shown in this process (#4242): one command
+# parses the same manifest several times, but the user needs one warning per
+# server.
+_PASSTHROUGH_WARNED: set[str] = set()
+
+
+def _warn_passthrough_once(message: str) -> None:
+    if message in _PASSTHROUGH_WARNED:
+        return
+    _PASSTHROUGH_WARNED.add(message)
+    _rich_warning(message, symbol="warning")
+
 
 # Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
 _KNOWN_DICT_KEYS = frozenset(
@@ -37,6 +52,9 @@ _KNOWN_DICT_KEYS = frozenset(
         # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
         "approval_keys",
+        "declared_depth",
+        # Selects which install targets receive the server; never rendered (#2606).
+        "targets",
     }
 )
 
@@ -57,16 +75,21 @@ _RESERVED_EXTRA_KEYS = _KNOWN_DICT_KEYS - {"extra"}
 # ``bearer_token_env_var`` or ``env_http_headers`` rather than ``http_headers``;
 # all three alias that one modeled field, so a transitive dependency must not
 # reach an Authorization header through passthrough that ``headers`` modeling
-# never sees. The literal below is pinned verbatim by the architecture guard
-# ``mutation_writes.mcp_passthrough_denylist``: keep it comment-free and sorted.
+# never sees. ``httpUrl`` (Gemini) and ``serverUrl`` (Antigravity) are harness
+# names of the modeled ``url``; passthrough must not add a second endpoint
+# beside the one APM renders. The literal below is pinned verbatim by the
+# architecture guard ``mutation_writes.mcp_passthrough_denylist``: keep it
+# comment-free and sorted.
 _HARNESS_EXTRA_ALIASES = frozenset(
     {
         "bearer_token_env_var",
         "enabled",
         "env_http_headers",
         "environment",
+        "httpUrl",
         "http_headers",
         "id",
+        "serverUrl",
     }
 )
 _EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | _HARNESS_EXTRA_ALIASES
@@ -107,7 +130,6 @@ def opencode_enabled_matches(current: dict, stored: dict) -> bool:
     )
 
 
-_NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
@@ -146,6 +168,8 @@ class MCPDependency:
     # OpenCode-only value forwarded unchanged; other target adapters ignore it.
     enabled: Any = _ENABLED_UNSET
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
+    # Canonical install targets that receive this server; None = every active target.
+    targets: list[str] | None = None
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
     # servers declared directly in the root manifest. Set by
@@ -156,6 +180,22 @@ class MCPDependency:
     # Executable-approval keys of the declaring locked package; empty for
     # root-declared servers. Never serialized and not part of equality.
     approval_keys: tuple[str, ...] = field(default=(), compare=False)
+    # Materialized root of the declaring package, used only to render an
+    # authored ``${CLAUDE_PLUGIN_ROOT}`` for a target. Never serialized and
+    # not part of equality, so recorded state stays location-independent.
+    plugin_root: str | None = field(default=None, compare=False)
+    # Another clone's root a pre-#3825 lock recorded, set only by a --frozen
+    # replay so an unchanged native entry is kept; never rendered or written.
+    recorded_plugin_root: str | None = field(default=None, compare=False)
+    # Runtimes that load this server natively from its declaring plugin, so
+    # APM never writes it there. Never serialized and not part of equality.
+    native_runtimes: frozenset[str] = field(default=frozenset(), compare=False)
+    # Lock depth of the declaring package, set by the lock-backed MCP view with
+    # the trust owner's own rule (``depth or 1``), so org mcp.trust_transitive
+    # judges depth > 1 only. 0 means no current declarer: the root manifest, or
+    # a config-only kept entry (bundle-owned or consent-retained), which the
+    # trust owner already decided when it was written. Never serialized.
+    declared_depth: int = field(default=0, compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
@@ -197,19 +237,19 @@ class MCPDependency:
         reserved = sorted(set(reserved_unknown) | set(reserved_explicit))
         if reserved:
             safe_reserved = ", ".join(ascii(k)[1:-1] for k in reserved)
-            _rich_warning(
+            _warn_passthrough_once(
                 f"MCP dependency '{safe_name}': reserved passthrough key(s) ignored "
-                f"(cannot override a modeled MCP field): {safe_reserved}",
-                symbol="warning",
+                f"(cannot override a modeled MCP field): {safe_reserved}"
             )
         if passthrough_unknown:
             safe_keys = ", ".join(ascii(k)[1:-1] for k in passthrough_unknown)
-            _rich_warning(
-                f"MCP dependency '{safe_name}': unknown key(s) preserved in extra: {safe_keys}",
-                symbol="warning",
+            _warn_passthrough_once(
+                f"MCP dependency '{safe_name}': unknown key(s) preserved in extra: {safe_keys}"
             )
 
         transport = d.get("transport") or d.get("type")  # legacy 'type' -> 'transport'
+        targets_raw = d.get("targets")  # architecture-authority-exempt: dependency-target-subset
+        targets = parse_target_subset(targets_raw) if targets_raw is not None else None
 
         instance = cls(
             name=d["name"],
@@ -226,6 +266,7 @@ class MCPDependency:
             cwd=d.get("cwd"),
             enabled=d.get("enabled", _ENABLED_UNSET),
             extra=extra,
+            targets=targets,
         )
 
         if instance.registry is False:
@@ -296,6 +337,8 @@ class MCPDependency:
                 result[field_name] = value
         if self.has_enabled:
             result["enabled"] = self.enabled
+        if self.targets is not None:
+            result["targets"] = list(self.targets)
         if self.extra:
             for k, v in self.extra.items():
                 if k not in result and k not in _EXTRA_DENYLIST:
@@ -344,6 +387,14 @@ class MCPDependency:
             parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
 
+    def _registry_config_key(self) -> str | None:
+        """The config key a registry reference writes under (canonical owner), else None."""
+        if self.registry is False or not isinstance(self.name, str):
+            return None
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        return MCPClientAdapter.determine_config_key(self.name, None)
+
     def validate(self, strict: bool = True) -> None:
         """Validate the dependency. Raises ValueError on invalid state.
 
@@ -355,13 +406,12 @@ class MCPDependency:
         # ---- Universal hardening (always) ----
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
-        if not _NAME_REGEX.match(self.name):
-            raise ValueError(
-                f"Invalid MCP dependency name '{self.name}': "
-                f"must start with a letter, digit, '@', or '_' and contain "
-                f"only [a-zA-Z0-9._@/:=-] (max 128 chars). "
-                f"Example: 'io.github.acme/cool-server' or 'my-server'."
-            )
+        validate_server_name(
+            self.name,
+            "MCP",
+            example="'io.github.acme/cool-server' or 'my-server'",
+            config_key=self._registry_config_key(),
+        )
         # C2 (defense-in-depth): reject embedded ``..`` segments. The regex
         # above allows ``a/../../../evil`` because '/', '.', '-' are all in
         # the character class. Today no code path uses this name as a
@@ -484,7 +534,7 @@ class MCPDependency:
                             f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
                             f"  Fix:  command: {first}",
                             f"        args: {suggested_args}",
-                            f"  See:  https://microsoft.github.io/apm/guides/mcp-servers/",  # noqa: F541
+                            f"  See:  https://microsoft.github.io/apm/consumer/install-mcp-servers/",  # noqa: F541
                         ]
                     )
                 )

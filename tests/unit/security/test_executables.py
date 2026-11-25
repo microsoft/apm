@@ -4,26 +4,25 @@ Covers:
 - ``ExecutableDeclaration`` data model properties
 - ``is_package_approved`` and ``is_any_type_approved`` checking logic
 - ``build_approval_key`` construction
-- ``scan_package_executables`` filesystem scanning
 - ``parse_allow_executables`` validation
-- ``write_allow_executables`` round-trip
 - ``prompt_executable_approval`` interactive / CI / trust-all / no-executables paths
 - ``_is_fully_approved`` helper
+
+Filesystem cases (scanning, manifest writes, bundle hashing) live in
+test_exec_vocab_unification.py.
 """
 
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import yaml
 
+import apm_cli.security.executables as ex
+from apm_cli.core.remediation import MCP_EXECUTABLES_UNTRUSTED
+from apm_cli.security import exec_kinds
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
-    EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_LSP,
     EXEC_TYPE_MCP,
@@ -35,17 +34,17 @@ from apm_cli.security.executables import (
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    build_exec_trust_context,
     filter_lsp_by_allow_executables,
-    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
-    local_bundle_approval_key,
     more_severe_exec_status,
     parse_allow_executables,
+    parse_project_executables,
     prompt_executable_approval,
-    scan_package_executables,
-    write_allow_executables,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # ExecutableDeclaration
@@ -205,184 +204,9 @@ class TestBuildApprovalKey:
         assert build_approval_key("ci-hooks@acme", "1.2.0") == "ci-hooks@acme#1.2.0"
 
 
-class TestLocalBundleApprovalKey:
-    def test_hash_includes_normally_excluded_directories(self, tmp_path: Path) -> None:
-        payload = tmp_path / "__pycache__" / "server.py"
-        payload.parent.mkdir()
-        payload.write_text("first", encoding="utf-8")
-        first = local_bundle_approval_key("demo", "", tmp_path)
-
-        payload.write_text("second", encoding="utf-8")
-
-        assert local_bundle_approval_key("demo", "", tmp_path) != first
-
-    def test_hash_rejects_symlinks(self, tmp_path: Path) -> None:
-        target = tmp_path / "target"
-        target.write_text("payload", encoding="utf-8")
-        link = tmp_path / "link"
-        try:
-            link.symlink_to(target)
-        except OSError as exc:
-            pytest.skip(f"file symlinks unavailable: {exc}")
-
-        with pytest.raises(ValueError, match="contains a symlink"):
-            local_bundle_approval_key("demo", "", tmp_path)
-
-    def test_locked_hash_uses_manifest_without_reading_payloads(self, tmp_path: Path) -> None:
-        lockfile = {"pack": {"bundle_files": {"extension.mjs": "a" * 64}}}
-
-        with patch.object(Path, "read_bytes") as read_bytes:
-            key = local_bundle_approval_key("demo", "1", tmp_path, lockfile)
-
-        read_bytes.assert_not_called()
-        assert key.startswith("demo#1@sha256:")
-
-
 # ---------------------------------------------------------------------------
 # scan_package_executables
 # ---------------------------------------------------------------------------
-
-
-class TestScanPackageExecutables:
-    """Tests for scan_package_executables."""
-
-    def test_empty_directory(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            decl = scan_package_executables(Path(tmpdir), "test-pkg", "1.0")
-            assert not decl.has_executables
-            assert decl.package_key == "test-pkg#1.0"
-            assert decl.hook_count == 0
-            assert decl.mcp_count == 0
-            assert decl.bin_count == 0
-
-    def test_detects_hooks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            hook_dir = Path(tmpdir) / ".apm" / "hooks"
-            hook_dir.mkdir(parents=True)
-            (hook_dir / "pre-tool-use.json").write_text("{}")
-            (hook_dir / "post-tool-use.json").write_text("{}")
-
-            decl = scan_package_executables(Path(tmpdir), "hooks-pkg", "2.0")
-            assert decl.hook_count == 2
-            assert decl.has_executables
-            assert EXEC_TYPE_HOOKS in decl.exec_types
-            assert "pre-tool-use.json" in decl.hook_details
-            assert "post-tool-use.json" in decl.hook_details
-
-    def test_detects_bin(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bin_dir = Path(tmpdir) / "bin"
-            bin_dir.mkdir()
-            (bin_dir / "tool1").write_text("#!/bin/sh\necho hi")
-            (bin_dir / "tool2").write_text("#!/bin/sh\necho bye")
-            # Hidden files should be ignored
-            (bin_dir / ".hidden").write_text("ignored")
-
-            decl = scan_package_executables(Path(tmpdir), "bin-pkg", "3.0")
-            assert decl.bin_count == 2
-            assert EXEC_TYPE_BIN in decl.exec_types
-            assert "tool1" in decl.bin_details
-            assert "tool2" in decl.bin_details
-
-    def test_detects_mcp_from_apm_yml(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            apm_yml = Path(tmpdir) / "apm.yml"
-            apm_yml.write_text(
-                yaml.dump(
-                    {
-                        "name": "mcp-pkg",
-                        "version": "1.0",
-                        "dependencies": {
-                            "mcp": [
-                                "server-a",
-                                {"name": "server-b", "command": "node"},
-                            ]
-                        },
-                    }
-                )
-            )
-            decl = scan_package_executables(Path(tmpdir), "mcp-pkg", "1.0")
-            assert decl.mcp_count == 2
-            # MCP is now enforced so it appears in exec_types.
-            assert EXEC_TYPE_MCP in decl.exec_types
-            assert "server-a" in decl.mcp_details
-
-    def test_detects_lsp_from_apm_yml(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "apm.yml").write_text(
-                yaml.dump(
-                    {
-                        "name": "lsp-pkg",
-                        "dependencies": {
-                            "lsp": [
-                                {"name": "pyright", "command": "pyright-langserver"},
-                                "typescript-language-server",
-                            ]
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            decl = scan_package_executables(Path(tmpdir), "lsp-pkg", "1.0")
-            assert decl.lsp_count == 2
-            assert EXEC_TYPE_LSP in decl.exec_types
-            assert decl.lsp_details == ["pyright", "typescript-language-server"]
-
-    def test_preparsed_manifest_avoids_a_second_yaml_read(self, tmp_path) -> None:
-        manifest_data = {
-            "dependencies": {"lsp": [{"name": "pyright", "command": "pyright-langserver"}]}
-        }
-        with patch("apm_cli.utils.yaml_io.load_yaml") as load_yaml:
-            decl = scan_package_executables(
-                tmp_path,
-                "lsp-pkg",
-                "1.0",
-                manifest_data=manifest_data,
-            )
-
-        load_yaml.assert_not_called()
-        assert decl.lsp_count == 1
-
-    def test_transitive_flag(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            decl = scan_package_executables(
-                Path(tmpdir),
-                "trans-pkg",
-                "1.0",
-                is_transitive=True,
-                parent_name="parent-pkg",
-            )
-            assert decl.is_transitive
-            assert decl.parent_name == "parent-pkg"
-
-    def test_combined_hooks_and_bin(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            hook_dir = Path(tmpdir) / ".apm" / "hooks"
-            hook_dir.mkdir(parents=True)
-            (hook_dir / "validate.json").write_text("{}")
-
-            bin_dir = Path(tmpdir) / "bin"
-            bin_dir.mkdir()
-            (bin_dir / "cli-tool").write_text("#!/bin/sh")
-
-            decl = scan_package_executables(Path(tmpdir), "combined", "1.0")
-            assert decl.hook_count == 1
-            assert decl.bin_count == 1
-            assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
-
-    def test_detects_canvas_extensions(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ext_dir = Path(tmpdir) / ".apm" / "extensions" / "widget"
-            ext_dir.mkdir(parents=True)
-            (ext_dir / "extension.mjs").write_text("export default {};")
-            # A sibling directory without the marker is ignored.
-            (Path(tmpdir) / ".apm" / "extensions" / "nomarker").mkdir()
-
-            decl = scan_package_executables(Path(tmpdir), "canvas-pkg", "1.0")
-            assert decl.canvas_count == 1
-            assert "widget" in decl.canvas_details
-            assert EXEC_TYPE_CANVAS in decl.exec_types
 
 
 # ---------------------------------------------------------------------------
@@ -451,60 +275,6 @@ class TestParseAllowExecutables:
 # ---------------------------------------------------------------------------
 # write_allow_executables
 # ---------------------------------------------------------------------------
-
-
-class TestWriteAllowExecutables:
-    """Tests for write_allow_executables round-trip."""
-
-    def test_writes_block(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest = Path(tmpdir) / "apm.yml"
-            manifest.write_text(yaml.dump({"name": "my-project", "version": "1.0"}))
-
-            allow = {"pkg#1.0": {"hooks": True}}
-            write_allow_executables(manifest, allow)
-
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(manifest)
-            assert data["allowExecutables"] == {"pkg#1.0": {"hooks": True}}
-
-    def test_removes_block_when_empty(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest = Path(tmpdir) / "apm.yml"
-            manifest.write_text(
-                yaml.dump(
-                    {
-                        "name": "my-project",
-                        "allowExecutables": {"old#1.0": {"hooks": True}},
-                    }
-                )
-            )
-
-            write_allow_executables(manifest, {})
-
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(manifest)
-            assert "allowExecutables" not in data
-
-    def test_preserves_other_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest = Path(tmpdir) / "apm.yml"
-            manifest.write_text(
-                yaml.dump({"name": "my-project", "version": "1.0", "description": "test"})
-            )
-
-            allow = {"pkg#1.0": {"bin": True}}
-            write_allow_executables(manifest, allow)
-
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(manifest)
-            assert data["name"] == "my-project"
-            assert data["version"] == "1.0"
-            assert data["description"] == "test"
-            assert data["allowExecutables"]["pkg#1.0"]["bin"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -631,15 +401,18 @@ class TestPromptExecutableApproval:
             prompt_executable_approval([decl])
         out = capsys.readouterr().out
         assert "allowExecutables" not in out
-        assert "apm approve --recommended" in out
+        # No org set configured: the bulk command would find nothing (#3994).
+        assert "apm approve --recommended" not in out
         assert "apm policy explain" in out
+        with pytest.raises(SystemExit):
+            prompt_executable_approval([decl], recommend=("owner/pkg",))
+        assert "apm approve --recommended" in capsys.readouterr().out
 
 
 class TestAliasDeprecationWarning:
     """S1 (#1873): the allowExecutables alias warns once, not per-package."""
 
     def test_warns_once(self, capsys) -> None:
-        import apm_cli.security.executables as ex
 
         ex._ALIAS_DEPRECATION_WARNED = False
         ex.warn_allow_executables_alias_once()
@@ -650,7 +423,6 @@ class TestAliasDeprecationWarning:
         assert "executables.allow" in out
 
     def test_uses_logger_when_given(self) -> None:
-        import apm_cli.security.executables as ex
 
         ex._ALIAS_DEPRECATION_WARNED = False
         calls = []
@@ -664,36 +436,8 @@ class TestAliasDeprecationWarning:
         assert "deprecated" in calls[0]
 
 
-class TestSaveUserExecutablesAtomic:
-    """S3 (#1873): personal consent writes are atomic and owner-only."""
-
-    def test_atomic_write_sets_owner_only_mode(self, tmp_path, monkeypatch) -> None:
-        import json
-
-        import apm_cli.security.executables as ex
-
-        cfg = tmp_path / "config.json"
-        monkeypatch.setattr(ex, "_user_config_file", lambda: cfg)
-        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
-        assert cfg.is_file()
-        # Owner-only perms on the freshly-created file. POSIX mode bits are not
-        # enforced on Windows, where atomic_write_text documents that the mode
-        # hint is silently ignored, so only assert the permission contract on
-        # platforms that honour it.
-        if os.name != "nt":
-            assert (cfg.stat().st_mode & 0o777) == 0o600
-        # Content round-trips and preserves co-resident keys on rewrite.
-        cfg.write_text(json.dumps({"default_client": "vscode"}), encoding="utf-8")
-        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-        assert data["default_client"] == "vscode"
-        assert data["executables"]["allow"]["pkg#1.0"]["hooks"] is True
-        # No leftover temp files in the dir.
-        assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
-
-
 # ---------------------------------------------------------------------------
-# filter_mcp_by_allow_executables (fail-closed under v1 deny-wins)
+# filter_lsp_by_allow_executables (fail-closed under v1 deny-wins)
 # ---------------------------------------------------------------------------
 
 
@@ -724,51 +468,6 @@ class _RecordingLogger:
 
     def warning(self, message: str, *args, **kwargs) -> None:
         self.warnings.append(message)
-
-
-class TestFilterMcpFailClosed:
-    """Self-defined MCP servers from dependencies follow their package's decision."""
-
-    @staticmethod
-    def _dep(name, *, owner=None, keys=(), self_defined=True):
-        dep = _FakeMcpDep(name, resolved_by=owner, approval_keys=keys)
-        dep.is_self_defined = self_defined
-        return dep
-
-    def test_none_gate_passes_all(self) -> None:
-        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
-        assert logger.warnings == []
-
-    def test_unapproved_package_server_filtered_out(self) -> None:
-        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, {}, logger) == []
-        assert logger.warnings
-
-    def test_approved_package_passes_regardless_of_server_name(self) -> None:
-        deps = [self._dep("srv", owner="o/a", keys=("o/a",))]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger)
-        assert result == deps
-
-    def test_server_name_matching_an_approved_key_is_not_enough(self) -> None:
-        deps = [self._dep("o/a", owner="o/b", keys=("o/b",))]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
-
-    def test_package_server_without_lock_identity_is_fail_closed(self) -> None:
-        deps = [self._dep("a", owner="o/a", keys=())]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
-        assert logger.warnings
-
-    def test_root_and_registry_servers_pass(self) -> None:
-        root = self._dep("root-srv")
-        registry = self._dep("io.github.x/y", owner="o/a", keys=("o/a",), self_defined=False)
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables([root, registry], {}, logger) == [root, registry]
 
 
 class TestFilterLspFailClosed:
@@ -808,7 +507,9 @@ class TestFilterLspFailClosed:
             "only if policy permits."
         ]
         assert "LSP server 'pyright' from 'evil/package'" in logger.verbose[0]
-        assert "if policy permits" in logger.verbose[0]
+        assert (
+            MCP_EXECUTABLES_UNTRUSTED.bind(package="evil/package").sentence() in logger.verbose[0]
+        )
 
     def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
         approved = _FakeMcpDep(
@@ -908,7 +609,7 @@ class TestDenyIdentitySpellings:
     def _ctx(*, org_deny=(), project_allow=None, project_deny=None, user_deny=None):
         from types import SimpleNamespace
 
-        from apm_cli.security.executables import ExecTrustContext, build_exec_trust_context
+        from apm_cli.security.executables import ExecTrustContext
 
         policy = SimpleNamespace(
             executables=SimpleNamespace(
@@ -976,6 +677,24 @@ class TestDenyIdentitySpellings:
         ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
 
+    def test_deny_ignores_the_port_and_grants_do_not(self) -> None:
+        """#3927: denies cover every port of a package; a grant names one server."""
+        from apm_cli.security.executables import canonical_exec_identity, resolve_exec_decision
+
+        assert canonical_exec_identity("https://github.com:8443/Evil/Pkg.git") == "evil/pkg"
+        ported = "github.com:8443/acme/tool"
+        ctx = self._ctx(project_allow={"acme/tool": {"hooks": True}})
+        assert resolve_exec_decision(ctx, "acme/tool", "hooks").allowed is True
+        assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
+        allow = {ported: {"hooks": True}}
+        for ctx in (
+            self._ctx(org_deny=["acme/tool"], project_allow=allow),
+            self._ctx(org_deny=["github.com:7999/acme/*"], project_allow=allow),
+            self._ctx(project_allow=allow, project_deny={"acme/tool": {"hooks": True}}),
+        ):
+            assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
     def test_content_bound_keys_stay_exact(self) -> None:
         from apm_cli.security.executables import canonical_exec_identity
 
@@ -1011,7 +730,7 @@ class TestCanonicalExecIdentityHostCase:
     def test_ado_deny_matches_case_variant(self) -> None:
         from types import SimpleNamespace
 
-        from apm_cli.security.executables import build_exec_trust_context, resolve_exec_decision
+        from apm_cli.security.executables import resolve_exec_decision
 
         key = "dev.azure.com/Org/Proj/Repo"
         policy = SimpleNamespace(
@@ -1030,3 +749,249 @@ class TestCanonicalExecIdentityHostCase:
             migrate_user_legacy=False,
         )
         assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+
+def test_locked_replacement_keys_name_the_selected_source() -> None:
+    """MCP/LSP views key a replaced row like the install gate, never upstream (#3710)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.security.executables import locked_dependency_approval_keys
+
+    lock = LockFile.from_yaml(
+        """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+    )
+    (locked,) = lock.get_package_dependencies()
+
+    assert locked_dependency_approval_keys(locked) == ("./local-hooky",)
+
+
+def test_locked_fork_replacement_keys_name_the_fork() -> None:
+    """A fork-replaced row is keyed by the fork, with and without its ref."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.security.executables import locked_dependency_approval_keys
+
+    lock = LockFile.from_yaml(
+        """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      git: https://github.com/myfork/hooky.git
+      ref: v1.2.0
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        git: https://github.com/myfork/hooky.git
+        ref: v1.2.0
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+    )
+    (locked,) = lock.get_package_dependencies()
+
+    assert locked_dependency_approval_keys(locked) == ("myfork/hooky#v1.2.0", "myfork/hooky")
+
+
+class TestParseProjectExecutables:
+    def test_absent_returns_empty_no_deprecation(self):
+        allow, deny, deprecated = parse_project_executables({})
+        assert allow == {}
+        assert deny == {}
+        assert deprecated is False
+
+    def test_new_block_allow_and_deny(self):
+        data = {
+            "executables": {
+                "allow": {"owner/repo": {"hooks": True}},
+                "deny": {"bad/pkg": {"bin": True}},
+            }
+        }
+        allow, deny, deprecated = parse_project_executables(data)
+        assert allow == {"owner/repo": {"hooks": True}}
+        assert deny == {"bad/pkg": {"bin": True}}
+        assert deprecated is False
+
+    def test_allow_executables_alias_sets_deprecation_flag(self):
+        data = {"allowExecutables": {"owner/repo": {"hooks": True}}}
+        allow, _deny, deprecated = parse_project_executables(data)
+        assert allow == {"owner/repo": {"hooks": True}}
+        assert deprecated is True
+
+    def test_new_block_wins_over_alias_on_conflict(self):
+        data = {
+            "allowExecutables": {"owner/repo": {"hooks": False}},
+            "executables": {"allow": {"owner/repo": {"hooks": True}}},
+        }
+        allow, _deny, deprecated = parse_project_executables(data)
+        assert allow["owner/repo"]["hooks"] is True
+        assert deprecated is True
+
+
+def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> None:
+    """Printed hints work as typed: quoted paths, -g kept beside --user (#4154)."""
+    from apm_cli.security.trust import approve_command, explain_command
+
+    path = "/tmp/native plugins/example"
+    assert approve_command(path, user_scope=True) == "apm approve -g '/tmp/native plugins/example'"
+    assert explain_command(path) == "apm policy explain '/tmp/native plugins/example'"
+    assert approve_command("--pending", user_scope=True) == "apm approve -g --pending"
+    assert (
+        approve_command("owner/repo", user_scope=True, user_store=True)
+        == "apm approve -g --user owner/repo"
+    )
+
+
+@pytest.mark.parametrize(
+    ("deployed", "deployed_files", "expected"),
+    [
+        pytest.param(("mcp",), [], (), id="mcp-only-is-not-a-rebuild-kind"),
+        pytest.param(
+            ("hooks", "bin"), [".claude/skills/p/SKILL.md"], ("hooks",), id="bin-not-deployed"
+        ),
+        pytest.param(("bin",), [".claude/skills/p/bin/tool"], ("bin",), id="bin-deployed"),
+        pytest.param(
+            ("hooks", "bin"),
+            [".github/skills/bin/SKILL.md"],
+            ("hooks",),
+            id="skill-named-bin-is-not-bin-evidence",
+        ),
+        pytest.param(
+            ("bin",), [".github/skills/bin/bin/tool"], ("bin",), id="skill-named-bin-with-bin-dir"
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            ["agent-data/workflows/bin/SKILL.md"],
+            ("hooks",),
+            id="grok-skill-named-bin",
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            [".github/hooks/scripts/bin/scripts/run.sh"],
+            ("hooks",),
+            id="hook-scripts-bin-dir",
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            [".agents/skills/p/references/skills/bin/tool"],
+            ("hooks",),
+            id="nested-bin-is-not-the-withheld-bin",
+        ),
+        pytest.param(("bin",), [".agents/skills/p/bin/tool"], ("bin",), id="agents-skill-bin"),
+        pytest.param(
+            ("lsp", "canvas"),
+            [".github/extensions/c/extension.mjs"],
+            ("lsp", "canvas"),
+            id="declared-order",
+        ),
+        pytest.param(("hooks", "canvas"), [], ("hooks",), id="canvas-not-deployed"),
+        pytest.param(
+            ("canvas",), [".copilot/extensions/c/extension.mjs"], ("canvas",), id="canvas-user"
+        ),
+        pytest.param(
+            ("hooks", "canvas"),
+            [".github/extensions"],
+            ("hooks",),
+            id="extensions-root-alone-is-not-canvas-evidence",
+        ),
+    ],
+)
+def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_files, expected):
+    """#4567/#4816: only kinds the rebuild removes; bin/ and canvas need a deployed file."""
+    withheld = set(deployed)
+    assert exec_kinds.rebuild_retired_kinds(deployed, withheld, deployed_files) == expected
+
+
+@pytest.mark.parametrize(
+    ("env", "deployed_file"),
+    [
+        pytest.param({}, ".copilot/skills/p/bin/tool", id="copilot-user-legacy-root"),
+        pytest.param(
+            {"CLAUDE_CONFIG_DIR": "{home}/.config/test-claude"},
+            ".config/test-claude/skills/p/bin/tool",
+            id="claude-relocated-user-root",
+        ),
+        pytest.param(
+            {"CLAUDE_CONFIG_DIR": "{home}"},
+            "skills/p/bin/tool",
+            id="claude-config-dir-is-home",
+        ),
+    ],
+)
+def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, deployed_file):
+    """#4567: bin/ under a user-scope skills root, relocated homes included, counts."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value.format(home=tmp_path))
+
+    assert exec_kinds.rebuild_retired_kinds(
+        ("hooks", "bin"), {"hooks", "bin"}, [deployed_file]
+    ) == (
+        "hooks",
+        "bin",
+    )
+
+
+def test_rebuild_retired_kinds_skips_dynamic_root_resolution(monkeypatch):
+    """#4567: a Cowork root that cannot resolve never blocks naming other kinds."""
+    import dataclasses
+
+    from apm_cli.integration import targets
+
+    def unresolvable():
+        raise RuntimeError("several OneDrive mounts")
+
+    cowork = targets.KNOWN_TARGETS["copilot-cowork"]
+    broken = dataclasses.replace(cowork, user_root_resolver=unresolvable)
+    monkeypatch.setitem(targets.KNOWN_TARGETS, "copilot-cowork", broken)
+
+    assert exec_kinds.rebuild_retired_kinds(("hooks",), {"hooks"}, []) == ("hooks",)
+
+
+@pytest.mark.parametrize(
+    ("root", "recorded"),
+    [
+        pytest.param("./skills", "skills/p/bin/tool", id="user-root-is-home"),
+        pytest.param("..\\cfg\\skills", "../cfg/skills/p/bin/tool", id="windows-outside-home"),
+    ],
+)
+def test_skill_root_matches_recorded_bin_path(root, recorded):
+    """#4567: roots normalize like recorded lock paths (no ".", forward slashes)."""
+    assert exec_kinds._deployed_bin_file(recorded, (exec_kinds._root_parts(root),))
+
+
+@pytest.mark.parametrize(
+    ("kinds", "expected"),
+    [
+        (("hooks",), "hooks"),
+        (("hooks", "lsp", "hooks"), "hooks and LSP server(s)"),
+        (("hooks", "lsp", "canvas"), "hooks, LSP server(s) and canvas extension(s)"),
+        ((), ""),
+    ],
+)
+def test_exec_kinds_phrase_names_each_kind_once(kinds, expected):
+    assert exec_kinds.exec_kinds_phrase(kinds) == expected

@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -397,7 +399,7 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value="/tmp"),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("tempfile.mkdtemp", return_value="/tmp/t456"),
-            patch("apm_cli.utils.git_env.git_resolve_commit", return_value=sha),
+            patch("apm_cli.utils.git_env.git_exact_ref_commit", return_value=sha),
         ):
             result = resolver.resolve(dep)
         assert result.resolved_commit == sha

@@ -69,6 +69,8 @@ def _write_policy_file(project: Path, **overrides) -> Path:
         "name": "test-policy",
         "version": "1.0.0",
         "enforcement": "block",
+        # One rule so discovery reports ``found``; a rule-less policy is ``empty``.
+        "dependencies": {"deny": ["blocked-org/*"]},
     }
     data.update(overrides)
     policy_path = project / "apm-policy.yml"
@@ -105,11 +107,31 @@ class TestCiWithPolicyFlag:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        # The hash-less lock row fires the integrity advisory: it goes to
+        # stderr, and stdout stays exactly the JSON document (#4453).
+        assert "without a content hash" in result.stderr
+        data = json.loads(result.stdout)
         # Baseline: up to 7 checks, Policy: 17 checks -> total > 7 when
         # policy evaluation actually ran.  Asserting > 7 (not > 6) catches
         # the regression where only baseline checks are returned.
         assert data["summary"]["total"] > 7
+
+    def test_ci_sarif_stdout_is_only_the_document_when_an_advisory_fires(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """An advisory never reaches stdout under SARIF (#4453)."""
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(tmp_path)
+
+        result = runner.invoke(
+            audit,
+            ["--ci", "--no-drift", "--policy", str(policy_path), "-f", "sarif"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "without a content hash" in result.stderr
+        assert json.loads(result.stdout)["version"] == "2.1.0"
 
     def test_ci_with_policy_deny_fails(self, runner, tmp_path, monkeypatch):
         """Policy deny list causing failure -> exit 1."""
@@ -164,7 +186,7 @@ class TestCiWithPolicyFlag:
         )
 
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         hash_check = next(
             check for check in payload["checks"] if check["name"] == "dependency-content-hashes"
         )
@@ -177,7 +199,9 @@ class TestCiWithPolicyOrg:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
+        mock_result = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:test/.github", outcome="found"
+        )
 
         with patch(
             "apm_cli.policy.discovery.discover_policy", return_value=mock_result
@@ -199,7 +223,7 @@ class TestCiPolicyNotFound:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(error=None, policy=None)
+        mock_result = PolicyFetchResult(error=None, policy=None, outcome="absent")
 
         with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result):
             result = runner.invoke(
@@ -243,7 +267,9 @@ class TestNoCacheFlag:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
+        mock_result = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:test/.github", outcome="found"
+        )
 
         with patch(
             "apm_cli.policy.discovery.discover_policy", return_value=mock_result
@@ -317,8 +343,25 @@ class TestCiWithoutPolicy:
         # found; JSON is on stdout. Read stdout explicitly so the warning does
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
-        # Only the nine baseline checks, including deployment ownership.
-        assert data["summary"]["total"] == 9
+        # Baseline checks only, including deployment ownership and the
+        # recorded executables decisions (#4053); no policy checks.
+        assert data["summary"]["total"] == data["summary"]["passed"] == 14
+        assert [check["name"] for check in data["checks"]] == [
+            "lockfile-exists",
+            "ref-consistency",
+            "deployment-ledger-owners",
+            "deployed-files-present",
+            "no-orphaned-packages",
+            "lockfile-targets-current",
+            "skill-subset-consistency",
+            "config-consistency",
+            "native-mcp-ownership",
+            "content-integrity",
+            "local-bundle-hooks",
+            "hook-approval-pins",
+            "exec-status-current",
+            "includes-consent",
+        ]
 
 
 # -- #3195: explicit --policy fails closed when it cannot be loaded -------
@@ -362,7 +405,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         source = "https://policy.invalid/apm-policy.yml"
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=requests.exceptions.ConnectionError(),
         ):
             result = _invoke_ci(runner, "--policy", source, "--no-cache")
@@ -378,7 +421,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         source = "https://policy.invalid/apm-policy.yml"
         resp = MagicMock(status_code=404)
 
-        with patch("apm_cli.policy.discovery.requests.get", return_value=resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=resp):
             result = _invoke_ci(runner, "--policy", source, "--no-cache")
 
         _assert_explicit_load_failure(result, source)
@@ -392,7 +435,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         source = "https://policy.invalid/apm-policy.yml"
         resp = MagicMock(status_code=200, text="<html>captive portal</html>")
 
-        with patch("apm_cli.policy.discovery.requests.get", return_value=resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=resp):
             result = _invoke_ci(runner, "--policy", source, "--no-cache")
 
         _assert_explicit_load_failure(result, source)
@@ -491,7 +534,7 @@ class TestExplicitPolicyLoadFailureFailsClosed:
         _setup_clean_project(tmp_path)
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=requests.exceptions.ConnectionError(),
         ):
             result = _invoke_ci(

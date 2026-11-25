@@ -22,13 +22,15 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.deps.egress_route import EgressSurface, is_proxy_only
 from apm_cli.install.errors import DirectDependencyError
-from apm_cli.install.phases._redownload import _should_skip_redownload
+from apm_cli.install.outcome import integration_changed_files
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import _targets_explicitly_requested, integrate_local_content
 from apm_cli.install.sources import make_dependency_source
 from apm_cli.install.template import (
+    announce_package,
     preflight_agent_plugin_materializations,
     preflight_skill_materializations,
     prepare_integration_materialization,
@@ -45,6 +47,31 @@ if TYPE_CHECKING:
 # ======================================================================
 
 
+def failed_acquisitions(diagnostics: Any, failed_keys: list[str]) -> list[tuple[str, str]]:
+    """Name each package whose acquire failed, with its recorded cause (#4909).
+
+    A failed acquire only records a diagnostic, rendered after the install;
+    a frozen refusal raised before then would otherwise hide the cause.
+    """
+    from apm_cli.utils.diagnostics import CATEGORY_ERROR
+
+    keys = list(dict.fromkeys(failed_keys))
+    errors = diagnostics.by_category().get(CATEGORY_ERROR, []) if keys and diagnostics else []
+    failures: list[tuple[str, str]] = []
+    for key in keys:
+        messages = [d.message for d in errors if d.package == key]
+        failures.extend(
+            (key, message) for message in messages or [f"{key}: package could not be acquired"]
+        )
+    return failures
+
+
+def _announce_held_headers(prepared_integrations) -> None:
+    """Emit every held package header (refusal paths before integration)."""
+    for _dep_key, _install_path, source, _materialization, _deltas in prepared_integrations:
+        announce_package(source)
+
+
 def _resolve_download_strategy(
     ctx: InstallContext,
     dep_ref: Any,
@@ -56,9 +83,14 @@ def _resolve_download_strategy(
     where *skip_download* is ``True`` when the package at *install_path*
     is already up-to-date.
     """
-    from apm_cli.drift import detect_ref_change
+    from apm_cli.drift import (
+        LOCKED_COPY_CONTENT_HASH,
+        LOCKED_COPY_GIT_HEAD,
+        detect_ref_change,
+        locked_copy_proof,
+    )
+    from apm_cli.install.transaction import stage_existing_copy
     from apm_cli.models.apm_package import GitReferenceType
-    from apm_cli.utils.path_security import safe_rmtree
 
     existing_lockfile = ctx.existing_lockfile
     update_refs = ctx.update_refs
@@ -129,90 +161,51 @@ def _resolve_download_strategy(
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False
     content_hash_already_verified = dep_key in ctx.content_hash_verified_deps
-    # Track whether lockfile_match was satisfied via content-hash fallback only
-    # (no git HEAD verification possible -- typical for virtual packages, where
+    # Track whether lockfile_match was satisfied without git HEAD verification
+    # (the .apm-pin marker or content hash -- typical for virtual packages, where
     # install_path is a carved-out subdirectory rather than a git repo).
     # The self-heal logic below uses this to recover from the v<=0.12.2
     # branch-ref drift bug for upgrading users.
     lockfile_match_via_content_hash_only = False
     if install_path.exists() and existing_lockfile:
         locked_dep = existing_lockfile.get_dependency(dep_key)
+        is_registry = getattr(locked_dep, "source", None) == "registry"
         if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
-            if update_refs:
-                # Update mode: compare resolved remote SHA with lockfile SHA.
-                # If the remote ref still resolves to the same commit,
-                # the package content is unchanged -- skip download.
-                # Also verify local checkout matches to guard against
-                # corrupted installs that bypassed pre-download checks.
-                if resolved_ref and resolved_ref.resolved_commit == locked_dep.resolved_commit:
-                    try:
-                        from git import Repo as GitRepo
-
-                        local_repo = GitRepo(install_path)
-                        if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
-                            lockfile_match = True
-                    except Exception:
-                        # Git check failed (e.g. .git removed, or virtual
-                        # package install_path is not a git repo). Fall back
-                        # to content-hash verification (#763).
-                        if content_hash_already_verified or _should_skip_redownload(
-                            locked_dep, install_path
-                        ):
-                            lockfile_match = True
-                            lockfile_match_via_content_hash_only = True
-                            content_hash_already_verified = True
-                            ctx.content_hash_verified_deps.add(dep_key)
-            elif not ref_changed:
-                # Normal mode: compare local HEAD with lockfile SHA.
-                try:
-                    from git import Repo as GitRepo
-
-                    local_repo = GitRepo(install_path)
-                    if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
-                        lockfile_match = True
-                except Exception:
-                    # Git check failed (e.g. .git removed, or virtual package
-                    # install_path is not a git repo). Fall back to
-                    # content-hash verification (#763).
-                    if content_hash_already_verified or _should_skip_redownload(
-                        locked_dep, install_path
-                    ):
-                        lockfile_match = True
-                        lockfile_match_via_content_hash_only = True
-                        content_hash_already_verified = True
-                        ctx.content_hash_verified_deps.add(dep_key)
-        elif (
-            locked_dep
-            and getattr(locked_dep, "source", None) == "registry"
-            and not ref_changed
-            and not update_refs
-        ):
-            # Registry deps have no resolved_commit; use content_hash as the
-            # skip-download signal (mirrors the git content-hash fallback above).
-            if content_hash_already_verified or _should_skip_redownload(locked_dep, install_path):
-                lockfile_match = True
-                content_hash_already_verified = True
-                ctx.content_hash_verified_deps.add(dep_key)
-        elif locked_dep and locked_dep.content_hash and not ref_changed and not update_refs:
-            # Unpinned git/virtual deps (#1548): the lockfile recorded a
-            # content_hash but no resolved_commit (e.g. ADO partial-clone
-            # fallback could not pin a SHA, or a virtual-file dep was carved
-            # out without a commit anchor).  Without this branch the second
-            # install would re-download every time, and a non-deterministic
-            # fresh hash trips the supply-chain mismatch check at
-            # sources.py with a false-positive attack alert.
-            #
-            # Cache-skip parity with the resolved_commit branches: when the
-            # on-disk content still hashes to the lockfile-recorded value,
-            # the package is intact -- skip re-download. This branch has no
-            # commit anchor; the content hash is the only trust signal, so any
-            # divergence must fall through to the fresh-download path and its
+            # Update mode: reuse the copy only while the remote ref still
+            # resolves to the locked commit. Normal mode: only while the
+            # manifest ref has not changed (user wants a different version).
+            copy_check = (
+                bool(resolved_ref) and resolved_ref.resolved_commit == locked_dep.resolved_commit
+                if update_refs
+                else not ref_changed
+            )
+        else:
+            # Registry deps and unpinned git/virtual deps (#1548) have no
+            # commit anchor; their content_hash is the only trust signal, so
+            # any divergence must reach the fresh-download path and its
             # supply-chain mismatch check.
-            if content_hash_already_verified or _should_skip_redownload(locked_dep, install_path):
+            copy_check = (
+                bool(locked_dep)
+                and (is_registry or bool(locked_dep.content_hash))
+                and not ref_changed
+                and not update_refs
+            )
+        if copy_check:
+            # The canonical copy-validity owner decides (#3884): the resolver
+            # gate and the parallel pre-download skip ask the same question.
+            proof = (
+                LOCKED_COPY_CONTENT_HASH
+                if content_hash_already_verified
+                else locked_copy_proof(locked_dep, install_path)
+            )
+            if proof is not None:
                 lockfile_match = True
-                lockfile_match_via_content_hash_only = True
-                content_hash_already_verified = True
-                ctx.content_hash_verified_deps.add(dep_key)
+                lockfile_match_via_content_hash_only = (
+                    proof != LOCKED_COPY_GIT_HEAD and not is_registry
+                )
+                if proof == LOCKED_COPY_CONTENT_HASH:
+                    content_hash_already_verified = True
+                    ctx.content_hash_verified_deps.add(dep_key)
 
     # Self-heal pipeline (PR #1158).
     #
@@ -268,11 +261,24 @@ def _resolve_download_strategy(
 
     # A same-SHA callback receipt binds validated bytes to their published path.
     # Recheck those bytes rather than comparing them with the previous revision.
+    # A commit that did not move keeps its locked content hash as the baseline.
+    from apm_cli.install.source_helpers import locked_commit_unchanged
+
     receipt = ctx.callback_content_hashes.get(dep_key)
-    if _already_resolved_sha_match and receipt and receipt[0] == install_path.resolve():
+    _locked_commit_unchanged = bool(
+        _dep_locked_chk
+        and _dep_locked_chk.content_hash
+        and locked_commit_unchanged(_dep_locked_chk, _callback_sha)
+    )
+    if (
+        _already_resolved_sha_match
+        and not _locked_commit_unchanged
+        and receipt
+        and receipt[0] == install_path.resolve()
+    ):
         from apm_cli.utils.content_hash import verify_package_hash
 
-        if verify_package_hash(install_path, receipt[1]):
+        if verify_package_hash(install_path, receipt[1], framed=True):
             content_hash_already_verified = True
             ctx.content_hash_verified_deps.add(dep_key)
 
@@ -292,12 +298,27 @@ def _resolve_download_strategy(
             install_path,
             _dep_locked_chk.content_hash,
             _dep_locked_chk.carried_licenses or carried_licenses_for(ctx, dep_key, _dep_locked_chk),
+            framed=_dep_locked_chk.content_hash_framed,
         ):
-            _hash_msg = f"Content hash mismatch for {dep_ref.get_unique_key()} -- re-downloading"
-            diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
-            if logger:
-                logger.progress(_hash_msg)
-            safe_rmtree(install_path, ctx.apm_modules_dir)
+            from apm_cli.install.source_helpers import (
+                locked_content_mismatch_line,
+                observed_package_hash,
+            )
+
+            # The download phase owns this notice; report here only when it did not (#4351).
+            if dep_ref.get_unique_key() not in getattr(ctx, "cache_mismatch_reported", ()):
+                _hash_msg = (
+                    locked_content_mismatch_line(
+                        dep_ref.get_unique_key(),
+                        _dep_locked_chk.content_hash,
+                        observed_package_hash(_dep_locked_chk, install_path),
+                    )
+                    + " Re-downloading from the locked source."
+                )
+                diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
+                if logger:
+                    logger.progress(_hash_msg)
+            stage_existing_copy(ctx, install_path, _dep_locked_chk)
             skip_download = False
 
     # When registry-only mode is active, bypass cache if the
@@ -308,7 +329,7 @@ def _resolve_download_strategy(
     if (
         skip_download
         and ctx.registry_config
-        and ctx.registry_config.enforce_only
+        and is_proxy_only(EgressSurface.SOURCE_ARCHIVE)
         and not dep_ref.is_local
     ):
         if not _dep_locked_chk or _dep_locked_chk.registry_prefix is None:
@@ -364,7 +385,11 @@ def _integrate_root_project(
     _local_managed = BaseIntegrator.normalize_managed_files(_local_managed)
 
     if logger:
-        logger.download_complete("<project root>", ref_suffix="local")
+        from apm_cli.core.scope import is_user_scope
+
+        # The user scope has no project root; never label it as one (RA-020).
+        root_label = "<user scope>" if is_user_scope(ctx.scope) else "<project root>"
+        logger.download_complete(root_label, ref_suffix="local")
         logger.verbose_detail("Integrating local .apm/ content...")
     try:
         _root_result = integrate_local_content(
@@ -393,25 +418,17 @@ def _integrate_root_project(
         DeploymentLedgerCodec.replace_context_local_files(
             ctx, _root_result.get("deployed_files", [])
         )
+        # Merged hook entries deploy no standalone file, yet audit replays them (#4033).
+        ctx.local_hooks_merged = _root_result.get("hooks_contributed", 0) > 0
 
-        _local_total = sum(
-            _root_result.get(k, 0)
-            for k in (
-                "prompts",
-                "agents",
-                "skills",
-                "sub_skills",
-                "instructions",
-                "commands",
-                "hooks",
-                "canvases",
-            )
-        )
-        if _local_total > 0 and logger:
-            logger.verbose_detail(f"Deployed {_local_total} local primitive(s) from .apm/")
+        _local_changed = integration_changed_files(_root_result)
+        if _local_changed > 0 and logger:
+            logger.verbose_detail(f"Deployed {_local_changed} local primitive(s) from .apm/")
+            # Project-owned content is never an APM dependency (#4184): it is
+            # reported separately and only when its deployed files changed.
+            logger.record_local_content_updated()
 
         return {
-            "installed": int(_local_total > 0),
             "prompts": _root_result["prompts"],
             "agents": _root_result["agents"],
             "skills": _root_result.get("skills", 0),
@@ -514,18 +531,20 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     """
     if not ctx.blocked_executables:
         return
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.executables import trust_remedy
+    from apm_cli.security.trust import approve_command, explain_command
 
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    recommend = tuple(getattr(getattr(policy, "executables", None), "recommend", None) or ())
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
     if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
         first = ctx.blocked_executables[0].package_name
         msg = (
             f"{len(ctx.blocked_executables)} package(s) have executable primitives "
             "parked pending approval; install completed without deploying them."
         )
-        remedy = (
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            f"Trust one: apm approve {first}  |  "
-            f"Inspect: apm policy explain {first}"
-        )
+        remedy = trust_remedy(first, recommend, user_scope=user_scope)
         if ctx.logger:
             ctx.logger.warning(msg, symbol="warning")
             ctx.logger.info(remedy, symbol="info")
@@ -550,6 +569,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     updated = prompt_executable_approval(
         ctx.blocked_executables,
         allow_executables=allow_exec,
+        recommend=recommend,
     )
 
     # Persist new approvals to the personal config if the user approved
@@ -558,10 +578,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         save_user_executables(updated, deny_exec)
         if ctx.logger:
             from apm_cli import config
+            from apm_cli.core.remediation import EXECUTABLES_APPROVED
 
             ctx.logger.info(
-                f"Updated {config.CONFIG_FILE}. "
-                "Run 'apm install' again to deploy approved executables.",
+                f"Updated {config.CONFIG_FILE}. {EXECUTABLES_APPROVED.sentence()}",
                 symbol="info",
             )
 
@@ -579,17 +599,26 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
             symbol="info",
         )
+        from apm_cli.core.remediation import EXECUTABLES_PARKED
+
+        deploy = EXECUTABLES_PARKED.bind(package=first).with_command(
+            approve_command(first, user_scope=user_scope)
+        )
         logger.info(
-            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
-            f"Why parked?: apm policy explain {first}",
+            f"Deploy later: {deploy.clause()}  |  "
+            f"Why parked?: {explain_command(first, user_scope=user_scope)}",
             symbol="info",
         )
 
 
 def _decl_fully_trusted(allow: dict, decl) -> bool:
     """Return True when *allow* grants every exec type *decl* declares."""
-    grant = allow.get(decl.package_key) or allow.get(decl.package_name) or {}
-    return all(grant.get(t, False) for t in decl.exec_types)
+    identity = decl.package_key.split("#", 1)[0]
+    grant = allow.get(decl.package_key) or allow.get(identity) or allow.get(decl.package_name) or {}
+    # A pinned item map was just recorded from the current definitions.
+    return all(
+        grant.get(t, False) is True or isinstance(grant.get(t), dict) for t in decl.exec_types
+    )
 
 
 # ======================================================================
@@ -623,6 +652,61 @@ def _fail_explicit_target_without_deploy(ctx: InstallContext) -> None:
         raise DirectDependencyError(message)
 
 
+def _keep_prior_entries(
+    ctx: InstallContext, kept: list[tuple[str, Path]], session_kinds: dict[str, str]
+) -> None:
+    """Keep each unproven managed file's prior lock entry, as cleanup keeps its files (#4360)."""
+    from apm_cli.install.deployed_paths import deployed_path_entry
+
+    lockfile = ctx.existing_lockfile
+    for owner, path in kept:
+        entry = deployed_path_entry(path, ctx.project_root, ctx.targets)
+        if lockfile is None:
+            prior = None
+        elif owner == ".":
+            # The project's own outputs keep their local lock hash (#4873).
+            prior = lockfile.local_deployed_file_hashes.get(entry)
+        else:
+            previous = lockfile.get_dependency(owner)
+            prior = previous.deployed_file_hashes.get(entry) if previous is not None else None
+        ctx.package_cleanup_retained.setdefault(owner, {})[entry] = prior
+        ctx.kept_overwrites.append((owner, entry))
+        kind = session_kinds.get(path.resolve().as_posix())
+        if kind is not None:
+            ctx.kept_overwrite_kinds[entry] = kind
+
+
+def _write_plan(ctx: InstallContext, materialized, deployment_plans, local_plan) -> list:
+    """Every package this phase will deploy, as the commit gate plans its writes (#4381)."""
+    plan = [
+        (
+            materialization.package_info,
+            deployment_plans.get(materialization.dep_key),
+            ctx.managed_files,
+        )
+        for _source, materialization in materialized
+        if materialization.package_info is not None
+    ]
+    if local_plan is not None and ctx.root_has_local_primitives and ctx.targets:
+        from apm_cli.install.project_package import build_project_local_package_info
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        managed = BaseIntegrator.normalize_managed_files(
+            builtins.set(ctx.managed_files) | builtins.set(ctx.old_local_deployed)
+        )
+        local = build_project_local_package_info(ctx.source_root or ctx.project_root)
+        plan.append((local, local_plan, managed))
+    return plan
+
+
+def _kept_skill_values(ctx: InstallContext) -> frozenset[str]:
+    """Return declared skill members this batch left on disk; cleanup retains them."""
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    skill = (getattr(ctx, "integrators", None) or {}).get("skill")
+    return skill.kept_values() if isinstance(skill, SkillIntegrator) else frozenset()
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
@@ -644,6 +728,20 @@ def run(ctx: InstallContext) -> None:
     apm_modules_dir = ctx.apm_modules_dir
     if apm_modules_dir is None:
         raise RuntimeError("Resolution must set apm_modules_dir before integration")
+
+    # LSP capability gate (#3727): declared LSP servers with no capable target
+    # fail before this phase deploys anything to a target.
+    from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+    preflight_lsp_targets(ctx)
+    session = getattr(
+        getattr(ctx, "integrators", {}).get("skill"), "_materialization_session", None
+    )
+    if session is not None:
+        from apm_cli.install.phases.cleanup import deployment_evidence
+
+        # Receipt-less managed files are replaced only when they equal the locked render (#4360).
+        session.render_evidence = deployment_evidence(ctx)
 
     # Direct dep keys: used to distinguish direct vs transitive failures
     # so direct failures can be surfaced immediately.
@@ -722,26 +820,84 @@ def run(ctx: InstallContext) -> None:
         for _, _, source, materialization, _ in prepared_integrations
         if materialization is not None
     ]
-    preflight_agent_plugin_materializations(materialized)
-    _fail_explicit_target_without_deploy(ctx)
-    deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)
-    if ctx.skill_baseline_refused:
-        return
+    # A batch refusal must not swallow the acquired packages' held [+]
+    # headers: print them before the refusal surfaces (#3994).
+    try:
+        from apm_cli.install.phases.policy_gate import enforce_content_types
 
-    if ctx.frozen and ctx.existing_lockfile is not None:
+        enforce_content_types(ctx, materialized)
+        preflight_agent_plugin_materializations(materialized)
+        _fail_explicit_target_without_deploy(ctx)
+        deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)
+        if ctx.skill_baseline_refused:
+            _announce_held_headers(prepared_integrations)
+            return
+
         from apm_cli.install.service import InstallService
 
-        InstallService.enforce_hydrated_mcp(
-            ctx.apm_package,
-            ctx.existing_lockfile,
-            apm_modules_dir,
-            trust_transitive_mcp=ctx.trust_transitive_mcp,
-            logger=ctx.logger,
-            active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
-        )
+        if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:
+            from apm_cli.core.scope import is_user_scope
+            from apm_cli.install.template import effective_allow_map
+            from apm_cli.security.trust import McpAdmission
+
+            InstallService.enforce_frozen_restored(
+                [
+                    *ctx.transitive_failures,
+                    *failed_acquisitions(
+                        ctx.diagnostics,
+                        [
+                            dep_key
+                            for dep_key, _, _, materialization, terminal in prepared_integrations
+                            if materialization is None and terminal is None
+                        ],
+                    ),
+                ]
+            )
+            InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
+            effective_allow_map(ctx)
+            InstallService.enforce_hydrated_mcp(
+                ctx.apm_package,
+                ctx.existing_lockfile,
+                apm_modules_dir,
+                # The pipeline's routed, cached trust context (already resolved
+                # for materialized packages) is the same one deployment uses.
+                admission=McpAdmission.for_project(
+                    ctx.project_root,
+                    user_scope=is_user_scope(ctx.scope),
+                    one_off=ctx.trust_transitive_mcp,
+                    trust_context=getattr(effective_allow_map(ctx), "trust_context", None)
+                    or getattr(ctx, "exec_trust_ctx", None),
+                ),
+                logger=ctx.logger,
+                active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+            )
+            # Hook approval pins are re-checked through the trust owner before
+            # any hook deploys or retires, as audit --ci checks them (#4188).
+            InstallService.enforce_frozen_hook_pins(
+                ctx.existing_lockfile,
+                apm_modules_dir,
+                getattr(effective_allow_map(ctx), "trust_context", None)
+                or getattr(ctx, "exec_trust_ctx", None),
+            )
+            # A deny, a revoked approval or a policy change since the lock
+            # refuses after the specific checks above, before any executable
+            # deploys or retires (RA-024).
+            from apm_cli.install.frozen_retirement import refuse_stale_exec_decisions
+
+            refuse_stale_exec_decisions(ctx, ctx.existing_lockfile, ctx.lockfile_path.parent)
+        from apm_cli.install.commit_gate import check_before_deploy
+
+        check_before_deploy(ctx, _write_plan(ctx, materialized, deployment_plans, local_plan))
+        if ctx.overwrite_preflight_refused:
+            _announce_held_headers(prepared_integrations)
+            return
+    except BaseException:
+        _announce_held_headers(prepared_integrations)
+        raise
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:
+            announce_package(source)
             deltas = terminal_deltas
         else:
             deltas = run_integration_template(
@@ -786,7 +942,6 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     root_deltas = _integrate_root_project(ctx, deployment_plan=local_plan)
     if root_deltas:
-        installed_count += root_deltas.get("installed", 0)
         total_prompts_integrated += root_deltas.get("prompts", 0)
         total_agents_integrated += root_deltas.get("agents", 0)
         total_skills_integrated += root_deltas.get("skills", 0)
@@ -810,6 +965,9 @@ def run(ctx: InstallContext) -> None:
     ctx.total_commands_integrated = total_commands_integrated
     ctx.total_hooks_integrated = total_hooks_integrated
     ctx.total_links_resolved = total_links_resolved
+    from apm_cli.install.deployment_plan import parked_kept_values_after_writes
+
+    ctx.kept_deployed_values = _kept_skill_values(ctx) | parked_kept_values_after_writes(ctx)
 
     # ------------------------------------------------------------------
     # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).
@@ -817,6 +975,11 @@ def run(ctx: InstallContext) -> None:
     # a cowork target with a resolved_deploy_root is active.
     # ------------------------------------------------------------------
     _check_cowork_caps(ctx)
+    if session is not None:
+        ctx.legacy_adopted = session.legacy_adopted
+    if session is not None and session.kept_overwrites:
+        _keep_prior_entries(ctx, session.kept_overwrites, session.kept_edit_kinds)
+        ctx.kept_overwrite_written = session.written_entries()
 
     # ------------------------------------------------------------------
     # Executable approval prompt: if any packages had their hooks or

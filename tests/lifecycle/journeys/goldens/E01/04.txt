@@ -1,0 +1,14 @@
+# apm journey golden v1: E01 step 4
+$ apm audit --ci --policy org -f sarif -o apm.sarif
+[exit 1]
+--- stdout
+--- stderr
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[+] No drift detected
+[*] CI audit report written to apm.sarif
+[x] dependency-allowlist: 1 dependency(ies) not in allow list
+    - github.com/github/awesome-copilot/skills/review-and-refactor: not in allowed sources
+    Run 'apm uninstall microsoft/apm-sample-package' to remove the dependency outside the org allow list, or ask your org admin to allow it (policy source: org:contoso/.github).
+[x] 1 of 16 check(s) failed

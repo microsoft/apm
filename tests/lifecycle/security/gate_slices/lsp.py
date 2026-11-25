@@ -1,0 +1,48 @@
+"""Gate removal rows for KIND lsp: p-lsp's LSP server entry (#4107).
+
+The server lands in ``.github/lsp.json`` (project) or ``.copilot/lsp-config.json``
+(user); with one server the file goes when the entry goes.
+"""
+
+from __future__ import annotations
+
+from tests.lifecycle.security.gate_slices import GateRow, GateSlice
+
+_PROJECT = {"project": (".github/lsp.json",)}
+_USER = {"home": (".copilot/lsp-config.json",)}
+_ALL = (
+    "local-deny",
+    "org-deny",
+    "org-enables-gate",
+    "policy-dep-deny",
+    "revoke-approval",
+)
+_LOCAL = ("local-deny", "revoke-approval")
+_SMOKE = {"G|install|local-deny|lsp"}
+
+# G path -> (changes with a row, surface files)
+_PATHS = {
+    "install": (_ALL, _PROJECT),
+    "frozen": (_ALL, _PROJECT),
+    "update": (_ALL, _PROJECT),
+    "uninstall-prune-rebuild": (_ALL, _PROJECT),
+    "audit-ci": (_ALL, _PROJECT),
+    "dry-run": (("local-deny", "org-deny", "revoke-approval"), _PROJECT),
+    "install-g": (_LOCAL, _USER),
+    "frozen-g": (_LOCAL, _USER),
+}
+
+SLICE = GateSlice(
+    kind="lsp",
+    package="p-lsp",
+    target="copilot",
+    rows=tuple(
+        GateRow(
+            f"G|{path}|{change}|lsp",
+            surface=surface,
+            smoke=f"G|{path}|{change}|lsp" in _SMOKE,
+        )
+        for path, (changes, surface) in _PATHS.items()
+        for change in changes
+    ),
+)

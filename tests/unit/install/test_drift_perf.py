@@ -29,6 +29,8 @@ from apm_cli.install.drift import (
 )
 from apm_cli.integration.targets import resolve_targets
 
+pytestmark = pytest.mark.component
+
 _INSTR_TEMPLATE = (
     b"---\n"
     b'applyTo: "**"\n'

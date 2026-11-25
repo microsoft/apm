@@ -21,6 +21,7 @@ from apm_cli.install.skill_path_migration import (
     detect_legacy_skill_deployments,
     execute_migration,
 )
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Lightweight stubs -- avoid importing the real lockfile module
@@ -85,6 +86,9 @@ class TestLegacySkillPattern:
             ".github/instructions/foo.md",  # not skills
             ".cursor/agents/something.md",  # not skills
             "skills/my-skill/SKILL.md",  # no dot-prefix
+            ".github/skills.bak/foo/SKILL.md",
+            "./.github/skills/foo/SKILL.md",
+            ".github/skills/foo/",
         ],
     )
     def test_rejects_non_legacy(self, path: str) -> None:
@@ -282,13 +286,36 @@ class TestExecuteMigration:
             ),
         ]
 
-        result = execute_migration(plans, lf, tmp_path)
+        result = execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         assert not src.exists()
         assert ".github/skills/s1/SKILL.md" not in lf.dependencies["pkg-a"].deployed_files
         assert ".agents/skills/s1/SKILL.md" in lf.dependencies["pkg-a"].deployed_files
         assert result.deleted == [".github/skills/s1/SKILL.md"]
         assert "pkg-a" in result.updated_deps
+
+    def test_keeps_legacy_file_without_deployment_evidence(self, tmp_path: Path) -> None:
+        """A lockfile row alone never authorizes deleting the legacy path (#3701)."""
+        src = tmp_path / ".github/skills/s1/SKILL.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("content")
+        lf = _StubLockFile(
+            dependencies={"pkg-a": _StubDep(deployed_files=[".github/skills/s1/SKILL.md"])}
+        )
+        plans = [
+            MigrationPlan(
+                src_path=".github/skills/s1/SKILL.md",
+                dst_path=".agents/skills/s1/SKILL.md",
+                dep_name="pkg-a",
+            ),
+        ]
+
+        result = execute_migration(plans, lf, tmp_path, evidence=no_evidence(tmp_path))
+
+        assert src.exists()
+        assert result.deleted == []
+        assert result.failed == [".github/skills/s1/SKILL.md"]
+        assert lf.dependencies["pkg-a"].deployed_files == [".github/skills/s1/SKILL.md"]
 
     def test_migrates_hash_entry(self, tmp_path: Path) -> None:
         """Content hash is migrated from old key to new key."""
@@ -312,7 +339,7 @@ class TestExecuteMigration:
             ),
         ]
 
-        execute_migration(plans, lf, tmp_path)
+        execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         hashes = lf.dependencies["pkg-a"].deployed_file_hashes
         assert ".cursor/skills/s1/SKILL.md" not in hashes
@@ -335,7 +362,7 @@ class TestExecuteMigration:
             ),
         ]
 
-        result = execute_migration(plans, lf, tmp_path)
+        result = execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         assert result.skipped_no_file == [".github/skills/s1/SKILL.md"]
         assert result.deleted == []
@@ -360,7 +387,7 @@ class TestExecuteMigration:
             ),
         ]
 
-        execute_migration(plans, lf, tmp_path)
+        execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         assert not (tmp_path / ".opencode/skills/s1").exists()
         assert not (tmp_path / ".opencode/skills").exists()
@@ -390,7 +417,7 @@ class TestExecuteMigration:
             ),
         ]
 
-        result = execute_migration(plans, lf, tmp_path)
+        result = execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         files = lf.dependencies["pkg-a"].deployed_files
         assert files.count(".agents/skills/s1/SKILL.md") == 1
@@ -417,7 +444,7 @@ class TestExecuteMigration:
             }
         )
         plans = detect_legacy_skill_deployments(lf, tmp_path)
-        result = execute_migration(plans, lf, tmp_path)
+        result = execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         assert len(result.deleted) == 4
         files = lf.dependencies["pkg-a"].deployed_files
@@ -429,7 +456,7 @@ class TestExecuteMigration:
     def test_no_plans_noop(self, tmp_path: Path) -> None:
         """execute_migration with empty plans returns empty result."""
         lf = _StubLockFile()
-        result = execute_migration([], lf, tmp_path)
+        result = execute_migration([], lf, tmp_path, evidence=no_evidence(tmp_path))
         assert result == MigrationResult()
 
 
@@ -477,22 +504,12 @@ class TestPathTraversalRejection:
         )
 
         # ensure_path_within should prevent deletion; the file is outside project.
-        result = execute_migration([evil_plan], lf, project)
+        result = execute_migration(
+            [evil_plan], lf, project, evidence=receipted_evidence(tmp_path, deploy_root=project)
+        )
         assert outer.exists(), "File outside project_root must NOT be deleted"
         assert result.deleted == []
         assert result.failed == ["../outer/victim.txt"]
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            ".github/skills.bak/foo/SKILL.md",
-            "./.github/skills/foo/SKILL.md",
-            ".github/skills/foo/",
-        ],
-    )
-    def test_regex_near_miss_rejects(self, path: str) -> None:
-        """Paths that look similar but shouldn't match the legacy pattern."""
-        assert not _LEGACY_SKILL_PATTERN.match(path)
 
 
 # ===================================================================
@@ -521,7 +538,7 @@ class TestMixedContentParentDir:
             }
         )
         plans = detect_legacy_skill_deployments(lf, tmp_path)
-        result = execute_migration(plans, lf, tmp_path)
+        result = execute_migration(plans, lf, tmp_path, evidence=receipted_evidence(tmp_path))
 
         assert len(result.deleted) == 1
         # Skill dir should be cleaned up:

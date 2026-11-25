@@ -3,9 +3,9 @@
 ``apm install PKG`` and ``apm uninstall PKG`` stopped stripping comments in
 #2000/#2012. The other commands that rewrite the consumer manifest --
 ``apm approve``, ``apm deny`` and ``apm install --mcp`` -- must honour the
-same promise: comments, flow-style lists, anchors/aliases, unknown
-extension fields and top-level key order survive, and an install/uninstall
-round trip restores the original bytes.
+same promise: comments, flow-style lists, unknown extension fields and
+top-level key order survive, and an install/uninstall round trip restores the
+original bytes. (YAML anchors and aliases are refused on read, #3858.)
 """
 
 from __future__ import annotations
@@ -19,19 +19,19 @@ from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _MANIFEST = """\
 # Consumer manifest: hand-written, keep these notes.
 name: consumer   # project name
 version: 0.1.0
 x-shared:
-  rule: &rule ./pkgs/alpha   # anchored entry
+  rule: ./pkgs/alpha   # extension entry
 target: [claude]   # flow-style list
 dependencies:
   # Direct APM packages
   apm:
-    - *rule
+    - ./pkgs/alpha
 executables: {}   # executable gate on
 """
 _COMMENTS = tuple(line.split("#", 1)[1].strip() for line in _MANIFEST.splitlines() if "#" in line)
@@ -61,13 +61,13 @@ def _assert_authoring_kept(manifest: Path, step: str) -> str:
     missing = [comment for comment in _COMMENTS if comment not in text]
     assert not missing, f"{step}: comments dropped {missing}\n{text}"
     assert "target: [claude]" in text, f"{step}: flow style lost\n{text}"
-    assert "&rule ./pkgs/alpha" in text and "- *rule" in text, f"{step}: alias lost\n{text}"
+    assert "rule: ./pkgs/alpha" in text, f"{step}: extension entry lost\n{text}"
     order = [line.split(":", 1)[0] for line in text.splitlines() if line[:1].isalpha()]
     assert tuple(key for key in order if key in _TOP_LEVEL) == _TOP_LEVEL, f"{step}: {order}"
     return text
 
 
-def test_manifest_rewrites_preserve_comments_layout_and_aliases(
+def test_manifest_rewrites_preserve_comments_and_layout(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
@@ -103,3 +103,42 @@ def test_manifest_rewrites_preserve_comments_layout_and_aliases(
 
     rerun = apm("reinstall", "install", "--no-policy")
     assert rerun == removed
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_manifest_rewrites_name_the_manifest_by_relative_path(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """install --mcp and uninstall name apm.yml relative to the project or HOME (#4190)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    alpha = project / "pkgs" / "alpha"
+    _package(alpha, "alpha", hook=False)
+    if scope == "user":
+        flags, manifest, package = ("-g",), isolated.config_root / "apm.yml", str(alpha)
+        label = "~/.apm/apm.yml"
+    else:
+        flags, manifest, label, package = (), project / "apm.yml", "apm.yml", "./pkgs/alpha"
+        dump_yaml({"name": "consumer", "version": "0.1.0", "targets": ["claude"]}, manifest)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str) -> list[str]:
+        result = runner.run((*args[:1], *flags, *args[1:]), cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert output.isascii(), output
+        assert str(manifest) not in "".join(output.split()), output
+        return [line.strip() for line in result.stdout.splitlines()]
+
+    added = apm("install", "--mcp", "local-echo", "--", "echo")
+    assert f"manifest: {label}" in added, added
+    assert (f"[*] Created {label}" in added) is (scope == "user"), added
+    assert "local-echo" in manifest.read_text(encoding="utf-8")
+
+    apm("install", package)
+    assert package in manifest.read_text(encoding="utf-8")
+    removed = apm("uninstall", package)
+    assert f"[*] Updated {label}" in removed, removed
+    assert "[*] Uninstall complete: removed 1 package" in removed, removed
+    assert package not in manifest.read_text(encoding="utf-8")

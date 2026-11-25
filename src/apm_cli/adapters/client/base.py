@@ -1,5 +1,6 @@
 """Base adapter interface for MCP clients."""
 
+import functools
 import json
 import os
 import re
@@ -8,10 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from ...core.command_logger import library_logger
+from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
-from ...utils.atomic_io import atomic_write_text, umask_file_mode
-from ...utils.console import _rich_error, _rich_warning
-from ...utils.path_security import has_symlink_component
+from ...utils.atomic_io import umask_file_mode
+from ...utils.json_config import json_config_text, write_json_config
+from ...utils.path_security import has_symlink_component, user_config_crosses_link
+from .config_journal import journal_config_write, journal_config_written
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -270,8 +274,23 @@ _SYMLINKED_MCP_CONFIG = (
 )
 
 
+# Config paths already reported unreadable in this process (#4332): one install
+# reads a client config more than once, but the user needs one warning per file.
+_UNREADABLE_CONFIGS_WARNED: set[str] = set()
+
+
+def warn_unreadable_config_once(logger, config_path: Path, exc: Exception) -> None:
+    """Log ``Could not read <path>: <exc>`` once per config path per process."""
+    key = str(config_path)
+    if key in _UNREADABLE_CONFIGS_WARNED:
+        logger.debug("Could not read %s: %s", config_path, exc)
+        return
+    _UNREADABLE_CONFIGS_WARNED.add(key)
+    logger.warning("Could not read %s: %s", config_path, exc)
+
+
 def _warn_symlinked_mcp_config(config_path: Path) -> None:
-    _rich_warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
+    library_logger().warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
 
 
 class MCPClientAdapter(ABC):
@@ -310,6 +329,13 @@ class MCPClientAdapter(ABC):
     # other adapters keep their written entry until the declaration changes.
     refreshes_environment_renders: bool = False
 
+    # Render-time state owned by ``_remote_shapes``: a retired shape while
+    # ``legacy_managed_renders`` reproduces an earlier APM render, and the
+    # nesting depth of comparison renders (which raise instead of warning on
+    # an unsupported transport).
+    _remote_shape_override: Any = None
+    _comparison_render_depth: int = 0
+
     @staticmethod
     def _merge_extra(config: dict, server_info: dict) -> dict:
         """Merge harness-specific ``_extra`` keys from server_info into config.
@@ -339,12 +365,60 @@ class MCPClientAdapter(ABC):
     # so that ``apm install --global`` can install MCP servers to them.
     supports_user_scope: bool = False
 
+    # Display path of a user-wide config that even a project install writes,
+    # because the runtime has no workspace MCP config (Windsurf). Install
+    # output names it so the account-wide effect is never silent (#3994).
+    user_wide_config_display: str | None = None
+
     # Whether the target runtime resolves ``${VAR}`` placeholders from the
     # host environment at server-start time. Adapters that opt in (Copilot
     # CLI) emit placeholders verbatim so secrets never touch disk; legacy
     # adapters resolve to literal values at install time via env_overrides
     # -> os.environ -> optional interactive prompt. See issue #1152.
     _supports_runtime_env_substitution: bool = False
+
+    # Native project-root reference a project-scope config uses for an authored
+    # ``${CLAUDE_PLUGIN_ROOT}`` inside the project (#3825). ``None`` writes the
+    # absolute package path: the harness documents no portable form.
+    plugin_root_project_reference: ClassVar[str | None] = None
+
+    def __init_subclass__(cls, **kwargs):
+        """Finalize the project-root reference after every subclass formatter."""
+        super().__init_subclass__(**kwargs)
+        formatter = cls.__dict__.get("_format_server_config")
+        if formatter is None or getattr(formatter, "_finalizes_plugin_root", False):
+            return
+
+        @functools.wraps(formatter)
+        def _format_with_plugin_root(self, *args, **kwargs):
+            from ...deps.plugin_root_render import finalize_project_root
+
+            return finalize_project_root(
+                formatter(self, *args, **kwargs), self._plugin_root_reference()
+            )
+
+        _format_with_plugin_root._finalizes_plugin_root = True
+        cls._format_server_config = _format_with_plugin_root
+
+    def _plugin_root_reference(self) -> str | None:
+        """Return this scope's project-root reference; user scope stays absolute."""
+        return None if self.user_scope else self.plugin_root_project_reference
+
+    def _self_defined_stdio(self, server_info: dict) -> dict | None:
+        """Return the self-defined stdio launcher with its plugin root rendered.
+
+        The only reader of ``_raw_stdio`` in adapters, so every target expands
+        an authored ``${CLAUDE_PLUGIN_ROOT}`` through one rule.
+        """
+        from ...deps.plugin_root_render import PLUGIN_ROOT_INFO_KEY, render_plugin_root
+
+        raw = server_info.get("_raw_stdio")
+        return render_plugin_root(
+            raw,
+            plugin_root=server_info.get(PLUGIN_ROOT_INFO_KEY),
+            project_root=self.project_root,
+            project_relative=self._plugin_root_reference() is not None,
+        )
 
     def __init__(
         self,
@@ -401,16 +475,58 @@ class MCPClientAdapter(ABC):
         runtime_vars: dict | None = None,
     ) -> dict:
         """Render one native server entry for exact baseline comparisons."""
-        rendered = self._format_server_config(
-            server_info,
-            env_overrides=env_overrides or {},
-            runtime_vars=runtime_vars or {},
-        )
+        # A comparison render reports an unsupported transport by raising,
+        # so only the install itself warns about the skip.
+        self._comparison_render_depth += 1
+        try:
+            rendered = self._format_server_config(
+                server_info,
+                env_overrides=env_overrides or {},
+                runtime_vars=runtime_vars or {},
+            )
+        finally:
+            self._comparison_render_depth -= 1
         if isinstance(rendered, tuple):
             rendered = rendered[0]
         if not isinstance(rendered, dict):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
+
+    def legacy_managed_renders(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> tuple[dict, ...]:
+        """Renders earlier APM releases wrote for the same declaration.
+
+        Rendered with each retired remote shape of this adapter's row
+        (``_remote_shapes``), so the ownership owner can recognize, heal or
+        retire an APM-written entry in a shape APM no longer writes.
+        """
+        from ._remote_shapes import remote_shape_of, requested_remote_transport
+
+        shape = remote_shape_of(self)
+        if not shape.retired or requested_remote_transport(self, server_info) is None:
+            return ()
+        kwargs = {"env_overrides": env_overrides, "runtime_vars": runtime_vars}
+        try:
+            current = self.render_server_config(server_info, **kwargs)
+        except ValueError:
+            current = None
+        renders: list[dict] = []
+        for spec in shape.retired:
+            self._remote_shape_override = spec
+            try:
+                candidate = self.render_server_config(server_info, **kwargs)
+            except ValueError:
+                continue
+            finally:
+                self._remote_shape_override = None
+            if candidate != current and candidate not in renders:
+                renders.append(candidate)
+        return tuple(renders)
 
     @staticmethod
     def json_identical(left: object, right: object) -> bool:
@@ -490,7 +606,7 @@ class MCPClientAdapter(ABC):
         JSONC comments), or the path runs through a symlink (under ``$HOME``
         at user scope), which stale cleanup refuses to rewrite later.
         """
-        if self.user_scope and has_symlink_component(Path.home(), config_path):
+        if self.user_scope and self._is_linked_config(config_path):
             _warn_symlinked_mcp_config(config_path)
             return None
         return self._parse_json_config_for_update(config_path)
@@ -514,11 +630,13 @@ class MCPClientAdapter(ABC):
         except FileNotFoundError:
             return {}
         except (OSError, UnicodeError) as exc:
-            _rich_warning(
-                f"Could not read {config_path}: {exc} -- skipping config write; "
-                "fix the file's permissions or encoding, or add this server manually",
-                symbol="warning",
-            )
+            if str(config_path) not in _UNREADABLE_CONFIGS_WARNED:
+                _UNREADABLE_CONFIGS_WARNED.add(str(config_path))
+                library_logger().warning(
+                    f"Could not read {config_path}: {exc} -- skipping config write; "
+                    "fix the file's permissions or encoding, or add this server manually",
+                    symbol="warning",
+                )
             return None
         if not raw.strip():
             return {}
@@ -527,7 +645,7 @@ class MCPClientAdapter(ABC):
         except json.JSONDecodeError:
             config = None
         if not isinstance(config, dict):
-            _rich_warning(
+            library_logger().warning(
                 f"Could not parse {config_path} as a JSON object -- skipping config "
                 "write to avoid data loss (comments and trailing commas are not "
                 "preserved); fix the file or add this server manually",
@@ -535,7 +653,7 @@ class MCPClientAdapter(ABC):
             )
             return None
         if self.mcp_servers_key in config and not isinstance(config[self.mcp_servers_key], dict):
-            _rich_warning(
+            library_logger().warning(
                 f"Could not parse {config_path}: {self.mcp_servers_key} must be "
                 "a JSON object -- skipping config write to avoid data loss; "
                 "fix the file or add this server manually",
@@ -543,6 +661,12 @@ class MCPClientAdapter(ABC):
             )
             return None
         return config
+
+    def _is_linked_config(self, config_path: Path, *, user_root: Path | None = None) -> bool:
+        """The one MCP config link policy (project, user under $HOME, relocated user root)."""
+        if user_root is None and not self.user_scope:
+            return self._is_linked_project_config(config_path)
+        return user_config_crosses_link(config_path, user_root or config_path.parent)
 
     def _is_linked_project_config(self, config_path: Path) -> bool:
         """Return whether a project-scope config path is or crosses a symlink.
@@ -576,16 +700,25 @@ class MCPClientAdapter(ABC):
         """
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
-        if shared and self._is_project_config_path(config_path):
-            atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
-            return
-        if config_path.is_file():
-            # Tighten first: the atomic write keeps an existing file's mode.
+        trailing_newline = self.json_config_trailing_newline
+        journal_config_write(
+            config_path,
+            json_config_text(config_path, config, default_trailing_newline=trailing_newline),
+        )
+        from ...integration.config_file_provenance import recorded_install_write
+
+        project = shared and self._is_project_config_path(config_path)
+        if not project and config_path.is_file():
+            os.chmod(config_path, 0o600)  # tighten first: the atomic write keeps the mode
+        mode = umask_file_mode(config_path) if project else 0o600
+        # The config file record (#4867) lands before the journal seals the write (#5009).
+        with recorded_install_write(config_path, self.project_root, self.user_scope):
+            write_json_config(
+                config_path, config, default_trailing_newline=trailing_newline, new_file_mode=mode
+            )
+        if not project:
             os.chmod(config_path, 0o600)
-        atomic_write_text(config_path, payload, new_file_mode=0o600)
-        os.chmod(config_path, 0o600)
+        journal_config_written(config_path)
 
     @abstractmethod
     def configure_mcp_server(
@@ -1271,6 +1404,17 @@ class MCPClientAdapter(ABC):
         # If no priority package found, return the first one
         return packages[0] if packages else None
 
+    @classmethod
+    def selected_remote(cls, server_info) -> dict | None:
+        """Return the remote entry this adapter renders for *server_info*, if any."""
+        if not isinstance(server_info, dict) or server_info.get("_raw_stdio"):
+            return None
+        remotes = server_info.get("remotes") or []
+        if not remotes:
+            return None
+        remote = cls._select_remote_with_url(remotes) or remotes[0]
+        return remote if isinstance(remote, dict) else None
+
     @staticmethod
     def _select_remote_with_url(remotes):
         """Return the first remote entry that has a non-empty URL.
@@ -1311,7 +1455,7 @@ class MCPClientAdapter(ABC):
                 if var_id in seen:
                     continue
                 seen.add(var_id)
-                _rich_warning(
+                library_logger().warning(
                     f"${{input:{var_id}}} in server "
                     f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
@@ -1636,7 +1780,7 @@ class MCPClientAdapter(ABC):
             return server_info_cache[server_url]
         server_info = self.registry_client.find_server_by_reference(server_url)
         if not server_info:
-            _rich_error(f"Error: MCP server '{server_url}' not found in registry")
+            library_logger().error(f"MCP server '{server_url}' not found in registry")
             return None
         return server_info
 
@@ -1874,10 +2018,10 @@ class MCPClientAdapter(ABC):
         ]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
-            _rich_warning(
+            library_logger().warning(
                 f"Required environment variables have no default value and cannot be "
-                f"prompted in non-interactive mode: {var_names}. Set them in your "
-                "environment and rerun `apm install`."
+                f"prompted in non-interactive mode: {var_names}. "
+                + MCP_ENV_VARS_UNRESOLVED.bind(names="them").sentence()
             )
 
         for env_var in env_vars:
@@ -1933,10 +2077,10 @@ class MCPClientAdapter(ABC):
             elif default_value:
                 resolved[name] = default_value
             elif required:
-                _rich_warning(
+                library_logger().warning(
                     f"Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly. Set {name} in your "
-                    "environment and rerun `apm install`."
+                    "The MCP server may not function correctly. "
+                    + MCP_ENV_VARS_UNRESOLVED.bind(names=name).sentence()
                 )
                 resolved[name] = ""
 

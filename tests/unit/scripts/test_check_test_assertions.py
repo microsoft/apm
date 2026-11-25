@@ -7,13 +7,26 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 RATCHET_TEST_SCOPE = "fixture"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "check_test_assertions.py"
 RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
-EMPTY_RULES = {RULE_AQ001: {}, RULE_AQ002: {}}
+RULE_AQ003 = "AQ003_unobserved_outcome"
+RULE_AQ004 = "AQ004_patches_owner_it_imports"
+RULE_AQ005 = "AQ005_global_patch_through_namespace"
+RULE_AQ006 = "AQ006_e2e_not_driving_installed_cli"
+EMPTY_RULES = {
+    RULE_AQ001: {},
+    RULE_AQ002: {},
+    RULE_AQ003: {},
+    RULE_AQ004: {},
+    RULE_AQ005: {},
+    RULE_AQ006: {},
+}
 
 
 def _run(root: Path, baseline: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -38,7 +51,7 @@ def _write_baseline(path: Path, rules: dict[str, dict[str, int]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
-            {"schema_version": 1, "rules": rules},
+            {"schema_version": 1, "rules": {**EMPTY_RULES, **rules}},
             indent=2,
             sort_keys=True,
         )
@@ -139,25 +152,142 @@ def test_new_file_debt_fails_against_zero_default(tmp_path: Path) -> None:
     assert "tests/test_new_debt.py:2" in result.stderr
 
 
-def test_reduction_is_stale_until_baseline_is_tightened(tmp_path: Path) -> None:
+def test_reduction_is_reported_as_stale_info_not_failure(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     _write_test(root, "def test_sample():\n    assert 1 == 1\n")
     baseline = root / "baseline.json"
-    _write_baseline(
-        baseline,
-        {
-            RULE_AQ001: {"tests/test_sample.py": 1},
-            RULE_AQ002: {},
-        },
+    _write_baseline(baseline, {RULE_AQ001: {"tests/test_sample.py": 1}})
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert (
+        f"[i] stale assertion-quality baseline entry: tests/test_sample.py: {RULE_AQ001} "
+        "reduced to 0 from 1"
+    ) in result.stdout
+    assert "uv run --frozen python scripts/check_test_assertions.py --update-baseline" in (
+        result.stdout
     )
+
+
+_COMPONENT = "import pytest\n\npytestmark = pytest.mark.component\n\n"
+_E2E = "import pytest\n\npytestmark = pytest.mark.e2e\n\n"
+
+
+def test_aq003_component_test_without_observable_assertion_fails(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write_test(
+        root,
+        _COMPONENT + "def test_mock_only(mocker):\n"
+        "    client = mocker.Mock()\n"
+        "    client.run()\n"
+        "    client.run.assert_called_once_with()\n"
+        "\n"
+        "class TestUnittestStyle:\n"
+        "    def test_return_value_only(self):\n"
+        "        self.assertEqual(run(), 1)\n"
+        "\n"
+        "def test_observes_output(capsys, tmp_path):\n"
+        "    out = capsys.readouterr().out\n"
+        "    assert 'done' in out\n"
+        "    assert (tmp_path / 'apm.lock.yaml').exists()\n",
+    )
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, {})
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
-    assert f"tests/test_sample.py: {RULE_AQ001} reduced to 0 from 1" in result.stderr
     assert (
-        "uv run --frozen python scripts/check_test_assertions.py --update-baseline"
+        f"{RULE_AQ003}: component/e2e test asserts no "
+        "user-visible output, exit code or durable state (observed 2, allowed 0). Fix:"
     ) in result.stderr
+    assert f"tests/test_sample.py:5, tests/test_sample.py:11: {RULE_AQ003}" in result.stderr
+    assert "tests/test_sample.py:14" not in result.stderr
+
+
+def test_aq004_patching_a_symbol_defined_in_the_imported_owner_fails(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    owner = root / "src" / "apm_cli" / "owner.py"
+    owner.parent.mkdir(parents=True)
+    owner.write_text(
+        "import requests\n\ndef fetch():\n    return 1\n\ndef run():\n    return fetch()\n",
+        encoding="utf-8",
+    )
+    _write_test(
+        root,
+        "from unittest.mock import patch\n\n"
+        "from apm_cli.owner import run\n\n"
+        "def test_self_mock():\n"
+        "    with patch('apm_cli.owner.fetch', return_value=2):\n"
+        "        assert run() == 2\n\n"
+        "def test_collaborator():\n"
+        "    with patch('apm_cli.owner.requests'):\n"
+        "        assert run() == 1\n",
+    )
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, {})
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert (
+        f"[x] tests/test_sample.py:6: {RULE_AQ004}: test patches a symbol defined in an "
+        "owner module it imports (observed 1, allowed 0). Fix: exercise the real owner"
+    ) in result.stderr
+
+
+def test_aq006_e2e_module_using_cli_runner_fails(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write_test(
+        root,
+        _E2E + "from click.testing import CliRunner\n\n"
+        "def test_in_process():\n"
+        "    result = CliRunner().invoke(None)\n"
+        "    assert result.exit_code == 0\n",
+    )
+    _write_test(
+        root,
+        _E2E + "def test_installed(apm_binary):\n"
+        "    import subprocess\n"
+        "    result = subprocess.run([apm_binary, '--version'], check=False)\n"
+        "    assert result.returncode == 0\n",
+        "test_driving.py",
+    )
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, {})
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert (
+        f"[x] tests/test_sample.py:1, tests/test_sample.py:1: {RULE_AQ006}: e2e module does "
+        "not drive the installed CLI only (observed 2, allowed 0). Fix: run the installed apm"
+    ) in result.stderr
+    assert "test_driving.py" not in result.stderr
+
+
+def test_aq006_lifecycle_world_fixture_drives_the_installed_cli(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write_test(
+        root,
+        _E2E + "def test_world(lifecycle_world):\n"
+        "    lock = lifecycle_world.project / 'apm.lock.yaml'\n"
+        "    assert not lock.exists()\n",
+    )
+    _write_test(
+        root,
+        _E2E + "def test_nothing(tmp_path):\n    assert not (tmp_path / 'x').exists()\n",
+        "test_no_driver.py",
+    )
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, {})
+
+    result = _run(root, baseline)
+
+    assert "tests/test_sample.py:1" not in result.stderr
+    assert f"tests/test_no_driver.py:1: {RULE_AQ006}" in result.stderr
 
 
 def test_update_refuses_growth_without_writing(tmp_path: Path) -> None:
@@ -341,3 +471,59 @@ def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
     assert provisional.stderr == ""
     assert finalized.returncode == 0
     assert finalized.stderr == ""
+
+
+def _write_project_module(root: Path, dotted: str) -> None:
+    path = root / "src" / Path(*dotted.split("."))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    (path.parent / "__init__.py").write_text("", encoding="utf-8")
+    path.with_suffix(".py").write_text("import os\nimport time\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'patch("pkg.retry.time.sleep")',
+        'mock.patch("pkg.retry.subprocess.run", return_value=None)',
+        'patch.dict("pkg.retry.os.environ", {"A": "1"})',
+        'monkeypatch.setattr("pkg.retry.sys.platform", "win32")',
+        'patch(target="pkg.retry.os.path.exists")',
+    ],
+)
+def test_aq005_global_patch_through_project_namespace_fails(tmp_path: Path, call: str) -> None:
+    root = tmp_path / "repo"
+    _write_project_module(root, "pkg.retry")
+    _write_test(root, f"def test_sample(monkeypatch):\n    {call}\n")
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, EMPTY_RULES)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert f"tests/test_sample.py:2: {RULE_AQ005}" in result.stderr
+    assert "patch an owner seam, or the stdlib target itself" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'patch("time.sleep")',
+        'patch("pkg.retry._backoff_sleep")',
+        'patch("pkg.types.Kind")',
+        'patch("pkg.retry.requests.get")',
+        'patch.object(retry.time, "sleep")',
+    ],
+)
+def test_aq005_allows_direct_seam_and_shadowing_targets(tmp_path: Path, call: str) -> None:
+    root = tmp_path / "repo"
+    _write_project_module(root, "pkg.retry")
+    _write_project_module(root, "pkg.types")
+    _write_test(root, f"def test_sample():\n    {call}\n")
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, EMPTY_RULES)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 0, result.stderr
+    assert "AQ005=0" in result.stdout

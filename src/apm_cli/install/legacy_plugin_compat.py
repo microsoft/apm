@@ -7,7 +7,9 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.constants import APM_DIR, APM_YML_FILENAME
+from apm_cli.constants import APM_DIR
+from apm_cli.core.remediation import CLAUDE_PLUGIN_CACHE_INVALID
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.resolution_staging import ResolutionStagingSession
@@ -16,7 +18,7 @@ from apm_cli.models.validation import (
     gather_detection_evidence,
     validate_legacy_marketplace_plugin,
 )
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_package_hash, same_package_digest
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -28,6 +30,10 @@ if TYPE_CHECKING:
 
 _LEGACY_PLUGIN_APM_VERSION = "0.28.0"
 _PLUGIN_SKILL_SOURCES_RECEIPT = Path(APM_DIR) / ".plugin-skill-sources.json"
+# Types the parser's generated apm.yml can make a plugin cache look like.
+_PARSER_SHADOWED_TYPES = frozenset(
+    {PackageType.APM_PACKAGE, PackageType.SKILL_BUNDLE, PackageType.HYBRID}
+)
 
 
 def preserve_normalized_marketplace_plugin_type(
@@ -35,14 +41,47 @@ def preserve_normalized_marketplace_plugin_type(
     locked_dependency: LockedDependency | None,
     detected_type: PackageType,
 ) -> PackageType:
-    """Keep parser-normalized plugin caches typed as marketplace plugins."""
-    if (
-        locked_dependency is not None
-        and locked_dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
-        and has_normalized_plugin_skill_sources_receipt(package_path)
+    """Keep parser-normalized plugin caches typed as on their fresh pass.
+
+    Classification is a function of the package tree: a cached pass must give
+    the type a fresh fetch gives. Only the parser writes the receipt, its
+    ``apm.yml`` and ``.apm/``; with those set aside, a tree that carries a
+    plugin manifest is a marketplace plugin on its fresh pass, whatever its
+    root ``skills/`` or ``SKILL.md`` (#4270). A ``skills/`` bundle without a
+    plugin manifest is never normalized, so it keeps ``skill_bundle``.
+    """
+    if not has_normalized_plugin_skill_sources_receipt(package_path):
+        return detected_type
+    if locked_dependency is not None and (
+        locked_dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
     ):
         return PackageType.MARKETPLACE_PLUGIN
+    # The parser's generated apm.yml/.apm must not masquerade as an
+    # independently authored APM layout, skill bundle or hybrid on the
+    # subsequent cached-source pass. This also repairs older locks that
+    # recorded that second-pass type.
+    if detected_type in _PARSER_SHADOWED_TYPES:
+        evidence = gather_detection_evidence(package_path)
+        if evidence.has_plugin_manifest:
+            return PackageType.MARKETPLACE_PLUGIN
     return detected_type
+
+
+def legacy_plugin_row_rehashable(
+    lockfile: LockFile | None, locked_dependency: LockedDependency | None
+) -> bool:
+    """Return whether ``apm update`` may re-lock a same-commit 0.28 plugin row.
+
+    APM 0.28 hashed its own normalization of a marketplace plugin, so that
+    row's content hash is not comparable with a fresh materialization of the
+    same commit; an explicit update re-records it (#4027).
+    """
+    return bool(
+        lockfile is not None
+        and lockfile.apm_version == _LEGACY_PLUGIN_APM_VERSION
+        and locked_dependency is not None
+        and locked_dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
+    )
 
 
 def matches_fresh_legacy_plugin_hash(
@@ -75,14 +114,16 @@ def matches_fresh_legacy_plugin_hash(
     try:
         shutil.copytree(package_path, replacement, symlinks=True)
         (replacement / _PLUGIN_SKILL_SOURCES_RECEIPT).unlink()
-        legacy_hash = compute_package_hash(replacement, exclude=exclude)
+        legacy_hash = compute_package_hash(
+            replacement, exclude=exclude, framed=locked_dependency.content_hash_framed
+        )
     except BaseException:
         staging.rollback()
         raise
     cleanup_issues = staging.rollback()
     if cleanup_issues:
         raise _staging_cleanup_error(dep_key, cleanup_issues)
-    return legacy_hash == locked_dependency.content_hash
+    return same_package_digest(legacy_hash, locked_dependency.content_hash)
 
 
 def upgrade_cached_legacy_plugin(
@@ -122,7 +163,7 @@ def validate_cached_legacy_plugin(
     if has_normalized_plugin_skill_sources_receipt(package_path):
         return None
 
-    apm_yml_path = package_path / APM_YML_FILENAME
+    apm_yml_path = manifest_file(package_path)
     apm_dir = package_path / APM_DIR
     if not apm_yml_path.is_file():
         raise _unsafe_upgrade_error(dep_key, package_path, "required apm.yml is missing")
@@ -147,7 +188,7 @@ def validate_cached_legacy_plugin(
         raise _unsafe_upgrade_error(
             dep_key, package_path, "the legacy lock entry has no content hash"
         )
-    actual_hash = compute_package_hash(package_path)
+    actual_hash = compute_package_hash(package_path, framed=locked_dependency.content_hash_framed)
     if actual_hash != expected_hash:
         raise _unsafe_upgrade_error(
             dep_key,
@@ -232,7 +273,7 @@ def _invalid_plugin_error(
     details = "; ".join(errors) or "validator returned no package"
     return DirectDependencyError(
         f"Cached Claude Plugin '{dep_key}' at '{package_path}' is invalid: {details}. "
-        "Remove the cached directory or run 'apm deps clean --yes', then retry."
+        f"Remove the cached directory, or {CLAUDE_PLUGIN_CACHE_INVALID.clause()}."
     )
 
 
@@ -274,5 +315,5 @@ def _unsafe_upgrade_error(
 ) -> DirectDependencyError:
     return DirectDependencyError(
         f"Cached Claude Plugin '{dep_key}' at '{package_path}' cannot be upgraded safely: "
-        f"{reason}. Remove the cached directory or run 'apm deps clean --yes', then retry."
+        f"{reason}. Remove the cached directory, or {CLAUDE_PLUGIN_CACHE_INVALID.clause()}."
     )

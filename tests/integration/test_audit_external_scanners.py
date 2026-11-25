@@ -21,6 +21,8 @@ from click.testing import CliRunner
 import apm_cli.config as _conf
 from apm_cli.commands.audit import audit
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner():
@@ -205,7 +207,7 @@ def test_external_llm_threads_into_skillspector_argv(runner, monkeypatch, tmp_pa
 
         return _R()
 
-    monkeypatch.setattr(ss.shutil, "which", _fake_which)
+    monkeypatch.setattr(ss.git_env, "trusted_executable", _fake_which)
     monkeypatch.setattr(ss.subprocess, "run", _fake_run)
 
     result = runner.invoke(audit, ["--external", "skillspector", "--external-llm", "-f", "json"])
@@ -233,7 +235,7 @@ def test_default_skillspector_argv_has_no_llm(runner, monkeypatch, tmp_path):
 
         return _R()
 
-    monkeypatch.setattr(ss.shutil, "which", lambda _b: "/usr/bin/skillspector")
+    monkeypatch.setattr(ss.git_env, "trusted_executable", lambda _b: "/usr/bin/skillspector")
     monkeypatch.setattr(ss.subprocess, "run", _fake_run)
 
     result = runner.invoke(audit, ["--external", "skillspector", "-f", "json"])
@@ -266,7 +268,7 @@ def test_skillspector_baseline_symlink_escape_fails_closed(
     scanner_run = Mock(
         return_value=CompletedProcess([], 0, stdout='{"version": "2.1.0", "runs": []}', stderr="")
     )
-    monkeypatch.setattr(ss.shutil, "which", lambda _binary: "/usr/bin/skillspector")
+    monkeypatch.setattr(ss.git_env, "trusted_executable", lambda _binary: "/usr/bin/skillspector")
     monkeypatch.setattr(ss.subprocess, "run", scanner_run)
 
     result = runner.invoke(

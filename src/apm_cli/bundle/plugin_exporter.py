@@ -16,9 +16,17 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
+from ..core.remediation import (
+    PACK_DEPENDENCY_UNATTESTED,
+    PACK_INSTALLED_FILES_MISSING,
+    PACK_SKILL_SUBSET_MISSING,
+)
 from ..deps.lockfile import (
     LockedDependency,
     LockFile,
+    installed_apm_version,
     resolve_lockfile_path_for_read,
 )
 from ..models.apm_package import APMPackage, DependencyReference
@@ -30,12 +38,20 @@ from ..utils.archive import (
     write_zip_archive,
 )
 from ..utils.atomic_io import write_text_lf
-from ..utils.console import _rich_warning
+from ..utils.console import _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
+from .credential_files import refuse_credential_files
 from .packer import PackResult
-from .plugin_layout import PLUGIN_ROOT_DIRS, find_plugin_root_sources
+from .plugin_layout import (
+    PLUGIN_ROOT_DIRS,
+    deployed_rendering_extension,
+    deployed_rendering_rank,
+    deployed_rendering_suffix,
+    find_plugin_root_sources,
+    superseded_plugin_renderings,
+)
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -154,8 +170,12 @@ def _collect_apm_components(
     # agents/ -> agents/
     _collect_flat(apm_dir / "agents", "agents", components, skipped=skipped_links)
 
-    # skills/ -> skills/ (preserve sub-directory structure)
-    _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
+    # skills/ -> skills/ (preserve sub-directory structure). When .apm/ authors
+    # no skill, the root skills/ install deploys is packed instead (#4709).
+    if _packs_root_skills(apm_dir.parent):
+        _collect_recursive(apm_dir.parent / "skills", "skills", components, skipped=skipped_links)
+    else:
+        _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
 
     # prompts/ -> commands/ (rename .prompt.md -> .md)
     _collect_recursive(
@@ -175,6 +195,30 @@ def _collect_apm_components(
     _collect_recursive(apm_dir / "extensions", "extensions", components, skipped=skipped_links)
 
     return components
+
+
+def _packs_root_skills(package_root: Path) -> bool:
+    """Whether pack takes skills from root ``skills/`` beside an ``.apm/`` tree.
+
+    Only when ``.apm/skills/`` authors no skill and the root ``skills/`` holds
+    one: the skills a path install deploys then come from the root (see
+    ``SkillIntegrator.skill_source_paths``). With skills in both, ``.apm/``
+    stays the publishing source and the root directory is reported skipped.
+    """
+    from ..integration.skill_integrator import SkillIntegrator
+
+    root = package_root / "skills"
+    authored = package_root / ".apm" / "skills"
+    # A skill is a directory holding a SKILL.md file, as install counts them.
+    if root.is_symlink() or (
+        authored.is_dir()
+        and any(child.is_dir() and (child / "SKILL.md").is_file() for child in authored.iterdir())
+    ):
+        return False
+    return any(
+        source.parent == root
+        for source in SkillIntegrator.skill_source_paths(package_root).values()
+    )
 
 
 def _collect_root_plugin_components(
@@ -221,6 +265,8 @@ def _warn_skipped_source_links(project_root: Path, links: list[Path], logger=Non
 def _warn_skipped_root_components(project_root: Path, logger=None) -> None:
     """Explain why plugin-native root sources are not packed."""
     for source in find_plugin_root_sources(project_root):
+        if source == "skills" and _packs_root_skills(project_root):
+            continue
         if source == "hooks.json":
             message = (
                 "Skipping root-level hooks.json because .apm/ is present. "
@@ -427,11 +473,11 @@ def _collect_hooks_from_root(
     return hooks
 
 
-def _collect_mcp(package_root: Path) -> dict:
+def _collect_mcp(package_root: Path, *, exclude_apm_managed: bool = True) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json``."""
     from ..core.plugin_manifest import collect_mcp_servers
 
-    return collect_mcp_servers(package_root)
+    return collect_mcp_servers(package_root, exclude_apm_managed=exclude_apm_managed)
 
 
 # ---------------------------------------------------------------------------
@@ -660,7 +706,14 @@ def _plugin_rel_for_deployed_path(
     else:
         return None
 
-    if plugin_parts[0] == "commands" and plugin_parts[-1].endswith(".prompt.md"):
+    # Only a .prompt.md rendering renames; a target's native Markdown command
+    # or prompt (Claude commands/, Kiro prompts/) keeps its stem.
+    native_suffix = deployed_rendering_suffix(PurePosixPath(*parts).as_posix())
+    if (
+        native_suffix in (None, ".prompt.md")
+        and plugin_parts[0] == "commands"
+        and plugin_parts[-1].endswith(".prompt.md")
+    ):
         plugin_parts[-1] = _rename_prompt(plugin_parts[-1])
     return PurePosixPath(*plugin_parts).as_posix()
 
@@ -769,17 +822,30 @@ def _append_deployed_component(
     components: list[tuple[Path, str]],
     source: Path,
     output_rel: str,
-    seen_outputs: set[str],
+    seen_outputs: dict[str, set[Path]],
     project_root: Path,
     dep: LockedDependency,
 ) -> None:
-    """Append one deployed component unless it is unsafe or already mapped."""
-    if output_rel in seen_outputs or not _validate_output_rel(output_rel):
+    """Append one deployed component unless it is unsafe or already mapped.
+
+    A repeated output path is dropped, except a further target rendering of a
+    primitive (``.claude/commands/x.md`` and ``.github/prompts/x.prompt.md``):
+    every rendering stays a candidate for ``_drop_same_path_renderings``
+    (#3686).
+    """
+    if not _validate_output_rel(output_rel):
+        return
+    seen = seen_outputs.get(output_rel)
+    if seen is not None and (
+        source in seen
+        or deployed_rendering_rank(portable_relpath(source, project_root)) is None
+        or any(deployed_rendering_rank(portable_relpath(p, project_root)) is None for p in seen)
+    ):
         return
     if source.is_file() and not source.is_symlink():
         _verify_attested_hash(source, project_root, dep)
         components.append((source, output_rel))
-        seen_outputs.add(output_rel)
+        seen_outputs.setdefault(output_rel, set()).add(source)
 
 
 def _collect_deployed_components(
@@ -789,7 +855,7 @@ def _collect_deployed_components(
     """Collect dependency components from lockfile deployed_files entries."""
     components: list[tuple[Path, str]] = []
     missing: list[str] = []
-    seen_outputs: set[str] = set()
+    seen_outputs: dict[str, set[Path]] = {}
     skill_subset = skill_subset_filter_tokens(dep.skill_subset)
 
     for rel_path in dep.deployed_files:
@@ -841,8 +907,7 @@ def _collect_deployed_components(
         suffix = f"\n  ... and {remaining} more" if remaining else ""
         raise ValueError(
             f"Cannot pack dependency {dep.repo_url}: installed files recorded "
-            "in apm.lock.yaml are missing on disk. Run 'apm install' to "
-            "restore them, then pack again:\n"
+            f"in apm.lock.yaml are missing on disk. {PACK_INSTALLED_FILES_MISSING.sentence()}\n"
             + "\n".join(f"  - {path}" for path in shown_missing)
             + suffix
         )
@@ -859,38 +924,259 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     partial install -- packing its cache would leak unattested content, so we
     refuse rather than silently pack it.
     """
-    if not install_path.is_dir():
+    if not install_path.is_dir() or _whole_native_plugin_root(dep):
+        # A plugin deployed whole is attested by its native_plugin record (#5253).
         return False
     probe = _collect_apm_components(install_path / ".apm")
     probe.extend(_collect_root_plugin_components(install_path))
     _collect_bare_skill(install_path, dep, probe)
+    # A canvas the executable gate kept from deploying is not a provenance
+    # gap: install recorded it as withheld, and pack omits it (#4714).
+    if _gate_parked_types(install_path, dep):
+        probe = [item for item in probe if not item[1].startswith("extensions/")]
     return bool(probe)
 
 
-def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
-    """Return True if the unattested cache holds hooks-config or MCP-config.
+def _whole_native_plugin_root(dep: LockedDependency) -> str | None:
+    """The recorded root of a dependency deployed only as a whole native plugin (#5253)."""
+    record = getattr(dep, "native_plugin", None)
+    return record.root if record is not None and not dep.deployed_files else None
+
+
+def _gate_parked_types(install_path: Path, dep: LockedDependency) -> tuple[str, ...]:
+    """Executable types the cache ships that the lock records the gate withheld (#4714).
+
+    Of the executable kinds only canvas extensions pack from ``.apm/``; the
+    lock row's ``exec_status`` and ``exec_allowed_types`` say whether install
+    deployed them.
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, TRUST_GATED
+
+    if dep.exec_status not in (TRUST_GATED, TRUST_DENIED):
+        return ()
+    if EXEC_TYPE_CANVAS in (dep.exec_allowed_types or ()):
+        return ()
+    canvas: list[tuple[Path, str]] = []
+    _collect_recursive(install_path / ".apm" / "extensions", "extensions", canvas)
+    return (EXEC_TYPE_CANVAS,) if canvas else ()
+
+
+def _warn_parked_executables(
+    dep: LockedDependency, install_path: Path, logger=None, *, format_carries: bool = True
+) -> None:
+    """Name a dependency's gate-parked canvas that pack leaves out, and its remedy (#4714).
+
+    *format_carries* is False for a bundle format that cannot carry canvas
+    extensions at all, so approving alone would not ship them.
+    """
+    from ..install.exec_skip_reasons import withheld_executable_reason
+
+    for exec_type in _gate_parked_types(install_path, dep):
+        label = dep.get_unique_key()
+        reason = withheld_executable_reason(
+            label,
+            exec_type,
+            "canvas extension(s)",
+            denied=_canvas_denied(dep, install_path),
+            outcome="not packed",
+        )
+        message = f"dependency {label}: {reason}"
+        if not format_carries:
+            message += (
+                " The agent-plugin format does not carry canvas extensions;"
+                " pack with '--format claude-plugin' to ship them."
+            )
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message, symbol="warning")
+
+
+def _canvas_denied(dep: LockedDependency, install_path: Path) -> bool | None:
+    """Whether the lock row's worst-case status is the canvas's own verdict.
+
+    ``exec_status`` is the worst case across executable types: a denied row
+    proves the canvas denied only when canvas is the package's one executable
+    type; otherwise it is unknown (``None``).
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, scan_package_executables
+
+    if dep.exec_status != TRUST_DENIED:
+        return False
+    try:
+        declared = set(scan_package_executables(install_path, dep.repo_url, "").exec_types)
+    except Exception:
+        return None
+    return True if declared <= {EXEC_TYPE_CANVAS} else None
+
+
+def _cache_config_kinds(install_path: Path) -> tuple[str, ...]:
+    """Return the config kinds (``hooks``, ``MCP``) the unattested cache holds.
 
     Hooks/MCP *configuration* (``.apm/hooks/*.json``, root ``hooks.json`` /
-    ``hooks/``, ``.mcp.json``) is merged into shared host settings by
-    ``apm install`` and is never recorded in the lockfile ``deployed_files``.
-    Because plugin pack now emits only lockfile-attested content, such config
-    is dropped from the bundle. This probe drives a transition warning that
-    names the dependency whose cached config will NOT be packed; it never
-    copies cache bytes. Hook *scripts* recorded in ``deployed_files`` are
-    unaffected and still pack.
+    ``hooks/``, ``.mcp.json``) is never copied from the cache: plugin pack
+    emits only lockfile-attested content. This probe drives a transition
+    warning that names the dependency whose cached config will NOT be packed;
+    it never copies cache bytes.
     """
     if not install_path.is_dir():
-        return False
-    if _collect_mcp(install_path):
-        return True
-    if _collect_hooks_from_apm(install_path / ".apm"):
-        return True
-    return bool(_collect_hooks_from_root(install_path))
+        return ()
+    kinds: list[str] = []
+    if _collect_hooks_from_apm(install_path / ".apm") or _collect_hooks_from_root(install_path):
+        kinds.append("hooks")
+    # A dependency's own .mcp.json is authored by that package, not rendered by APM.
+    if _collect_mcp(install_path, exclude_apm_managed=False):
+        kinds.append("MCP")
+    return tuple(kinds)
+
+
+def _packs_hook_config(components: list[tuple[Path, str]]) -> bool:
+    """Whether *components* carry a hooks config file (``hooks.json`` or ``hooks/*.json``)."""
+    for _source, rel in components:
+        parts = PurePosixPath(rel).parts
+        if parts == ("hooks.json",) or (
+            len(parts) == 2 and parts[0] == "hooks" and parts[1].endswith(".json")
+        ):
+            return True
+    return False
+
+
+def _warn_unpacked_dependency_config(
+    dep: LockedDependency,
+    install_path: Path,
+    dep_components: list[tuple[Path, str]],
+    logger=None,
+) -> None:
+    """Name the dependency hooks/MCP config the bundle will not carry (#2013).
+
+    A hooks file the lockfile attests (``deployed_files`` plus its hash) packs
+    with the dependency's components, so only hook config that reaches no
+    packed hooks file is named, and MCP config, which install merges into
+    shared settings and never attests. A plugin deployed whole is named once
+    instead: pack leaves its recorded root out (#5253).
+    """
+    root = _whole_native_plugin_root(dep)
+    if root:
+        # Its hooks and MCP config load from the plugin root, never from shared settings.
+        _emit_pack_warning(
+            f"dependency {dep.get_unique_key()}: the native plugin deployed whole under "
+            f"{root} is not packed; a bundle carries only files the lockfile records in "
+            "deployed_files. A consumer that needs it declares it as its own dependency.",
+            logger,
+        )
+        return
+    kinds = [
+        kind
+        for kind in _cache_config_kinds(install_path)
+        if kind != "hooks" or not _packs_hook_config(dep_components)
+    ]
+    if kinds:
+        _emit_pack_warning(
+            f"dependency {dep.repo_url} contributed {'/'.join(kinds)} config that "
+            "is not attested in apm.lock.yaml; it will NOT be packed. "
+            "Attested primitives (skills/agents/etc.) are unaffected.",
+            logger,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Main exporter
 # ---------------------------------------------------------------------------
+
+
+def _collect_lsp_servers(
+    project_root: Path, package: APMPackage, lockfile: LockFile | None
+) -> tuple[dict[str, dict], list[str]]:
+    """Return the ``.lsp.json`` servers a Claude plugin bundle carries (RA-034).
+
+    Sources, later wins on a name collision (the root package's authored file
+    last, as for ``.mcp.json``): servers the lockfile records, declared
+    ``dependencies.lsp``, then a root ``.lsp.json``. Every entry is validated
+    by ``LSPDependency`` (``command`` and ``extensionToLanguage``), the schema
+    plugin admission applies when the bundle is installed. The second value
+    names each server with no complete config, so none is dropped silently.
+    """
+    from ..deps.plugin_parser import lsp_servers_to_apm_deps
+    from ..models.dependency.lsp import LSPDependency
+
+    servers: dict[str, dict] = {}
+    names: set[str] = set()
+
+    def _admit(config: dict) -> None:
+        try:
+            dep = LSPDependency.from_dict(config)
+        except (ValueError, TypeError):
+            return
+        servers[dep.name] = dep.to_lsp_json_entry()
+
+    if lockfile is not None:
+        names.update(lockfile.lsp_servers or ())
+        for name, config in sorted((lockfile.lsp_configs or {}).items()):
+            names.add(name)
+            if isinstance(config, dict):
+                _admit({**config, "name": name})
+    for dep in package.get_lsp_dependencies():
+        names.add(dep.name)
+        if dep.command is not None and dep.extension_to_language is not None:
+            _admit(dep.to_dict())
+    lsp_json = project_root / ".lsp.json"
+    if lsp_json.is_file() and not lsp_json.is_symlink():
+        try:
+            data = json.loads(lsp_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        authored = data.get("lspServers", data) if isinstance(data, dict) else None
+        if isinstance(authored, dict):
+            names.update(str(name) for name in authored)
+            for config in lsp_servers_to_apm_deps(authored, project_root, warn_on_invalid=False):
+                _admit(config)
+    return dict(sorted(servers.items())), sorted(names - servers.keys())
+
+
+def _deployed_path(source: Path, project_root: Path, rendered: dict[Path, str]) -> str | None:
+    """Return the deployed (project-relative) path a packed source was read from.
+
+    Rules rendered into a pack temp root (*rendered*) keep their deployed path.
+    """
+    if source in rendered:
+        return rendered[source]
+    try:
+        return portable_relpath(source, project_root)
+    except ValueError:
+        return None
+
+
+def _routed_rule_components(
+    lockfile, project_root: Path, dependency_keys: set[str], rendered: dict[Path, str]
+) -> dict[str, list[tuple[Path, str]]]:
+    """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
+
+    A pre-#3939 install deployed them as ``.claude/rules/`` files, which the
+    plugin pack mapped to ``instructions/``; render them through the same
+    projection so the bundle keeps those bytes. Only *dependency_keys* (the
+    dependencies the bundle ships) render. Keyed by dependency key.
+    """
+    import atexit
+    import tempfile
+
+    from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
+
+    components: dict[str, list[tuple[Path, str]]] = {}
+    routed = routed_claude_rules(lockfile, project_root, dependency_keys=dependency_keys)
+    if not routed:
+        return components
+    rendered_root = Path(tempfile.mkdtemp(prefix="apm-pack-rules-"))
+    atexit.register(shutil.rmtree, rendered_root, ignore_errors=True)
+    for dep_key, rules in routed.items():
+        dep_root = rendered_root / hashlib.sha256(dep_key.encode()).hexdigest()[:16]
+        write_routed_claude_rules(dep_root, rules)
+        rendered.update({dep_root / rel: rel for rel in rules})
+        components[dep_key] = [
+            (dep_root / rel, plugin_rel)
+            for rel in sorted(rules)
+            if (plugin_rel := _plugin_rel_for_deployed_path(rel, None)) is not None
+        ]
+    return components
 
 
 def export_plugin_bundle(
@@ -926,7 +1212,7 @@ def export_plugin_bundle(
     lockfile = LockFile.read(lockfile_path)
 
     # 2. Read apm.yml
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     package = APMPackage.from_apm_yml(apm_yml_path)
     pkg_name = package.name
     pkg_version = package.version or "0.0.0"
@@ -935,7 +1221,7 @@ def export_plugin_bundle(
     for dep_ref in package.get_apm_dependencies():
         if dep_ref.is_local:
             raise ValueError(
-                f"Cannot pack — apm.yml contains local path dependency: "
+                f"Cannot pack -- apm.yml contains local path dependency: "
                 f"{dep_ref.local_path}\n"
                 f"Local dependencies are for development only. Replace them with "
                 f"remote references (e.g., 'owner/repo') before packing."
@@ -969,21 +1255,28 @@ def export_plugin_bundle(
     #    file_map: output_rel_posix -> (source_abs, owner_name)
     file_map: dict[str, tuple[Path, str]] = {}
     collisions: list[str] = []
+    dropped_renderings: list[str] = []
     merged_hooks: dict = {}
     merged_mcp: dict = {}
 
     apm_modules_dir = project_root / "apm_modules"
 
+    # Prefer lockfile is_dev flag (covers transitive deps);
+    # fall back to apm.yml URL matching for older lockfiles
+    packed_deps = [
+        dep
+        for dep in (lockfile.get_all_dependencies() if lockfile else [])
+        if not (
+            getattr(dep, "is_dev", False)
+            or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
+        )
+    ]
+    rendered_rules: dict[Path, str] = {}
+    routed_rules = _routed_rule_components(
+        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}, rendered_rules
+    )
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
-            # Prefer lockfile is_dev flag (covers transitive deps);
-            # fall back to apm.yml URL matching for older lockfiles
-            if (
-                getattr(dep, "is_dev", False)
-                or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
-            ):
-                continue
-
+        for dep in packed_deps:
             dep_name = dep.repo_url
 
             # Provenance rule (issue #1999 follow-up): a dependency's content
@@ -992,6 +1285,8 @@ def export_plugin_bundle(
             # ``apm_modules`` is an unattested cache -- it carries no integrity
             # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger)
+            dep_routed = routed_rules.get(dep.get_unique_key(), [])
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
@@ -999,10 +1294,10 @@ def export_plugin_bundle(
                     raise ValueError(
                         f"Cannot pack dependency {dep.repo_url}: the skills "
                         f"recorded in apm.lock.yaml (skill_subset: {declared_skills}) "
-                        "were not found among its installed files. Run 'apm install' "
-                        "to re-deploy the expected skills, then pack again."
+                        "were not found among its installed files. "
+                        f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
-            elif _cache_would_contribute_primitives(install_path, dep):
+            elif not dep_routed and _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
                 # recorded none of them: a stale or partial install. Refuse
                 # to pack the cache -- fail loudly with a fix.
@@ -1010,8 +1305,7 @@ def export_plugin_bundle(
                     f"Cannot pack dependency {dep.repo_url}: the lockfile records "
                     "no deployed files for it, but installed content that cannot "
                     "be verified exists in the apm_modules cache (a stale or "
-                    "partial install). Run 'apm install' to record provenance in "
-                    "apm.lock.yaml, then pack again."
+                    f"partial install). {PACK_DEPENDENCY_UNATTESTED.sentence()}"
                 )
             else:
                 # No attested content and nothing packable in the cache: the
@@ -1019,22 +1313,14 @@ def export_plugin_bundle(
                 # MCP-only or hooks-config-only package). Skip it cleanly.
                 dep_components = []
 
-            # Transition warning (#2013): dependency hooks/MCP *config* lives in
-            # the unattested cache and is never packed. Name the dependency so
-            # an author who relied on it merging into shared settings is not
-            # surprised by the silent exclusion. Attested primitives are packed
-            # regardless of this warning.
-            if _cache_would_contribute_hooks_or_mcp(install_path):
-                _warn = (
-                    f"dependency {dep.repo_url} contributed hooks/MCP config that "
-                    "is not attested in apm.lock.yaml; it will NOT be packed. "
-                    "Attested primitives (skills/agents/etc.) are unaffected."
-                )
-                if logger:
-                    logger.warning(_warn)
-                else:
-                    _rich_warning(_warn, symbol="warning")
+            # Transition warning (#2013): name dependency hooks/MCP config the
+            # bundle will not carry, so an author who relied on it merging into
+            # shared settings is not surprised by the exclusion.
+            _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
+            dep_components = _drop_duplicate_renderings(
+                dep_components + dep_routed, project_root, rendered_rules, dropped_renderings
+            )
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
@@ -1082,6 +1368,9 @@ def export_plugin_bundle(
     ):
         _warn_no_local_primitives(logger)
 
+    own_components = _drop_duplicate_renderings(
+        own_components, project_root, rendered_rules, dropped_renderings
+    )
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
     hook_resources.validate_outputs(
         file_map,
@@ -1089,6 +1378,7 @@ def export_plugin_bundle(
             "plugin.json",
             "hooks.json",
             ".mcp.json",
+            ".lsp.json",
             "apm.lock.yaml",
             PLUGIN_ECOSYSTEM_PATHS["claude"],
         },
@@ -1101,7 +1391,22 @@ def export_plugin_bundle(
     root_mcp = _collect_mcp(project_root)
     _deep_merge(merged_mcp, root_mcp, overwrite=True)
 
-    # 7. Emit collision warnings
+    # 6b. LSP -- Claude plugins carry LSP servers in a root .lsp.json; name
+    #     each server without a complete config instead of dropping it (I8).
+    merged_lsp, unpacked_lsp = _collect_lsp_servers(project_root, package, lockfile)
+    if unpacked_lsp:
+        message = (
+            "LSP servers without a complete config (command and extensionToLanguage) "
+            f"are not packed: {', '.join(unpacked_lsp)}. Add both fields to each one in "
+            "apm.yml dependencies.lsp or .lsp.json, then pack again."
+        )
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message, symbol="warning")
+
+    # 7. Name the dropped renderings, then emit collision warnings
+    _report_dropped_renderings(dropped_renderings, logger)
     for msg in collisions:
         if logger:
             logger.warning(msg)
@@ -1109,6 +1414,7 @@ def export_plugin_bundle(
             _rich_warning(msg)
 
     # 8. Build output file list (sorted for determinism)
+    refuse_credential_files(file_map)
     output_files = sorted(file_map.keys())
 
     # Add generated files to the list
@@ -1119,6 +1425,8 @@ def export_plugin_bundle(
     output_files.extend(hook_resources.generated)
     if merged_mcp:
         output_files.append(".mcp.json")
+    if merged_lsp:
+        output_files.append(".lsp.json")
     output_files.append("plugin.json")
 
     # 9. Dry run -- return file list without writing
@@ -1155,6 +1463,10 @@ def export_plugin_bundle(
             json.dumps({"mcpServers": merged_mcp}, indent=2, sort_keys=True),
         )
 
+    # 13b. Write merged .lsp.json (flat server map, Claude plugin layout)
+    if merged_lsp:
+        write_text_lf(bundle_dir / ".lsp.json", json.dumps(merged_lsp, indent=2, sort_keys=True))
+
     # 14. Write plugin.json with updated component paths
     plugin_json = _update_plugin_json_paths(plugin_json, output_files, logger=logger)
     write_text_lf(bundle_dir / "plugin.json", json.dumps(plugin_json, indent=2, sort_keys=False))
@@ -1168,31 +1480,36 @@ def export_plugin_bundle(
     # Walk the bundle and hash every file (excluding the lockfile itself,
     # which we are about to write) so install-time integrity verification can
     # detect tampering without needing the original deployed_files map.
-    if lockfile is not None:
-        from .lockfile_enrichment import enrich_lockfile_for_pack
+    # A project without apm.lock.yaml (e.g. ``dependencies: {}`` with only
+    # local primitives) still gets an integrity manifest: synthesize an empty
+    # lockfile so ``pack.bundle_files`` is always recorded (issue #3846).
+    if lockfile is None:
+        lockfile = LockFile(apm_version=installed_apm_version())
+    from .lockfile_enrichment import enrich_lockfile_for_pack
 
-        bundle_files: dict[str, str] = {}
-        for fp in bundle_dir.rglob("*"):
-            if not fp.is_file() or fp.is_symlink():
-                continue
-            rel = fp.relative_to(bundle_dir).as_posix()
-            if rel == "apm.lock.yaml":
-                continue
-            bundle_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
-        # Issue #1207 D1: do NOT silently substitute ``"copilot"`` when
-        # ``target`` is missing.  Bundles are target-agnostic at install
-        # time; ``pack.target`` is recorded as informational metadata only.
-        # Falling back to ``"all"`` preserves the lockfile-filter shape
-        # (which uses target prefixes to narrow each dep's deployed_files
-        # list to the union of supported targets) without locking the
-        # bundle to a single client.
-        enriched_yaml = enrich_lockfile_for_pack(
-            lockfile,
-            "plugin",
-            target or "all",
-            bundle_files=bundle_files,
-        )
-        write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
+    bundle_files: dict[str, str] = {}
+    for fp in bundle_dir.rglob("*"):
+        if not fp.is_file() or fp.is_symlink():
+            continue
+        rel = fp.relative_to(bundle_dir).as_posix()
+        if rel == "apm.lock.yaml":
+            continue
+        bundle_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+    # Issue #1207 D1: do NOT silently substitute ``"copilot"`` when
+    # ``target`` is missing.  Bundles are target-agnostic at install
+    # time; ``pack.target`` is recorded as informational metadata only.
+    # Falling back to ``"all"`` preserves the lockfile-filter shape
+    # (which uses target prefixes to narrow each dep's deployed_files
+    # list to the union of supported targets) without locking the
+    # bundle to a single client.
+    enriched_yaml = enrich_lockfile_for_pack(
+        lockfile,
+        "plugin",
+        target or "all",
+        bundle_files=bundle_files,
+        renderings=_packed_renderings(file_map, project_root, rendered_rules),
+    )
+    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(bundle_path=bundle_dir, files=output_files)
 
@@ -1211,8 +1528,58 @@ def export_plugin_bundle(
 
 
 # ---------------------------------------------------------------------------
-# Collision handling
+# Rendering selection and collision handling
 # ---------------------------------------------------------------------------
+
+
+def _drop_duplicate_renderings(
+    components: list[tuple[Path, str]],
+    project_root: Path,
+    rendered: dict[Path, str],
+    dropped: list[str],
+) -> list[tuple[Path, str]]:
+    """Keep one rendering per primitive of one package (#3686).
+
+    A multi-target install deploys a primitive once per target (for example
+    ``.claude/agents/rv.md`` and ``.github/agents/rv.agent.md``); the bundle
+    carries only the rendering :mod:`.plugin_layout` prefers, and each dropped
+    one is named by its deployed path. Distinct primitives that share a plugin
+    path stay a collision for :func:`_merge_file_map` to report.
+    """
+    deployed = [_deployed_path(source, project_root, rendered) for source, _rel in components]
+    superseded = superseded_plugin_renderings(deployed)
+    dropped.extend(deployed[index] or "" for index in sorted(superseded))
+    return [component for index, component in enumerate(components) if index not in superseded]
+
+
+def _packed_renderings(
+    file_map: dict[str, tuple[Path, str]], project_root: Path, rendered: dict[Path, str]
+) -> dict[str, str]:
+    """Record the deploying target's extension of every packed file (#3686).
+
+    Taken from the final *file_map* winner, after rendering deduplication and
+    collision resolution, so a consumer never lowers a file by the provenance
+    of a dropped or displaced one. Own sources carry no entry.
+    """
+    renderings: dict[str, str] = {}
+    for rel, (source, _owner) in file_map.items():
+        deployed = _deployed_path(source, project_root, rendered)
+        if deployed and (extension := deployed_rendering_extension(deployed)):
+            renderings[rel] = extension
+    return renderings
+
+
+def _report_dropped_renderings(dropped: list[str], logger=None) -> None:
+    """Name every per-target duplicate rendering pack left out, on one line."""
+    if not dropped:
+        return
+    message = "Packed one rendering per primitive; dropped per-target duplicates: " + ", ".join(
+        dict.fromkeys(dropped)
+    )
+    if logger:
+        logger.info(message)
+    else:
+        _rich_info(message, symbol="info")
 
 
 def _merge_file_map(
@@ -1233,7 +1600,7 @@ def _merge_file_map(
         if output_rel in file_map:
             existing_owner = file_map[output_rel][1]
             collisions.append(
-                f"{output_rel} — collision between '{existing_owner}' and "
+                f"{output_rel} -- collision between '{existing_owner}' and "
                 f"'{owner}' ({'last writer wins' if force else 'first writer wins'})"
             )
             if force:

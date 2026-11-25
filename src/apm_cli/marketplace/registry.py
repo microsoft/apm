@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .errors import ManualMarketplaceConflictError, MarketplaceNotFoundError
-from .models import ORIGIN_MANIFEST, MarketplaceSource
+from .models import ORIGIN_MANIFEST, PERSISTED_ORIGINS, MarketplaceSource
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +28,6 @@ def _marketplaces_path() -> str:
     return os.path.join(CONFIG_DIR, _MARKETPLACES_FILENAME)
 
 
-def _ensure_file() -> str:
-    """Ensure the marketplaces file exists, creating it if needed."""
-    from ..config import ensure_config_exists
-
-    ensure_config_exists()
-    path = _marketplaces_path()
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"marketplaces": []}, f, indent=2)
-    return path
-
-
 def _invalidate_cache() -> None:
     global _registry_cache
     with _registry_lock:
@@ -50,28 +38,28 @@ def _invalidate_cache() -> None:
 def _marketplace_mutation():
     """Lock the complete cross-process load-modify-save transaction."""
     from ..cache.locking import shard_lock
-    from ..config import ensure_config_exists
+    from ..config import CONFIG_DIR
 
-    ensure_config_exists()
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     path = Path(_marketplaces_path())
     with _mutation_lock, shard_lock(path):
         _invalidate_cache()
         yield
 
 
-def _load(*, create: bool = True) -> list[MarketplaceSource]:
+def _load() -> list[MarketplaceSource]:
     """Load registered marketplaces from disk (cached per-process).
 
-    With ``create=False`` a missing registry reads as empty and no file or
-    directory is created.
+    A read never writes: a missing registry reads as empty and no file or
+    directory is created (#4600). Only ``_save`` creates the registry.
     """
     global _registry_cache
     with _registry_lock:
         if _registry_cache is not None:
             return list(_registry_cache)
-        if not create and not os.path.exists(_marketplaces_path()):
+        path = _marketplaces_path()
+        if not os.path.exists(path):
             return []
-        path = _ensure_file() if create else _marketplaces_path()
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -91,7 +79,15 @@ def _load(*, create: bool = True) -> list[MarketplaceSource]:
 def _save(sources: list[MarketplaceSource]) -> None:
     """Write marketplace list to disk atomically."""
     global _registry_cache
-    path = _ensure_file()
+    # A root project's ``marketplaces:`` map is never registered (#2903 D3).
+    if any(s.origin not in PERSISTED_ORIGINS for s in sources):
+        raise ValueError("Project-declared marketplaces are never written to the registry")
+    _adopt_ref_pins(_leaving(_load(), sources))
+    from ..config import CONFIG_DIR
+
+    # Only the directory: config.json is written by 'apm config set' alone.
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
+    path = _marketplaces_path()
     data = {"marketplaces": [s.to_dict() for s in sources]}
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -105,21 +101,24 @@ def _save(sources: list[MarketplaceSource]) -> None:
 
 
 def get_registered_marketplaces() -> list[MarketplaceSource]:
-    """Return all registered marketplaces."""
+    """Return all registered marketplaces; a missing registry reads as empty."""
     return _load()
-
-
-def read_registered_marketplaces() -> list[MarketplaceSource]:
-    """Return all registered marketplaces without creating the registry file."""
-    return _load(create=False)
 
 
 def get_marketplace_by_name(name: str) -> MarketplaceSource:
     """Return a marketplace by display name (case-insensitive).
 
+    Inside a project whose root ``apm.yml`` declares ``marketplaces:``, a
+    declared name wins over a registration with the same name (#2903 D3).
+
     Raises:
         MarketplaceNotFoundError: If not found.
     """
+    from .project_marketplaces import project_marketplace
+
+    declared = project_marketplace(name)
+    if declared is not None:
+        return declared
     lower = name.lower()
     for src in _load():
         if src.name.lower() == lower:
@@ -127,6 +126,37 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
     from ..utils.github_host import default_host
 
     raise MarketplaceNotFoundError(name, host=default_host())
+
+
+def _leaving(
+    before: Sequence[MarketplaceSource], after: Sequence[MarketplaceSource]
+) -> list[MarketplaceSource]:
+    """Registrations whose name is removed or now names another catalog."""
+    from .source_identity import catalog_pin_identity
+
+    def identity(source: MarketplaceSource) -> str | None:
+        try:
+            return catalog_pin_identity(source)
+        except ValueError:
+            return None
+
+    kept = {(s.name.lower(), identity(s)) for s in after}
+    return [s for s in before if (s.name.lower(), identity(s)) not in kept]
+
+
+def _adopt_ref_pins(leaving: Sequence[MarketplaceSource]) -> None:
+    """Move legacy alias pins to the catalog each leaving registration names (#4966)."""
+    if not leaving:
+        return
+    from .source_identity import catalog_pin_identity
+    from .version_pins import adopt_alias_ref_pins
+
+    for source in leaving:
+        try:
+            catalog = catalog_pin_identity(source)
+        except ValueError:
+            continue
+        adopt_alias_ref_pins(source.name, catalog)
 
 
 def add_marketplace(source: MarketplaceSource) -> None:

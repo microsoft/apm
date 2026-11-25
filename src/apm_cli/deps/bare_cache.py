@@ -32,13 +32,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from git import Repo
-
 from ..models.dependency.host_virtual import dependency_repository_owner
 from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
+from .git_lazy import bind_git_name
 
 if TYPE_CHECKING:
+    from git import Repo
+
     from ..models.apm_package import DependencyReference
 
 _log = logging.getLogger(__name__)
@@ -88,6 +89,9 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
             capture_output=True,
             timeout=10,
         )
+        from ..utils.git_config_memo import invalidate
+
+        invalidate(bare_path)  # its config changed: no earlier probe answers for it
         if result.returncode != 0:
             logging.getLogger(__name__).warning(
                 "Failed to redact remote URL from bare repo config at %s "
@@ -118,6 +122,125 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
             fetch_head,
             exc,
         )
+
+
+# Protocol v0 servers refuse a want for an unadvertised commit. Under v2 a
+# "not our ref" means the commit is gone on stock git, but some hosts answer
+# so for any unadvertised commit; neither may clone the history in full.
+_WANT_REFUSED = ("does not allow request for unadvertised object",)
+_NOT_OUR_REF = "not our ref"
+# git translates its own messages; the fetch runs untranslated so they match.
+_UNTRANSLATED = {"LC_ALL": "C", "LANGUAGE": "C"}
+
+
+def _refuses_want_by_commit(exc: subprocess.CalledProcessError) -> bool:
+    """Whether git failed because the server refuses to serve a commit by its id."""
+    return any(marker in _stderr_text(exc) for marker in _WANT_REFUSED)
+
+
+def _stderr_text(exc: subprocess.CalledProcessError) -> str:
+    detail = exc.stderr
+    if isinstance(detail, bytes):
+        detail = detail.decode("utf-8", "replace")
+    return (detail or "").lower()
+
+
+def _fetch_admitted_tip_by_name(
+    git_exe: str, path: Path, url: str, ref: str, sha: str, fetch_env: dict[str, str]
+) -> bool:
+    """Fetch *ref* by name when it still points at *sha*; ``False`` if unknown.
+
+    Both the listing and the fetch use *fetch_env*, the validated clone env of
+    *path*, so they reach the destination a clone would (a mirror rewrite).
+
+    Raises:
+        AdmittedCommitGoneError: *ref* no longer points at *sha*.
+    """
+    from ..cache.commit_reachability import admitted_tip_name
+
+    name = admitted_tip_name(url, ref, sha, fetch_env)
+    if name is None:
+        return False
+    subprocess.run(
+        [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, name],
+        env={**fetch_env, **_UNTRANSLATED},
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+    return True
+
+
+def fetch_commit_worktree(
+    execute_transport_plan: Callable[..., None],
+    repo_url_base: str,
+    target: Path,
+    *,
+    dep_ref: DependencyReference,
+    sha: str,
+    verbose_callback: Callable[[str], None] | None = None,
+) -> None:
+    """Check out commit *sha* at *target*, fetched by that commit, never by a name (#5138).
+
+    Shallow: ``git init``, ``git fetch --depth=1 --no-tags <url> <sha>`` and a
+    detached checkout. A server that refuses a want by commit falls back to a
+    full clone and a checkout of *sha*. A server that answers "not our ref"
+    gets the ref fetched by name, only while it still points at *sha*; the
+    checkout is still of *sha*. Runs over the clone transport plan. The
+    caller verifies the checkout against *sha* once links are materialized.
+    """
+    from ..utils.git_env import (
+        checkout_git_worktree,
+        clone_git_worktree,
+        get_git_executable,
+        git_clone_env,
+        git_no_templates_args,
+        git_subprocess_env,
+    )
+
+    git_exe = get_git_executable()
+
+    def _action(url: str, env: dict[str, str], path: Path) -> None:
+        env = git_subprocess_env(env)
+        if path.exists():
+            _rmtree(path)
+        # The env a clone would get, with remote-activated config applied.
+        fetch_env = git_clone_env(url, env, path)
+        try:
+            subprocess.run(
+                [git_exe, "init", "-q", *git_no_templates_args(), str(path)],
+                env=fetch_env,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, sha],
+                env={**fetch_env, **_UNTRANSLATED},
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+        except subprocess.CalledProcessError as exc:
+            # Only a server that refuses a want by commit gets the full clone; a
+            # missing commit or an auth failure fails here, at depth-1 cost.
+            ref = getattr(dep_ref, "reference", None)
+            if ref and _NOT_OUR_REF in _stderr_text(exc):
+                if not _fetch_admitted_tip_by_name(git_exe, path, url, ref, sha, fetch_env):
+                    raise
+                checkout_git_worktree(path, sha, env=env)
+                return
+            if not _refuses_want_by_commit(exc):
+                raise
+            if verbose_callback:
+                verbose_callback(
+                    f"Fetch by commit refused; cloning in full to check out {sha[:12]}"
+                )
+            if path.exists():
+                _rmtree(path)
+            clone_git_worktree(url, path, env=env, no_checkout=True)
+        checkout_git_worktree(path, sha, env=env)
+
+    execute_transport_plan(repo_url_base, target, dep_ref=dep_ref, clone_action=_action)
 
 
 def bare_clone_with_fallback(
@@ -258,20 +381,10 @@ def bare_clone_with_fallback(
             # would set resolved_commit to the abbreviation and lockfile
             # comparisons against `head.commit.hexsha` (always 40-char)
             # would never match. Copilot review finding (#1135).
-            full_sha_result = run_git_text(
-                [
-                    git_exe,
-                    "--git-dir",
-                    str(target),
-                    "rev-parse",
-                    "--verify",
-                    f"{ref}^{{commit}}",
-                ],
-                env=env,
-                check=True,
-                capture_output=True,
-            )
-            full_sha = full_sha_result.stdout.strip()
+            from ..utils.git_env import git_resolve_commit
+
+            # A commit pin: the full commit its (possibly abbreviated) name expands to.
+            full_sha = git_resolve_commit(target, ref, bare=True, env=env)
             subprocess.run(
                 [git_exe, "--git-dir", str(target), "update-ref", "HEAD", full_sha],
                 env=env,
@@ -747,7 +860,8 @@ def clone_with_fallback(
         RuntimeError: If the planned attempt(s) all fail.
     """
     repo_holder: list[Repo] = []
-    _repo = repo_cls if repo_cls is not None else Repo
+    git_repo = bind_git_name(globals(), "Repo")
+    _repo = repo_cls if repo_cls is not None else git_repo
     supported = {"branch", "depth", "no_checkout", "single_branch"}
     unsupported = sorted(set(clone_kwargs) - supported)
     if unsupported:
@@ -759,7 +873,7 @@ def clone_with_fallback(
         # Retries always start from a clean target, matching the bare path.
         if target.exists():
             _rmtree(target)
-        if repo_cls is not None and repo_cls is not Repo:
+        if repo_cls is not None and repo_cls is not git_repo:
             repo_holder.append(
                 getattr(_repo, "clone_from")(  # noqa: B009 - injected test double only
                     url,
@@ -866,13 +980,24 @@ def build_clone_failure_message(
     last_error: Exception | None,
     last_attempt_scheme: str | None,
     public_github_non_auth_failure: bool = False,
+    repository_not_found: bool = False,
 ) -> str:
     """Build the aggregate ``RuntimeError`` message for a failed transport plan.
 
     Extracted from :meth:`GitHubPackageDownloader._execute_transport_plan`
     to keep that module under the file-length guardrail. Pure formatting:
-    no I/O, no clone attempts.
+    no I/O, no clone attempts. A host that answered "not found" gets the
+    canonical not-found message alone: protocol fallback and network advice
+    cannot help a missing repository.
     """
+    if repository_not_found:
+        return auth_resolver.build_not_found_message(
+            dep_host or default_host_fn(),
+            repo_url_base,
+            dependency_repository_owner(dep_ref) if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            host_type=dep_ref.host_type if dep_ref else None,
+        )
     if plan.strict and len(plan.attempts) >= 1:
         tried = plan.attempts[0].label
         error_msg = f"Failed to clone repository {repo_url_base} via {tried}. "
@@ -894,6 +1019,18 @@ def build_clone_failure_message(
             "and is readable, then inspect the matching rule with "
             "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
         )
+    elif is_ado and getattr(last_error, "attempts", None) is not None:
+        # The exhausted ADO chain names every credential step in order; it
+        # leads the message and replaces the generic "Last error" suffix.
+        error_msg += f"{last_error} " + auth_resolver.build_error_context(
+            dep_host or "dev.azure.com",
+            "clone",
+            org=dep_ref.ado_organization if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            dep_url=dep_ref.repo_url if dep_ref else None,
+            attempts=last_error.attempts,
+        )
+        return error_msg
     elif is_ado and not has_ado_token:
         host = dep_host or "dev.azure.com"
         error_msg += auth_resolver.build_error_context(
@@ -960,3 +1097,11 @@ def build_clone_failure_message(
         error_msg += f" Last error: {git_subprocess_error_text(last_error)}"
 
     return error_msg
+
+
+def __getattr__(name: str) -> Any:
+    # ``Repo`` stays a module attribute (a patch target) without importing
+    # GitPython until a clone needs it.
+    if name == "Repo":
+        return bind_git_name(globals(), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

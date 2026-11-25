@@ -6,6 +6,7 @@ The no-rewrite half (req-lk-006) is issue #2379.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,7 +15,7 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile, suppress_lockfile_writes
 from apm_cli.install.errors import FrozenInstallError, frozen_install_tip
 from apm_cli.install.request import InstallRequest
-from apm_cli.install.service import InstallService, _outermost
+from apm_cli.install.service import InstallService, _outermost, resolve_frozen
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -22,7 +23,7 @@ def _build_lockfile(deps: list[LockedDependency]) -> LockFile:
     lock = LockFile(
         lockfile_version="1",
         generated_at="2025-01-01T00:00:00+00:00",
-        apm_version="0.0.0-test",
+        apm_version="0.0.0",
     )
     for dep in deps:
         lock.add_dependency(dep)
@@ -491,6 +492,10 @@ class TestEnforceFrozenColdCache:
         assert any("until its locked source is restored" in message for message in cold_cache_logs)
 
 
+_DEPLOYED_BYTES = b"deployed\n"
+_DEPLOYED_HASH = f"sha256:{hashlib.sha256(_DEPLOYED_BYTES).hexdigest()}"
+
+
 def _locked(deployed: list[str]) -> LockedDependency:
     return LockedDependency(
         repo_url="https://github.com/o/r",
@@ -498,8 +503,19 @@ def _locked(deployed: list[str]) -> LockedDependency:
         resolved_commit="a" * 40,
         depth=1,
         deployed_files=list(deployed),
-        deployed_file_hashes={p: f"sha256:{'0' * 64}" for p in deployed if "." in Path(p).name},
+        deployed_file_hashes={p: _DEPLOYED_HASH for p in deployed if "." in Path(p).name},
     )
+
+
+def _deploy(project_dir: Path, deployed: list[str]) -> None:
+    """Leave the claimed files on disk, as the install that recorded them did."""
+    for claim in deployed:
+        path = project_dir / claim
+        if "." in path.name:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(_DEPLOYED_BYTES)
+        else:
+            path.mkdir(parents=True, exist_ok=True)
 
 
 class TestSuppressLockfileWrites:
@@ -550,6 +566,7 @@ class TestEnforceFrozenNoRewrite:
 
     def _request(self, tmp_path: Path, committed: list[str]) -> InstallRequest:
         _write_apm_yml(tmp_path)
+        _deploy(tmp_path, committed)
         _write_lockfile(tmp_path, [_locked(committed)])
         return _make_request(project_dir=tmp_path, manifest_deps=[])
 
@@ -579,6 +596,20 @@ class TestEnforceFrozenNoRewrite:
         newer.apm_version = "99.0.0"
 
         InstallService._enforce_frozen_no_rewrite(req, [newer.to_yaml()])
+
+    def test_missing_recorded_file_fails_and_is_named(self, tmp_path: Path):
+        """A file the gate retired under an unchanged lock fails as audit does (#4043)."""
+        req = self._request(tmp_path, [".claude/skills/a", ".claude/skills/a/SKILL.md"])
+        (tmp_path / ".claude/skills/a/SKILL.md").unlink()
+
+        with pytest.raises(FrozenInstallError, match="missing from disk") as exc:
+            InstallService._enforce_frozen_no_rewrite(req, [])
+
+        assert exc.value.reasons == [
+            "  - .claude/skills/a/SKILL.md is recorded in apm.lock.yaml but missing"
+        ]
+        assert "without --frozen" in exc.value.tip
+        assert "commit apm.lock.yaml" in exc.value.tip
 
     def test_unrecorded_deployed_file_fails_and_is_named(self, tmp_path: Path):
         req = self._request(tmp_path, [".claude/skills/a", ".claude/skills/a/SKILL.md"])
@@ -663,7 +694,7 @@ class TestEnforceFrozenDeployedHashes:
             InstallService._enforce_frozen_no_rewrite(req, [])
 
         assert exc.value.reasons == [
-            f"  - {self._SKILL}: expected sha256:{'0' * 64}, observed {observed}"
+            f"  - {self._SKILL}: expected {_DEPLOYED_HASH}, observed {observed}"
         ]
         assert "without --frozen" in exc.value.tip
         assert "apm export-patch" in exc.value.tip
@@ -767,6 +798,35 @@ class TestFrozenRunEndToEnd:
         assert (tmp_path / "apm.lock.yaml").read_bytes() != committed
 
 
+class TestFrozenAcquireFailures:
+    """A failed download is named before any derived frozen check (#4909)."""
+
+    def test_refusal_names_each_failed_package_with_its_recorded_cause(self):
+        from apm_cli.install.phases.integrate import failed_acquisitions
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        diagnostics = DiagnosticCollector()
+        diagnostics.error("Failed to install o/a: clone failed", package="o/a")
+        diagnostics.warn("unrelated", package="o/a")
+        failures = failed_acquisitions(diagnostics, ["o/a", "o/b", "o/a"])
+
+        assert failures == [
+            ("o/a", "Failed to install o/a: clone failed"),
+            ("o/b", "o/b: package could not be acquired"),
+        ]
+        with pytest.raises(FrozenInstallError) as excinfo:
+            InstallService.enforce_frozen_restored(failures)
+        assert str(excinfo.value).splitlines()[0] == (
+            "--frozen: locked dependencies could not be restored: o/a, o/b."
+        )
+
+    def test_no_failed_package_refuses_nothing(self):
+        from apm_cli.install.phases.integrate import failed_acquisitions
+
+        assert failed_acquisitions(None, []) == []
+        InstallService.enforce_frozen_restored([])
+
+
 class TestOutermost:
     def test_drops_paths_covered_by_a_listed_ancestor(self):
         assert _outermost(
@@ -779,3 +839,49 @@ class TestOutermost:
             ".claude/skills/b",
             ".claude/skills/bc",
         ]
+
+
+class TestResolveFrozen:
+    """req-lk-018: a truthy CI replays an existing lockfile unless the invocation is non-frozen."""
+
+    @staticmethod
+    def _root(tmp_path: Path, *, locked: bool) -> str:
+        if locked:
+            (tmp_path / "apm.lock.yaml").write_text("lockfile_version: '1'\n")
+        return str(tmp_path)
+
+    @pytest.mark.parametrize("ci", ["true", "1", "TRUE", "yes"])
+    def test_truthy_ci_with_lockfile_selects_frozen(self, tmp_path: Path, ci: str) -> None:
+        root = self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, False, False, root, environ={"CI": ci}) is True
+
+    def test_truthy_ci_without_lockfile_stays_non_frozen(self, tmp_path: Path) -> None:
+        root = self._root(tmp_path, locked=False)
+        assert resolve_frozen(None, False, False, root, environ={"CI": "true"}) is False
+
+    @pytest.mark.parametrize("environ", [{}, {"CI": ""}, {"CI": "0"}, {"CI": "False"}])
+    def test_absent_or_falsy_ci_stays_non_frozen(
+        self, tmp_path: Path, environ: dict[str, str]
+    ) -> None:
+        root = self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, False, False, root, environ=environ) is False
+
+    def test_project_scope_reads_the_working_directory_lockfile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert resolve_frozen(None, False, False, None, environ={"CI": "1"}) is False
+        self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, False, False, None, environ={"CI": "1"}) is True
+
+    @pytest.mark.parametrize("flag", [True, False])
+    @pytest.mark.parametrize("locked", [True, False])
+    def test_explicit_flag_wins_over_ci(self, tmp_path: Path, flag: bool, locked: bool) -> None:
+        root = self._root(tmp_path, locked=locked)
+        assert resolve_frozen(flag, False, False, root, environ={"CI": "true"}) is flag
+        assert resolve_frozen(flag, False, False, root, environ={}) is flag
+
+    @pytest.mark.parametrize("intent", [True, ("org/pkg",), "server"])
+    def test_resolve_intent_stays_non_frozen_under_ci(self, tmp_path: Path, intent: object) -> None:
+        root = self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, intent, False, root, environ={"CI": "true"}) is False

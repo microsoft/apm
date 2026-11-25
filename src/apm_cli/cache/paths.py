@@ -28,9 +28,30 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextvars import ContextVar
 from pathlib import Path
 
 _log = logging.getLogger(__name__)
+
+# Set while a command only decides: caches are read, never written, evicted or touched.
+_READ_ONLY: ContextVar[bool] = ContextVar("apm_cache_read_only", default=False)
+
+
+@contextlib.contextmanager
+def read_only_caches() -> Iterator[None]:
+    """Read every cache without maintaining it (no write, eviction or recency refresh)."""
+    token = _READ_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _READ_ONLY.reset(token)
+
+
+def cache_writes_allowed() -> bool:
+    """False inside :func:`read_only_caches`."""
+    return not _READ_ONLY.get()
+
 
 # Bucket layout within cache root
 GIT_DB_BUCKET = "git/db_v1"
@@ -41,7 +62,7 @@ HTTP_BUCKET = "http_v1"
 _temp_cache_dir: str | None = None
 
 
-def get_cache_root(*, no_cache: bool = False) -> Path:
+def get_cache_root(*, no_cache: bool = False, ensure: bool = True) -> Path:
     """Resolve the cache root directory.
 
     Args:
@@ -56,6 +77,7 @@ def get_cache_root(*, no_cache: bool = False) -> Path:
         ValueError: If the resolved path is invalid (contains NUL bytes,
             is empty after expansion).
     """
+    ensure = ensure and cache_writes_allowed()
     # Escape hatch: APM_NO_CACHE or explicit no_cache flag
     if no_cache or os.environ.get("APM_NO_CACHE", "").strip() in ("1", "true", "yes"):
         return _get_temp_cache_root()
@@ -63,10 +85,10 @@ def get_cache_root(*, no_cache: bool = False) -> Path:
     # Escape hatch: APM_CACHE_DIR override
     override = os.environ.get("APM_CACHE_DIR", "").strip()
     if override:
-        return _validate_and_ensure(override)
+        return _validate_and_ensure(override, ensure=ensure)
 
     # Platform default
-    return _validate_and_ensure(_platform_default())
+    return _validate_and_ensure(_platform_default(), ensure=ensure)
 
 
 def get_git_db_path(cache_root: Path) -> Path:
@@ -107,7 +129,7 @@ def _platform_default() -> str:
     return os.path.join(os.path.expanduser("~"), ".cache", "apm")
 
 
-def _validate_and_ensure(path_str: str) -> Path:
+def _validate_and_ensure(path_str: str, *, ensure: bool = True) -> Path:
     """Validate and create cache root, returning the Path.
 
     Raises:
@@ -126,8 +148,9 @@ def _validate_and_ensure(path_str: str) -> Path:
     if not cache_path.is_absolute():
         raise ValueError(f"Cache path must be absolute: {path_str}")
 
-    # Create with restrictive permissions
-    _ensure_dir(cache_path)
+    # Create with restrictive permissions (a read-only caller passes ensure=False)
+    if ensure:
+        _ensure_dir(cache_path)
     return cache_path
 
 

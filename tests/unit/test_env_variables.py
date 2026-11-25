@@ -7,7 +7,11 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+
+pytestmark = pytest.mark.component
 
 
 class TestEnvironmentVariablesHandling(unittest.TestCase):

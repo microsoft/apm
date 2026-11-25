@@ -88,9 +88,17 @@ class GitHubHttpObservation:
 
 
 def _mint_certificates(
-    directory: Path, hosts: tuple[str, ...] = (API_HOST, RAW_HOST)
+    directory: Path,
+    hosts: tuple[str, ...] = (API_HOST, RAW_HOST),
+    *,
+    crl_url: str | None = None,
 ) -> tuple[Path, Path, Path]:
-    """Create a private CA and a leaf for *hosts*; return (ca, leaf, key)."""
+    """Create a private CA and a leaf for *hosts*; return (ca, leaf, key).
+
+    With *crl_url* the leaf names that CRL distribution point and the CA's
+    empty CRL is written (DER) to ``directory / "ca.crl"``, so a client that
+    checks revocation by default (Windows schannel) can verify the leaf.
+    """
     openssl = openssl_executable()
     if openssl is None:
         raise RuntimeError("openssl CLI is required to mint fixture certificates")
@@ -101,7 +109,8 @@ def _mint_certificates(
         _LEAF_CNF.format(
             common_name=hosts[0],
             alt_names=", ".join(f"DNS:{host}" for host in sorted(hosts)),
-        ),
+        )
+        + (f"crlDistributionPoints = URI:{crl_url}\n" if crl_url else ""),
         encoding="ascii",
     )
     ca_key, ca_pem = directory / "ca.key", directory / "ca.pem"
@@ -132,7 +141,27 @@ def _mint_certificates(
         "-CAcreateserial", "-out", leaf_pem, "-days", "2",
         "-extfile", leaf_cnf, "-extensions", "v3_leaf",
     )  # fmt: skip
+    if crl_url:
+        _mint_empty_crl(_run, directory, ca_key, ca_pem)
     return ca_pem, leaf_pem, leaf_key
+
+
+def _mint_empty_crl(run, directory: Path, ca_key: Path, ca_pem: Path) -> Path:
+    """The CA's empty CRL (nothing revoked), DER, at ``directory / "ca.crl"``."""
+    index, number = directory / "crl-index.txt", directory / "crl-number"
+    index.write_text("", encoding="ascii")
+    number.write_text("01\n", encoding="ascii")
+    config = directory / "crl.cnf"
+    config.write_text(
+        "[ca]\ndefault_ca = fixture\n[fixture]\n"
+        f"database = {index.as_posix()}\ncrlnumber = {number.as_posix()}\n"
+        "default_md = sha256\ndefault_crl_days = 2\n",
+        encoding="ascii",
+    )
+    pem, der = directory / "ca.crl.pem", directory / "ca.crl"
+    run("ca", "-gencrl", "-config", config, "-keyfile", ca_key, "-cert", ca_pem, "-out", pem)
+    run("crl", "-in", pem, "-outform", "DER", "-out", der)
+    return der
 
 
 class _ProxyServer(ThreadingHTTPServer):

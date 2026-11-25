@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 from click.testing import CliRunner
+
+pytestmark = pytest.mark.component
 
 
 def _write_apm_yml(root: Path, *, deps: list | None = None, dev_deps: list | None = None) -> None:

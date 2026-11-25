@@ -23,7 +23,6 @@ from apm_cli.commands.uninstall.cli import uninstall
 from apm_cli.commands.uninstall.engine import (
     _preflight_uninstall_survivors,
 )
-from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.outcome import finalize_install_result
 from apm_cli.install.services import (
@@ -42,6 +41,7 @@ from apm_cli.models.apm_package import APMPackage, PackageContentType, PackageIn
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.results import InstallResult
 from apm_cli.models.validation import PackageType, validate_apm_package
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
@@ -229,11 +229,13 @@ def test_services_gate_rejects_native_type_without_canonical_ir(tmp_path: Path) 
         integrate_package_primitives(
             package_info,
             project,
+            skill_subset=None,
             targets=[MagicMock(name="target")],
             integrators=integrators,
             force=True,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert _tree_snapshot(project) == {}
@@ -1031,8 +1033,8 @@ def test_uninstall_honors_declared_non_copilot_target_despite_github_directory(
     result = CliRunner().invoke(uninstall, ["owner/removed"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
-    assert not catalog_path_for(project / "apm_modules").exists()
-    assert not (project / ".github" / "copilot" / "settings.local.json").exists()
+    assert not (project / ".agents" / "plugins").exists()
+    assert not (project / ".github" / "copilot" / "settings.json").exists()
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(

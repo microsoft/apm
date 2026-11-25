@@ -21,6 +21,8 @@ from apm_cli.bundle.plugin_exporter import export_plugin_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers (reuse patterns from test_plugin_exporter.py)
 # ---------------------------------------------------------------------------
@@ -231,3 +233,180 @@ class TestPluginExportIncludesLockfile:
                 f"Hash mismatch for {rel_path}: "
                 f"expected {expected_hash[:12]}..., got {actual_hash[:12]}..."
             )
+
+
+class TestPluginExportWithoutProjectLockfile:
+    """Issue #3846: no project apm.lock.yaml must still yield an integrity manifest."""
+
+    def _setup_local_only_project(self, tmp_path: Path) -> Path:
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: local-only\nversion: 1.0.0\ndependencies: {}\n", encoding="utf-8"
+        )
+        skill_dir = project / ".apm" / "skills" / "foo"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: foo\ndescription: Foo.\n---\n# Foo\n", encoding="utf-8"
+        )
+        return project
+
+    def test_bundle_embeds_lockfile_with_bundle_files(self, tmp_path: Path) -> None:
+        from apm_cli.bundle.local_bundle import verify_bundle_integrity
+
+        project = self._setup_local_only_project(tmp_path)
+
+        result = export_plugin_bundle(project_root=project, output_dir=tmp_path / "build")
+
+        bundle_lock = result.bundle_path / "apm.lock.yaml"
+        assert bundle_lock.is_file()
+        lock_data = yaml.safe_load(bundle_lock.read_text(encoding="utf-8"))
+        assert lock_data["dependencies"] == []
+        bundle_files = lock_data["pack"]["bundle_files"]
+        assert set(bundle_files) == {"plugin.json", "skills/foo/SKILL.md"}
+        assert verify_bundle_integrity(result.bundle_path, lock_data) == []
+        # The synthesized lockfile lives only in the bundle.
+        assert not (project / "apm.lock.yaml").exists()
+
+        (result.bundle_path / "skills" / "foo" / "SKILL.md").write_text(
+            "tampered", encoding="utf-8"
+        )
+        errors = verify_bundle_integrity(result.bundle_path, lock_data)
+        assert any("skills/foo/SKILL.md" in err for err in errors)
+
+
+def test_plugin_pack_carries_lsp_servers_in_bundle_lsp_json(tmp_path: Path, capsys) -> None:
+    """RA-034: the Claude plugin bundle's .lsp.json carries every complete LSP server.
+
+    Sources are apm.yml dependencies.lsp, the lockfile and a root .lsp.json
+    (which wins a name collision). The bundle file passes the checks plugin
+    admission and bundle install apply; only incomplete servers are named.
+    """
+    import json
+
+    from apm_cli.claude_plugins.admission import _unsupported_capability
+    from apm_cli.deps.plugin_parser import _extract_lsp_servers, lsp_servers_to_apm_deps
+    from apm_cli.install.local_bundle_handler import _parse_bundle_lsp_servers
+    from apm_cli.models.dependency.lsp import LSPDependency
+
+    project = _setup_project_with_skill(tmp_path)
+    _write_apm_yml(
+        project,
+        deps={
+            "lsp": [
+                {
+                    "name": "pyright",
+                    "command": "pyright-langserver",
+                    "extensionToLanguage": {".py": "python"},
+                }
+            ]
+        },
+    )
+    lock = LockFile.read(project / "apm.lock.yaml") or LockFile()
+    lock.lsp_servers = ["gopls", "orphan"]
+    lock.lsp_configs = {
+        "gopls": {
+            "name": "gopls",
+            "command": "gopls",
+            "args": ["serve"],
+            "extensionToLanguage": {".go": "go"},
+        }
+    }
+    lock.write(project / "apm.lock.yaml")
+    (project / ".lsp.json").write_text(
+        json.dumps(
+            {
+                "lspServers": {
+                    "pyright": {
+                        "command": "pyright-langserver",
+                        "args": ["--stdio"],
+                        "extensionToLanguage": {".py": "python"},
+                    },
+                    "rust-analyzer": {
+                        "command": "rust-analyzer",
+                        "fileExtensions": {".rs": "rust"},
+                    },
+                    "broken": {"command": "broken-ls"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = export_plugin_bundle(project, tmp_path / "out")
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert (
+        "LSP servers without a complete config (command and extensionToLanguage) are not "
+        "packed: broken, orphan. Add both fields to each one in apm.yml dependencies.lsp "
+        "or .lsp.json, then pack again."
+    ) in output
+    assert ".lsp.json" in result.files
+    bundle_lsp = json.loads((result.bundle_path / ".lsp.json").read_text(encoding="utf-8"))
+    assert bundle_lsp == {
+        "gopls": {"command": "gopls", "args": ["serve"], "extensionToLanguage": {".go": "go"}},
+        "pyright": {
+            "command": "pyright-langserver",
+            "args": ["--stdio"],
+            "extensionToLanguage": {".py": "python"},
+        },
+        "rust-analyzer": {"command": "rust-analyzer", "extensionToLanguage": {".rs": "rust"}},
+    }
+
+    manifest = json.loads((result.bundle_path / "plugin.json").read_text(encoding="utf-8"))
+    assert _unsupported_capability(result.bundle_path, manifest) is None
+    discovered = _extract_lsp_servers(result.bundle_path, manifest)
+    admitted = [
+        LSPDependency.from_dict(spec)
+        for spec in lsp_servers_to_apm_deps(discovered, result.bundle_path)
+    ]
+    assert {dep.name: dep.to_lsp_json_entry() for dep in admitted} == bundle_lsp
+    installed = _parse_bundle_lsp_servers(result.bundle_path)
+    assert {dep.name: dep.to_lsp_json_entry() for dep in installed} == bundle_lsp
+
+
+def test_plugin_pack_without_lsp_warns_nothing_about_lsp(tmp_path: Path, capsys) -> None:
+    project = _setup_project_with_skill(tmp_path)
+
+    result = export_plugin_bundle(project, tmp_path / "out")
+
+    assert "LSP" not in capsys.readouterr().out
+    assert ".lsp.json" not in result.files
+    assert not (result.bundle_path / ".lsp.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("deployed", "native", "gap", "named"),
+    [
+        # A plugin deployed whole is attested by its native_plugin record (#5253).
+        ((), True, False, True),
+        # Loose files recorded beside the record pack through deployed_files, so the
+        # cache is never consulted and the root is not named as left out.
+        ((".claude/skills/demo/SKILL.md",), True, True, False),
+        # No record and no deployed files: a stale or partial install, refused.
+        ((), False, True, False),
+    ],
+)
+def test_a_whole_native_plugin_is_named_not_a_provenance_gap(
+    tmp_path: Path, capsys, deployed, native, gap, named
+) -> None:
+    from apm_cli.bundle.plugin_exporter import (
+        _cache_would_contribute_primitives,
+        _warn_unpacked_dependency_config,
+    )
+    from apm_cli.native_plugins.record import NativePluginRecord
+
+    cache = tmp_path / "cache"
+    (cache / ".apm" / "skills" / "demo").mkdir(parents=True)
+    (cache / ".apm" / "skills" / "demo" / "SKILL.md").write_text("# demo\n")
+    record = NativePluginRecord("demo", "sha256:" + "0" * 64, "apm-p-0", "./.agents/plugins")
+    dep = LockedDependency(
+        repo_url="org/demo", deployed_files=list(deployed), native_plugin=record if native else None
+    )
+
+    assert _cache_would_contribute_primitives(cache, dep) is gap
+    _warn_unpacked_dependency_config(dep, cache, [])
+    printed = " ".join(capsys.readouterr().out.split())
+
+    line = "[!] dependency org/demo: the native plugin deployed whole under .agents/plugins/demo"
+    assert (line in printed) is named, printed

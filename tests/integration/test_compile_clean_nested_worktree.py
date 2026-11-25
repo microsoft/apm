@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.compilation.distributed_compiler import AGENTS_MD_GENERATED_MARKER
+from apm_cli.core.remediation import NESTED_REPOSITORY_SKIPPED
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -98,10 +99,13 @@ def test_compile_excludes_linked_worktree_primitives(
         env=environment,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
-    for output_name in ("AGENTS.md", "CLAUDE.md"):
-        output = (parent / output_name).read_text(encoding="utf-8")
-        assert "OWN-SENTINEL" in output
-        assert "FOREIGN-SENTINEL" not in output
+    output = (parent / "AGENTS.md").read_text(encoding="utf-8")
+    assert "OWN-SENTINEL" in output
+    assert "FOREIGN-SENTINEL" not in output
+    # CLAUDE.md reaches the same instructions through its AGENTS.md import (#3939).
+    claude = (parent / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "@AGENTS.md" in claude.splitlines()
+    assert "FOREIGN-SENTINEL" not in claude
     assert "foreign.instructions.md" not in result.stdout
     assert "foreign.instructions.md" not in result.stderr
 
@@ -146,9 +150,8 @@ def test_compile_root_reports_skipped_nested_repository_placement(
     assert not (destination / "src" / "AGENTS.md").exists()
     assert "Compiled 1 output file (1 AGENTS.md file)" in result.stdout
     unwrapped_stdout = result.stdout.replace("\n", "")
-    assert (
-        f"Run apm compile from {destination / 'src'} to compile it separately" in unwrapped_stdout
-    )
+    advice = NESTED_REPOSITORY_SKIPPED.bind(root=destination / "src").sentence()
+    assert advice in unwrapped_stdout
 
 
 def test_compile_clean_preserves_nested_git_worktree_agents_file(

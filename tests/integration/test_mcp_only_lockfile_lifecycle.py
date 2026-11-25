@@ -212,7 +212,8 @@ def test_uninstall_preserves_unmanaged_skills(
     assert not (project.root / "apm.lock.yaml").exists()
     assert not (project.root / "apm_modules" / "_local" / package.name).exists()
     assert not load_yaml(project.manifest_path).get("dependencies", {}).get("apm", [])
-    assert "fixture-mcp" not in json.loads(mcp_config.read_text(encoding="utf-8"))["mcpServers"]
+    # APM created .mcp.json and its last entry left: the file goes (#4852).
+    assert not mcp_config.exists()
     for path in deployed_files:
         assert not (project.root / path).exists()
 
@@ -245,7 +246,8 @@ def test_frozen_missing_lock_fails_without_durable_writes(
     )
 
     assert result.returncode != 0
-    assert "--frozen requires apm.lock.yaml to exist" in result.stdout
+    # Error lines go to stderr (RA-004).
+    assert "--frozen requires apm.lock.yaml to exist" in result.stdout + result.stderr
     _assert_same_state(before, _snapshot(project))
     assert_unchanged(cache_before, ArtifactSnapshot.capture(isolated.cache_root))
 

@@ -270,7 +270,9 @@ def test_native_hook_discovery_across_reinstall_update_and_user_scope(
     refused = _run(
         lifecycle, ("audit", "--strip"), expected=1, scenario_id="native-hooks-mixed-strip-refusal"
     )
-    assert "does not rewrite native configuration" in " ".join(refused.stdout.split())
+    assert "does not rewrite native configuration" in " ".join(
+        (refused.stdout + refused.stderr).split()
+    )
     assert dirty_skill.read_bytes() == _BIDI_BYTES
     _assert_same_state(
         mixed_before,
@@ -318,7 +320,8 @@ def test_unrecorded_unicode_detect_strip_and_idempotent_audit(
         scenario_id="ci-no-drift-detects-unrecorded-unicode",
     )
     assert "content-integrity" in failed.stdout
-    assert f"unicode: {_UNRECORDED}" in failed.stdout
+    # Failed-check details follow their header to stderr (RA-004).
+    assert f"unicode: {_UNRECORDED}" in failed.stderr
     assert "No critical hidden Unicode or hash drift detected" not in failed.stdout
     assert "All checks passed" not in failed.stdout
     _assert_same_state(before_failure, _snapshot(lifecycle))
@@ -386,7 +389,10 @@ def test_symlinked_deploy_root_never_scans_outside_project(
         scenario_id="symlinked-deploy-root-contained",
     )
     assert _UNRECORDED not in audit.stdout
-    assert audit.stderr == "Error: Refusing deployment through symlinked target root: .claude\n"
+    assert audit.stderr == (
+        "Error: Refusing deployment through a symlinked path component: .claude. "
+        "Replace the symlink with a regular directory or remove it, then retry.\n"
+    )
     assert payload.read_bytes() == _BIDI_BYTES
 
 
@@ -436,4 +442,4 @@ def test_recorded_path_outside_current_targets_retains_unicode_coverage(
         scenario_id="outside-current-targets-recorded",
     )
     assert "content-integrity" in recorded.stdout
-    assert f"unicode: {_OUTSIDE_CURRENT_TARGETS}" in recorded.stdout
+    assert f"unicode: {_OUTSIDE_CURRENT_TARGETS}" in recorded.stderr

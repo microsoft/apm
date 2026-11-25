@@ -6,15 +6,12 @@ APM is invoked from within a git repository's hook or worktree).
 
 Preserved variables (user-controlled config for proxy/auth):
 - GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS, SSH_ASKPASS
-- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT
-- GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
+- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT, GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
 
 Git state variables stripped after external-process sanitization:
-- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE
-- GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
-- GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
-- GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
-- GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
+- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR
+- GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_INDEX_VERSION, GIT_CEILING_DIRECTORIES
+- GIT_DISCOVERY_ACROSS_FILESYSTEM, GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
 - GIT_IMPLICIT_WORK_TREE, GIT_NO_REPLACE_OBJECTS, GIT_PREFIX
 """
 
@@ -27,11 +24,13 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils import git_config_once as _config_once
+from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (successful resolutions only).
@@ -152,16 +151,75 @@ class GitUrlRewriteError(ValueError):
         super().__init__(f"{message}; {_URL_REWRITE_RECOVERY}")
 
 
+_CONFIG_ORIGIN_COMMAND = "'git config --show-origin --list'"
+_PROBE_DETAIL_MAX_CHARS = 200
+_PROBE_SEVERITY_RE = re.compile(r"^(?:fatal|error|warning):\s*", re.IGNORECASE)
+# A value may itself contain apostrophes: mask through the last "' for '" Git
+# appends, or to the end of the line when that suffix is absent.
+_PROBE_CONFIG_VALUE_RE = re.compile(r"(config value )'(?:.*'(?= for ')|.*$)", re.IGNORECASE)
+_PROBE_FILE_LINE_RE = re.compile(r"\bline (\d+) in file (.+?)\s*$")
+_PROBE_FILE_AT_LINE_RE = re.compile(r"in file '([^']+)' at line (\d+)")
+_PROBE_FILE_ACCESS_RE = re.compile(r"unable to (?:access|read config file) '([^']+)'")
+
+
+def _probe_stderr_line(stderr: bytes | str | None) -> str:
+    """Return Git's first diagnostic line, redacted and printable ASCII."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not stderr:
+        return ""
+    first = next((line.strip() for line in stderr.splitlines() if line.strip()), "")
+    line = _PROBE_SEVERITY_RE.sub("", first)
+    line = _PROBE_CONFIG_VALUE_RE.sub(r"\1'***'", redact_git_diagnostic(line))
+    return "".join(ch if " " <= ch <= "~" else "?" for ch in line)
+
+
+def _probe_remedy(line: str) -> str:
+    """Return one runnable next step for the configuration Git reported."""
+    inspect = f"check Git configuration with {_CONFIG_ORIGIN_COMMAND} and retry"
+    if "'$GIT_DIR' too big" in line:
+        return (
+            "the project path is too long for Git; move the project to a shorter path "
+            "or run 'git config --global core.longpaths true', then retry"
+        )
+    if match := _PROBE_FILE_LINE_RE.search(line):
+        number, path = match.groups()
+    elif match := _PROBE_FILE_AT_LINE_RE.search(line):
+        path, number = match.groups()
+    elif match := _PROBE_FILE_ACCESS_RE.search(line):
+        path, number = match.group(1), None
+    else:
+        return inspect
+    if len(path) > _PROBE_DETAIL_MAX_CHARS:
+        return inspect
+    check = f"then check with {_CONFIG_ORIGIN_COMMAND} and retry"
+    if number is None:
+        return f"fix or remove the config file '{path}', {check}"
+    return f"fix line {number} of '{path}', {check}"
+
+
 class GitUrlRewriteProbeError(ValueError):
     """An actionable failure to inspect effective Git configuration."""
 
-    def __init__(self, category: str) -> None:
-        """Initialize a safe probe failure without rendering raw Git output."""
+    def __init__(self, category: str, *, stderr: bytes | str | None = None) -> None:
+        """Initialize a probe failure; Git's first stderr line is shown redacted."""
         self.category = category
-        super().__init__(
-            f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
-        )
+        line = _probe_stderr_line(stderr)
+        self.detail = line
+        if len(line) > _PROBE_DETAIL_MAX_CHARS:
+            self.detail = f"{line[: _PROBE_DETAIL_MAX_CHARS - 3]}..."
+        if line:
+            message = (
+                f"Unable to verify Git URL rewrite safety ({category}: {self.detail}); "
+                f"{_probe_remedy(line)}"
+            )
+        else:
+            message = (
+                f"Unable to verify Git URL rewrite safety ({category}); "
+                f"check Git configuration and retry; locate each config file with "
+                f"{_CONFIG_ORIGIN_COMMAND}; {_URL_REWRITE_INSPECTION}"
+            )
+        super().__init__(message)
 
 
 def _run_git_config(
@@ -227,10 +285,17 @@ def _executable_exclusion_root() -> Path:
     for directory in ancestors:
         if (directory / ".git").exists():
             return directory
+    from apm_cli.core.scope import manifest_file
+
     for directory in ancestors:
-        if (directory / "apm.yml").is_file():
+        if manifest_file(directory).is_file():
             return directory
     return cwd
+
+
+def _inside_project(path: Path, root: Path) -> bool:
+    """Exclusion policy: a path whose containment can't be verified counts as inside."""
+    return filesystem_containment(path, root) is not False
 
 
 def _resolve_trusted_executable(name: str) -> str:
@@ -241,7 +306,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         directory = Path(entry).expanduser().resolve()
         try:
-            if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+            if _inside_project(directory, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -262,12 +327,130 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         resolved = Path(candidate).resolve()
         try:
-            if resolved == exclusion_root or resolved.is_relative_to(exclusion_root):
+            if _inside_project(resolved, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
         return str(resolved)
     raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
+
+
+_NO_CWD_SEARCH = "NoDefaultCurrentDirectoryInExePath"
+_UNSET = object()
+_user_no_cwd_search: object = _UNSET
+
+
+def disable_implicit_cwd_search() -> None:
+    """On Windows, stop bare program names resolving from the working directory.
+
+    Called once at CLI start, before any subprocess. The user's own value is
+    remembered so :func:`user_script_environment` can hand it back to scripts
+    the user wrote.
+    """
+    global _user_no_cwd_search
+    if sys.platform != "win32":
+        return
+    if _user_no_cwd_search is _UNSET:
+        _user_no_cwd_search = os.environ.get(_NO_CWD_SEARCH)
+    os.environ[_NO_CWD_SEARCH] = "1"
+
+
+def user_script_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* for a user-authored script, with the user's own cwd-search setting.
+
+    APM's helper launches keep the setting :func:`disable_implicit_cwd_search`
+    applied; scripts the user wrote (``apm run``, lifecycle and package
+    scripts) see the value the user started with, so a project-local tool they
+    call by name still resolves as before.
+    """
+    if _user_no_cwd_search is _UNSET:
+        return env
+    restored = {key: value for key, value in env.items() if key.upper() != _NO_CWD_SEARCH.upper()}
+    if isinstance(_user_no_cwd_search, str):
+        restored[_NO_CWD_SEARCH] = _user_no_cwd_search
+    return restored
+
+
+def _links_into(directory: Path, root: Path) -> bool:
+    """Whether *directory* may hold a symlink whose resolved target lies inside *root*.
+
+    A directory that cannot be listed may still be searched by the shell, so it
+    counts as linking in: unchecked links never serve an APM-authored script.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return True
+    for entry in entries:
+        if not entry.is_symlink():
+            continue
+        try:
+            target = entry.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if _inside_project(target, root):
+            return True
+    return False
+
+
+def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* with PATH limited to directories outside the project.
+
+    For scripts APM itself authors and launches (runtime setup, self-update):
+    the programs they call by name resolve the way :func:`trusted_executable`
+    resolves APM's own helpers. ``.``, empty, relative and unresolvable entries
+    and every entry inside the project are dropped, as is any directory holding
+    a link whose target lies inside the project (the target check
+    :func:`trusted_executable` applies). Each kept entry is the resolved
+    directory that passed the check. User-authored scripts never use this.
+    Raises ``FileNotFoundError`` when no entry remains, rather than launching
+    with an empty PATH.
+    """
+    exclusion_root = _executable_exclusion_root()
+    result = dict(env)
+    # A missing PATH counts as empty: the child shell's built-in default search
+    # path has not passed the project check, so the refusal below applies.
+    keys = [key for key in env if key.upper() == "PATH"] or ["PATH"]
+    for key in keys:
+        kept = []
+        for entry in env.get(key, "").split(os.pathsep):
+            expanded = Path(entry).expanduser() if entry else None
+            if expanded is None or not expanded.is_absolute():
+                continue
+            try:
+                directory = expanded.resolve(strict=True)
+                if _inside_project(directory, exclusion_root):
+                    continue
+                if _links_into(directory, exclusion_root):
+                    continue
+            except (OSError, RuntimeError, ValueError):
+                continue
+            # Hand on the directory that passed the check: a ``~`` or a link in
+            # the written spelling would be read again when the shell searches.
+            kept.append(str(directory))
+        if not kept:
+            # An empty PATH makes POSIX shells search the working directory.
+            raise FileNotFoundError(
+                "No PATH directory outside the project remains for APM's setup scripts. "
+                "Add the directory holding your installed tools to PATH and retry."
+            )
+        result[key] = os.pathsep.join(kept)
+    return result
+
+
+def trusted_executable(name: str) -> str | None:
+    """Return the absolute path of helper *name*, or ``None`` if it is not installed.
+
+    The single owner for locating a helper program APM launches or probes
+    (git, az, npm, codex, PowerShell, ...). It searches only PATH directories
+    outside the current project, never the working directory, so a program
+    shipped inside a checkout cannot stand in for the real tool. Launch the
+    returned path; never pass a bare helper name to ``subprocess``.
+    """
+    try:
+        return _resolve_trusted_executable(name)
+    except FileNotFoundError:
+        return None
 
 
 def get_git_executable() -> str:
@@ -444,12 +627,19 @@ def clear_git_auth_env(
     env: dict[str, str],
     *,
     remove_helpers: bool = False,
+    keep_url_rewrites: bool = False,
 ) -> None:
-    """Remove inherited Git authorization channels while retaining other config."""
+    """Remove inherited Git authorization channels while retaining other config; with
+    *keep_url_rewrites* only GIT_CONFIG_PARAMETERS ``url.*`` rewrites stay (#5246)."""
+    from apm_cli.utils.git_config_parameters import url_rewrites_only
+
     env.pop(_MANAGED_GIT_AUTH_INTENT_ENV, None)
     env.pop("GIT_TOKEN", None)
     env.pop("GIT_HTTP_EXTRAHEADER", None)
-    env.pop("GIT_CONFIG_PARAMETERS", None)
+    parameters = env.pop("GIT_CONFIG_PARAMETERS", None)
+    rewrites = url_rewrites_only(parameters) if keep_url_rewrites else None
+    if rewrites:
+        env["GIT_CONFIG_PARAMETERS"] = rewrites
     try:
         count = int(env.pop("GIT_CONFIG_COUNT", "0"))
     except ValueError:
@@ -557,16 +747,16 @@ class GitConfigEntry:
 
     scope: str
     key: str
-    value: str
+    value: str = field(repr=False)  # may carry an extraheader credential
 
 
 @dataclass(frozen=True)
 class _GitConfigSnapshot:
     """Configuration facts validated for one Git child."""
 
-    entries: tuple[GitConfigEntry, ...]
-    rewrites: tuple[tuple[str, str], ...]
-    http_headers: tuple[GitConfigEntry, ...]
+    entries: tuple[GitConfigEntry, ...] = field(repr=False)
+    rewrites: tuple[tuple[str, str], ...] = field(repr=False)
+    http_headers: tuple[GitConfigEntry, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -586,14 +776,38 @@ def _read_effective_git_config(
     git_dir: Path | None = None,
     worktree: Path | None = None,
 ) -> _GitConfigSnapshot:
-    """Return the flattened config visible to one Git child."""
+    """Return the flattened config visible to one Git child, probed once per invocation."""
+    from apm_cli.utils import git_config_memo
+
+    return git_config_memo.read(
+        lambda: _probe_effective_git_config(env, git_dir=git_dir, worktree=worktree),
+        env,
+        git=get_git_executable(),
+        git_dir=git_dir,
+        worktree=worktree,
+        config_paths=git_config_memo.git_config_paths,
+    )
+
+
+def _probe_effective_git_config(
+    env: dict[str, str],
+    *,
+    git_dir: Path | None = None,
+    worktree: Path | None = None,
+) -> _GitConfigSnapshot:
+    """Spawn ``git config --list`` for the flattened config visible to one Git child."""
     if git_dir is not None and worktree is not None:
         raise ValueError("git_dir and worktree are mutually exclusive")
     command = [get_git_executable()]
     probe_env = dict(env)
     probe_cwd: str | None = None
     if git_dir is not None:
-        command.extend(("--git-dir", str(git_dir)))
+        # Git refuses an explicit GIT_DIR longer than PATH_MAX - 40 (220 on
+        # Windows) with "'$GIT_DIR' too big", which deep staged clones reach
+        # (#4397). A relative GIT_DIR from its parent probes the same config.
+        absolute_git_dir = Path(os.path.abspath(git_dir))
+        command.append(f"--git-dir={absolute_git_dir.name}")
+        probe_cwd = str(absolute_git_dir.parent)
     elif worktree is not None:
         command.extend(("-C", str(worktree)))
     else:
@@ -622,7 +836,7 @@ def _read_effective_git_config(
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git config probe could not start") from exc
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git config probe failed")
+        raise GitUrlRewriteProbeError("Git config probe failed", stderr=result.stderr)
 
     fields = tuple(field for field in result.stdout.split(b"\0") if field)
     if len(fields) % 2:
@@ -685,6 +899,7 @@ def _has_applicable_http_authorization(
     return any(_is_credential_bearing_http_header(value) for value in active)
 
 
+@_config_once.urlmatch_first
 def _urlmatched_header_group(
     remote_url: str,
     headers: Sequence[GitConfigEntry],
@@ -814,14 +1029,9 @@ _TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset(
     {"http.sslbackend", "http.sslcainfo", "http.sslcapath"}
 )
 
-# Module-level cache for the ambient (env=None) TLS probe -- see
-# real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
-# cached "no ambient TLS config" answer, not a retry signal. Guarded by
-# _real_git_tls_config_lock: parallel installs call this once per
-# dependency, and the probe spawns a `git config` child with its own
-# 10s/30s retry budget, so an unguarded check-then-probe race could let
-# several workers pay that cost concurrently before either stores a result.
-_real_git_tls_config_cache: dict[str, str] | None = None
+# (stamp, answer) of the ambient (env=None) TLS probe; {} is a real answer.
+# The lock makes racing workers share one probe (each has a retry budget).
+_real_git_tls_config_cache: tuple[tuple, dict[str, str]] | None = None
 _real_git_tls_config_lock = threading.Lock()
 
 
@@ -849,9 +1059,8 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     tracked key is recorded during the scan and only the final, possibly
     empty, values are filtered out afterward.
 
-    Cached for the default ``env=None`` case after the first probe: the
-    ambient config a plain ``git clone`` sees is stable for the life of the
-    process, and both ``AuthResolver.build_public_github_anonymous_git_env``
+    Cached for ``env=None`` while ``git_config_memo.ambient_tls_stamp`` (env,
+    config files, user-code epoch) is unchanged, and both ``AuthResolver.build_public_github_anonymous_git_env``
     and ``AuthResolver.git_env_for_context`` call this once per attempt, so
     an uncached probe would spawn one extra ``git config`` child process
     (with its own retry/timeout budget) per dependency in a large install.
@@ -865,8 +1074,12 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     probe instead of each paying its own retry/timeout budget.
     """
     global _real_git_tls_config_cache
-    if env is None and _real_git_tls_config_cache is not None:
-        return dict(_real_git_tls_config_cache)
+    from apm_cli.utils.git_config_memo import ambient_tls_stamp
+
+    stamp = ambient_tls_stamp() if env is None else None
+    kept = _real_git_tls_config_cache
+    if kept is not None and kept[0] == stamp:
+        return dict(kept[1])
 
     def _probe() -> dict[str, str]:
         try:
@@ -887,10 +1100,11 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
         return _probe()
 
     with _real_git_tls_config_lock:
-        if _real_git_tls_config_cache is not None:
-            return dict(_real_git_tls_config_cache)
+        kept = _real_git_tls_config_cache
+        if kept is not None and kept[0] == stamp:
+            return dict(kept[1])
         result = _probe()
-        _real_git_tls_config_cache = result
+        _real_git_tls_config_cache = (stamp, result)
         return dict(result)
 
 
@@ -1032,6 +1246,22 @@ def validate_git_url_rewrite_safety(
         worktree=worktree,
     )
     return effective_url
+
+
+def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
+    """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
+
+    Identification only (for example keying a cached verdict to the server
+    contacted); it never authorizes a contact (see validate_git_url_rewrite_safety).
+    """
+    return resolve_git_url_rewrite(remote_url, git_url_rewrites(env)) or remote_url
+
+
+def git_url_rewrites(env: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """The ``insteadOf`` rewrites git applies under *env*; independent of the URL."""
+    child = git_subprocess_env(env)
+    _append_parent_git_config(child)  # the parent config merge git_network_env does
+    return tuple(_read_effective_git_config(child).rewrites)
 
 
 def _append_git_url_rewrites(
@@ -1360,6 +1590,7 @@ def git_network_env(
     return env
 
 
+@_config_once.config_once_first
 def git_clone_env(
     remote_url: str,
     overrides: dict[str, object] | None,
@@ -1732,22 +1963,96 @@ def git_resolve_commit(
     env: dict[str, object] | None = None,
     bare: bool = False,
 ) -> str:
-    """Resolve a ref in a worktree or an explicitly selected bare repository."""
+    """Resolve a ref in a worktree or an explicitly selected bare repository.
+
+    ``HEAD`` and a full ``refs/`` name resolve as written; any other name
+    resolves exactly (see :func:`exact_named_commit`), never by a rev-parse
+    name expansion into another namespace.
+
+    Raises:
+        subprocess.CalledProcessError: Nothing in the repository has that name.
+    """
+    git = (get_git_executable(), "--git-dir" if bare else "-C", str(worktree))
+    child_env = git_subprocess_env(env)
+    if ref == "HEAD":
+        commit = _peeled_commit(git, child_env, ref)
+    elif ref.startswith("refs/") and not ref.startswith(("refs/heads/", "refs/tags/")):
+        commit = _listed_commit(git, (ref,), child_env)
+    else:
+        commit = exact_named_commit(git, ref, child_env)
+    if commit is None:
+        raise subprocess.CalledProcessError(128, [*git, "rev-parse", "--verify", ref])
+    return commit
+
+
+def git_exact_ref_commit(
+    worktree: Path,
+    refname: str,
+    *,
+    env: dict[str, object] | None = None,
+) -> str | None:
+    """The commit the full *refname* names, or ``None``; never a rev-parse name expansion."""
+    git = (get_git_executable(), "-C", str(worktree))
+    return _listed_commit(git, (refname,), git_subprocess_env(env))
+
+
+_HEX_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _git_out(git: Sequence[str], env: dict[str, str], *args: str) -> str:
     result = run_git_text(
-        [
-            get_git_executable(),
-            "--git-dir" if bare else "-C",
-            str(worktree),
-            "rev-parse",
-            "--verify",
-            f"{ref}^{{commit}}",
-        ],
-        check=True,
+        [*git, *args],
         capture_output=True,
         timeout=30,
-        env=git_subprocess_env(env),
+        env=env,
+        stdin=subprocess.DEVNULL,
     )
-    return result.stdout.strip()
+    return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+
+def _peeled_commit(git: Sequence[str], env: dict[str, str], oid: str) -> str | None:
+    sha = _git_out(git, env, "rev-parse", "--verify", "--quiet", f"{oid}^{{commit}}").lower()
+    return sha if _FULL_SHA_RE.match(sha) else None
+
+
+def _listed_commit(git: Sequence[str], names: Sequence[str], env: dict[str, str]) -> str | None:
+    """The commit of the first of *names* that exists exactly as a ref."""
+    listing = _git_out(git, env, "for-each-ref", "--format=%(objectname) %(refname)", *names)
+    found = {}
+    for line in listing.splitlines():
+        oid, _, refname = line.partition(" ")
+        found[refname] = oid
+    for name in names:
+        if name in found:
+            return _peeled_commit(git, env, found[name])
+    return None
+
+
+def exact_named_commit(git: Sequence[str], ref: str, env: dict[str, str]) -> str | None:
+    """Resolve *ref* exactly in the repository *git* (a command prefix) addresses.
+
+    A full commit resolves as itself. Any other name resolves as
+    ``refs/heads/<ref>`` then ``refs/tags/<ref>`` (or a fully spelled
+    ``refs/heads/`` or ``refs/tags/`` name), as Git prefers a ref; only when
+    no such ref exists does a hex name expand as a unique commit
+    abbreviation. Never a ``rev-parse`` name expansion, so a ref in another
+    namespace cannot answer for *ref*.
+    """
+    if not ref:
+        return None
+    if _HEX_RE.match(ref) and len(ref) == 40:
+        return _peeled_commit(git, env, ref.lower())
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return _listed_commit(git, (ref,), env)
+    if ref.startswith("refs/"):
+        return None
+    commit = _listed_commit(git, (f"refs/heads/{ref}", f"refs/tags/{ref}"), env)
+    if commit is not None or not _HEX_RE.match(ref):
+        return commit
+    matches = _git_out(git, env, "rev-parse", f"--disambiguate={ref.lower()}").split()
+    commits = [oid for oid in matches if _git_out(git, env, "cat-file", "-t", oid) == "commit"]
+    return commits[0].lower() if len(commits) == 1 else None
 
 
 def git_current_branch(
@@ -1772,6 +2077,9 @@ def reset_git_cache() -> None:
     _git_executable = None
     _gh_executable = None
     _real_git_tls_config_cache = None
+    from apm_cli.utils import git_config_memo
+
+    git_config_memo.forget()
 
 
 def git_long_paths_args() -> list[str]:

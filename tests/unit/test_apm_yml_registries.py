@@ -15,6 +15,18 @@ from pathlib import Path
 import pytest
 
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+from tests.lifecycle.known import KnownFailure
+
+# @registry shorthand: a deferred design, its tracker stays open (#4543).
+_REGISTRY_SHORTHAND = KnownFailure(
+    "#4543",
+    "@registry scope shorthand not yet implemented",
+    r"Shorthand '@alias' is not supported",
+    kind="deferred-design",
+    raises=(ValueError, AssertionError),
+)
+
+pytestmark = pytest.mark.component
 
 
 @pytest.fixture
@@ -172,6 +184,7 @@ class TestRegistriesBlockValidation:
         with pytest.raises(ValueError, match="missing required field 'url:'"):
             APMPackage.from_apm_yml(p)
 
+    @pytest.mark.req("req-mf-014")
     def test_non_http_url_rejected(self, write_yml):
         p = write_yml("""
             name: x
@@ -209,6 +222,142 @@ class TestRegistriesBlockValidation:
             APMPackage.from_apm_yml(p)
 
 
+_V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
+_CONTRACTS = pytest.mark.parametrize(
+    "schema_line", ["", f"$schema: {_V01_SCHEMA}"], ids=["default", "openapm-v0.1"]
+)
+
+
+def _registry_manifest(schema_line: str, entry: str) -> str:
+    return f"""
+        {schema_line}
+        name: x
+        version: 1.0.0
+        registries:
+          corp:
+            {entry}
+        """
+
+
+class TestRegistryUrlScheme:
+    """req-sc-006: plain http:// is a parse error unless local or insecure: true (#4286)."""
+
+    @_CONTRACTS
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://registry.example.com/apm",
+            "HTTP://registry.example.com",
+            "http://8.8.8.8/apm",
+            # Just outside the RFC 1918 172.16.0.0/12 range on both sides.
+            "http://172.32.0.1/apm",
+            "http://172.15.255.255/apm",
+            # Integer, hex and leading-zero spellings of 10.0.0.1 are not
+            # strict literals; resolvers read them differently, so they are
+            # never local (utils/net.py is_local_network_host).
+            "http://167772161/apm",
+            "http://0x0a000001/apm",
+            "http://010.0.0.1/apm",
+        ],
+    )
+    def test_http_to_public_host_is_a_parse_error(self, write_yml, schema_line, url):
+        p = write_yml(_registry_manifest(schema_line, f"url: {url}"))
+        with pytest.raises(ValueError, match=r"Registry 'corp' uses http:// to a non-local host"):
+            APMPackage.from_apm_yml(p)
+
+    @_CONTRACTS
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost:8080/apm",
+            "http://127.0.0.1:8080/apm",
+            "http://[::1]:8080/apm",
+            "http://10.1.2.3/apm",
+            "http://172.16.0.9/apm",
+            "http://192.168.1.10/apm",
+            "https://registry.example.com/apm",
+        ],
+    )
+    def test_https_loopback_and_private_hosts_are_accepted(
+        self, write_yml, schema_line, url, capsys
+    ):
+        p = write_yml(_registry_manifest(schema_line, f"url: {url}"))
+        assert APMPackage.from_apm_yml(p).registries["corp"] == url
+        assert "Registry 'corp'" not in "".join(capsys.readouterr())
+
+    @_CONTRACTS
+    def test_insecure_true_accepts_http_to_public_host(self, write_yml, schema_line, capsys):
+        url = "http://registry.example.com/apm"
+        p = write_yml(_registry_manifest(schema_line, f"url: {url}\n            insecure: true"))
+        assert APMPackage.from_apm_yml(p).registries["corp"] == url
+        assert "Registry 'corp'" not in "".join(capsys.readouterr())
+
+    @_CONTRACTS
+    @pytest.mark.parametrize("value", ["false", '"true"', "1"])
+    def test_insecure_must_be_true_boolean(self, write_yml, schema_line, value):
+        entry = f"url: http://registry.example.com/apm\n            insecure: {value}"
+        p = write_yml(_registry_manifest(schema_line, entry))
+        with pytest.raises(ValueError, match="Registry 'corp'"):
+            APMPackage.from_apm_yml(p)
+
+    @_CONTRACTS
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://user:FAKE_SECRET_123@[invalid/apm",
+            "ftp://user:FAKE_SECRET_123@corp.example.com",
+            "http://user:FAKE_SECRET_123@registry.example.com/apm",
+        ],
+    )
+    def test_diagnostic_never_echoes_url_credentials(self, write_yml, schema_line, url):
+        p = write_yml(_registry_manifest(schema_line, f"url: '{url}'"))
+        with pytest.raises(ValueError, match="Registry 'corp'") as excinfo:
+            APMPackage.from_apm_yml(p)
+        assert "FAKE_SECRET_123" not in str(excinfo.value)
+
+    def test_workspace_manifest_http_registry_is_not_merged(self, tmp_path, monkeypatch):
+        from apm_cli.deps.registry.config_loader import _load_yaml_registries
+
+        workspace = tmp_path / "apm.yml"
+        workspace.write_text(
+            "registries:\n"
+            "  public: {url: 'http://registry.example.com/apm'}\n"
+            "  opted: {url: 'http://registry.example.com/apm', insecure: true}\n"
+            "  local: {url: 'http://127.0.0.1:9000/apm'}\n"
+        )
+        before = workspace.read_bytes()
+        assert _load_yaml_registries(workspace) == {
+            "opted": "http://registry.example.com/apm",
+            "local": "http://127.0.0.1:9000/apm",
+        }
+        assert workspace.read_bytes() == before
+
+
+class TestRegistryEntryKeys:
+    """req-mf-015: a mistyped key is rejected and an x- key is accepted (#4252)."""
+
+    @_CONTRACTS
+    def test_mistyped_key_is_rejected_naming_key_and_registry(self, write_yml, schema_line):
+        entry = "url: https://r.example.com\n            typo: 1"
+        p = write_yml(_registry_manifest(schema_line, entry))
+        with pytest.raises(ValueError, match=r"Registry 'corp' has unknown fields: \['typo'\]"):
+            APMPackage.from_apm_yml(p)
+
+    @_CONTRACTS
+    def test_extension_key_is_accepted(self, write_yml, schema_line, capsys):
+        entry = "url: https://r.example.com\n            x-acme-note: 1"
+        p = write_yml(_registry_manifest(schema_line, entry))
+        assert APMPackage.from_apm_yml(p).registries["corp"] == "https://r.example.com"
+        assert "x-acme-note" not in "".join(capsys.readouterr())
+
+    @_CONTRACTS
+    def test_bare_x_prefix_is_not_an_extension(self, write_yml, schema_line):
+        entry = "url: https://r.example.com\n            x-: 1"
+        p = write_yml(_registry_manifest(schema_line, entry))
+        with pytest.raises(ValueError, match="unknown fields"):
+            APMPackage.from_apm_yml(p)
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Default-registry routing pass
 # ───────────────────────────────────────────────────────────────────────────
@@ -233,7 +382,7 @@ class TestDefaultRouting:
             assert dep.source == "registry"
             assert dep.registry_name == "corp"
 
-    @pytest.mark.xfail(reason="@registry scope shorthand not yet implemented", strict=True)
+    @_REGISTRY_SHORTHAND.mark()
     def test_at_scope_overrides_default(self, write_yml):
         p = write_yml("""
             name: x

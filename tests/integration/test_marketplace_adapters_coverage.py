@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tarfile
 import time
 import zipfile
@@ -495,20 +496,17 @@ class TestRunAudit:
 class TestBaseAdapterHelpers:
     """Tests for pure helper functions in ``adapters/client/base.py``."""
 
-    def test_translate_env_placeholder_dollar_brace(self) -> None:
-        result = _translate_env_placeholder("${MY_VAR}")
-        assert result == "${MY_VAR}"
-
-    def test_translate_env_placeholder_env_prefix(self) -> None:
-        result = _translate_env_placeholder("${env:MY_VAR}")
-        assert result == "${MY_VAR}"
-
-    def test_translate_env_placeholder_legacy_angle(self) -> None:
-        result = _translate_env_placeholder("<MY_VAR>")
-        assert result == "${MY_VAR}"
-
-    def test_translate_env_placeholder_non_string_passthrough(self) -> None:
-        assert _translate_env_placeholder(42) == 42  # type: ignore[arg-type]
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param("${MY_VAR}", "${MY_VAR}", id="dollar_brace"),
+            pytest.param("${env:MY_VAR}", "${MY_VAR}", id="env_prefix"),
+            pytest.param("<MY_VAR>", "${MY_VAR}", id="legacy_angle"),
+            pytest.param(42, 42, id="non_string_passthrough"),
+        ],
+    )
+    def test_translate_env_placeholder(self, value, expected) -> None:
+        assert _translate_env_placeholder(value) == expected
 
     def test_extract_legacy_angle_vars_returns_names(self) -> None:
         result = _extract_legacy_angle_vars("token=<API_TOKEN> key=<SECRET_KEY>")
@@ -526,20 +524,26 @@ class TestBaseAdapterHelpers:
     def test_has_env_placeholder_false_for_plain_string(self) -> None:
         assert _has_env_placeholder("plain-value") is False
 
-    def test_stringify_env_literal_bool_false(self) -> None:
-        assert _stringify_env_literal(False) == "false"
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param(False, "false", id="bool_false"),
+            pytest.param(True, "true", id="bool_true"),
+            pytest.param(42, "42", id="int"),
+        ],
+    )
+    def test_stringify_env_literal(self, value, expected) -> None:
+        assert _stringify_env_literal(value) == expected
 
-    def test_stringify_env_literal_bool_true(self) -> None:
-        assert _stringify_env_literal(True) == "true"
-
-    def test_stringify_env_literal_int(self) -> None:
-        assert _stringify_env_literal(42) == "42"
-
-    def test_registry_field_required_default(self) -> None:
-        assert registry_field_is_required({}) is True
-
-    def test_registry_field_required_explicit_false(self) -> None:
-        assert registry_field_is_required({"required": False}) is False
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            pytest.param({}, True, id="default"),
+            pytest.param({"required": False}, False, id="explicit_false"),
+        ],
+    )
+    def test_registry_field_required(self, field, expected) -> None:
+        assert registry_field_is_required(field) is expected
 
 
 # ===========================================================================
@@ -662,9 +666,9 @@ class TestHermesClientAdapter:
     def _make_adapter(self, tmp_path: Path) -> HermesClientAdapter:
         adapter = HermesClientAdapter(project_root=tmp_path)
         # Redirect config to tmp_path so tests are hermetic
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=tmp_path / ".hermes",
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(tmp_path / ".hermes")},
         ):
             pass  # just warm up
         return adapter
@@ -696,9 +700,9 @@ class TestHermesClientAdapter:
 
     def test_update_config_creates_file(self, tmp_path: Path) -> None:
         hermes_home = tmp_path / ".hermes"
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=hermes_home,
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(hermes_home)},
         ):
             adapter = HermesClientAdapter(project_root=tmp_path)
             server_entry = {"command": "npx", "args": ["-y", "mcp-server"]}
@@ -718,9 +722,9 @@ class TestHermesClientAdapter:
             yaml.dump({"model_provider": "openai", "mcp_servers": {}}),
             encoding="utf-8",
         )
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=hermes_home,
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(hermes_home)},
         ):
             adapter = HermesClientAdapter(project_root=tmp_path)
             adapter.update_config({"new-server": {"command": "python"}})
@@ -730,9 +734,9 @@ class TestHermesClientAdapter:
 
     def test_get_current_config_missing_file(self, tmp_path: Path) -> None:
         hermes_home = tmp_path / ".hermes"
-        with patch(
-            "apm_cli.integration.targets.resolve_hermes_root",
-            return_value=hermes_home,
+        with patch.dict(
+            os.environ,
+            {"HERMES_HOME": str(hermes_home)},
         ):
             adapter = HermesClientAdapter(project_root=tmp_path)
             result = adapter.get_current_config()

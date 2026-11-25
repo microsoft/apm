@@ -8,10 +8,12 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.commands.install import _has_local_apm_content, _integrate_local_content
 from apm_cli.deps.lockfile import LockFile
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

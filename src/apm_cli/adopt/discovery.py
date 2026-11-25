@@ -12,13 +12,14 @@ from typing import Any
 from apm_cli.compilation.root_context_protection import catalog_root_context_markers
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import LocatorKind
+from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_detection import SIGNAL_WHITELIST
 from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
+from apm_cli.integration.skill_layout import resolve_skill_layout
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
     active_targets,
     active_targets_user_scope,
-    apply_legacy_skill_paths,
     scoped_profile_or_none,
 )
 from apm_cli.models.dependency import DependencyReference
@@ -35,7 +36,7 @@ def _inventory(root: Path, *, user_scope: bool) -> list[tuple[Path, str]]:
         if user_scope
         else active_targets(root, "all", create_config=False)
     )
-    profiles = profiles + apply_legacy_skill_paths(profiles)
+    profiles = profiles + resolve_skill_layout(profiles, legacy_skill_paths=True)
     directories: dict[Path, str] = {}
     shallow: set[Path] = set()
     for profile in profiles:
@@ -76,7 +77,7 @@ def _inventory(root: Path, *, user_scope: bool) -> list[tuple[Path, str]]:
             continue
         if not directory.is_dir():
             continue
-        if (directory / "SKILL.md").exists() or (directory / "apm.yml").exists():
+        if (directory / "SKILL.md").exists() or manifest_file(directory).exists():
             found[directory] = "package"
             continue
         for child in directory.iterdir():
@@ -189,8 +190,8 @@ def discover(root: Path, manifest: Path, *, user_scope: bool = False) -> dict[st
                 )
                 continue
             checked_tree(path, root)
-            if (path / "apm.yml").exists():
-                read_manifest(path / "apm.yml", root)
+            if manifest_file(path).exists():
+                read_manifest(manifest_file(path), root)
             admission = validate_apm_package(path, read_only=True)
             if not admission.is_valid:
                 finding["reason"] = (

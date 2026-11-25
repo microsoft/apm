@@ -19,12 +19,18 @@ apm cache prune [--days N]
 ## Description
 
 `apm cache` groups three subcommands that operate on the local cache
-root. The cache holds two independent stores:
+root. The cache holds three independent stores:
 
 - **Git cache** -- bare repository databases plus per-SHA worktree
   checkouts, keyed by resolved commit.
 - **HTTP cache** -- conditional-GET responses for MCP registry
   endpoints.
+- **Deploy store** -- the exact bytes of every file a successful install
+  deployed, keyed by the file's `deployed_file_hashes` digest in
+  `apm.lock.yaml`. Every read re-hashes the entry, and a mismatch counts
+  as a miss. A refused or failed install stores nothing. Entries above
+  4 MiB are not stored, and when the store passes 256 MiB the least
+  recently used entries are evicted down to 80% of that.
 
 A fresh, integrity-verified HTTP cache hit updates only the entry
 directory's `mtime`. This recency marker drives LRU eviction; it does
@@ -38,7 +44,7 @@ breaks correctness; the next dependency install or MCP registry
 lookup re-fetches whatever it needs.
 
 Plain and frozen installs can reuse locked SHAs when upstream is unavailable.
-Commands that require current state -- `apm install --update`, `apm install
+Commands that require current state -- `apm install --update` (deprecated), `apm install
 --refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm
 outdated` -- resolve upstream first. Update may reuse content for the resolved
 SHA; `--refresh` bypasses it.
@@ -64,18 +70,19 @@ Output:
 
 ```
 [i] Cache root: /Users/you/Library/Caches/apm
-  Git repositories (db):    12
-  Git checkouts:            34
-  HTTP cache entries:       87
 
-  Total size:               142.3 MB
-    Git:                    138.1 MB
-    HTTP:                   4.2 MB
+[#]   Git repositories (db):    12
+[#]   Git checkouts:            34
+[#]   HTTP cache entries:       87
+
+[#]   Total size:               142.3 MB
+[#]     Git:                    138.1 MB
+[#]     HTTP:                   4.2 MB
 ```
 
 ### `apm cache clean`
 
-Remove every entry from both the git and HTTP caches. Prompts for
+Remove every entry from the git cache, the HTTP cache and the deploy store. Prompts for
 confirmation unless a skip flag is passed.
 
 ```bash
@@ -116,8 +123,8 @@ apm cache prune --days 7     # tighter window
 Output counts SHA groups, not checkout variants:
 
 ```text
-Pruning SHA groups older than 30 days...
-Pruned 2 SHA group(s).
+[*] Pruning SHA groups older than 30 days...
+[+] Pruned 2 SHA group(s).
 ```
 
 | Flag | Description |
@@ -183,6 +190,7 @@ Inside the cache root:
                      #                                      16 hex of
                      #                                      sha256(paths))
   http_v1/           # conditional-GET response cache
+  deploy_v1/         # deployed file bytes: <hex[:2]>/<hex>
 ```
 
 The `full/` and `sparse-<variant>/` subdirs let two consumers of the

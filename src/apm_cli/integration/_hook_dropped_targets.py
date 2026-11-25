@@ -40,6 +40,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from apm_cli.core.remediation import HOOK_CONFIG_UNREADABLE, HOOK_SIDECAR_UNREADABLE
+from apm_cli.integration import write_seam
 from apm_cli.utils.console import _rich_warning
 
 from . import hook_integrator as _hi
@@ -80,12 +82,13 @@ def reconcile_dropped_targets(
             stats,
             container=config.event_container_key,
             sidecar_path=sidecar_path,
+            defaults=config.top_level_defaults,
+            root=project_root,
         )
         if stats["errors"] > errors_before:
             _rich_warning(
                 f"Hook config {json_path} is unreadable or malformed; left "
-                "unmodified. Delete or fix the file manually, then re-run "
-                "apm install."
+                f"unmodified. {HOOK_CONFIG_UNREADABLE.sentence()}"
             )
             _hi._log.warning(
                 "Dropped-target hook config %s is unreadable/malformed; "
@@ -111,8 +114,7 @@ def _reconcile_sidecar_only_orphan(sidecar_path: Path, stats: dict[str, int]) ->
         stats["errors"] += 1
         _rich_warning(
             f"Hook ownership sidecar {sidecar_path} is unreadable or "
-            "malformed; left in place. Delete or fix the file manually, "
-            "then re-run apm install."
+            f"malformed; left in place. {HOOK_SIDECAR_UNREADABLE.sentence()}"
         )
         _hi._log.warning(
             "Orphaned hook ownership sidecar %s is unreadable/malformed (%s); "
@@ -122,7 +124,7 @@ def _reconcile_sidecar_only_orphan(sidecar_path: Path, stats: dict[str, int]) ->
         )
         return
     try:
-        sidecar_path.unlink()
+        write_seam.unlink(sidecar_path)
         stats["files_removed"] += 1
     except OSError as exc:
         stats["errors"] += 1

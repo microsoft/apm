@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.runtime.factory import RuntimeFactory
 
+pytestmark = pytest.mark.component
+
 
 class TestRuntimeFactory:
     """Test Runtime Factory."""

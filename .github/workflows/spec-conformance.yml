@@ -7,28 +7,28 @@ name: Spec conformance
 # regeneration.
 
 on:
+  # No paths: filter: merge-gate.yml requires the spec gate and its shards on
+  # every PR, so a filtered-out run would leave the gate waiting forever.
   pull_request:
     branches: [ main ]
-    paths:
-      - 'docs/src/content/docs/specs/**'
-      - 'tests/fixtures/spec-conformance/**'
-      - 'tests/spec_conformance/**'
-      - 'src/apm_cli/**'
-      - 'pyproject.toml'
-      - 'CONFORMANCE.md'
-      - 'CONFORMANCE.json'
-      - 'CONTRIBUTING.md'
-      - '.github/workflows/spec-conformance.yml'
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  # merge-train.yml runs the spec checks on write-access queue/* refs (#4574),
+  # since merge_group requires them (#4337).
+  workflow_call:
+    inputs:
+      base_sha:
+        description: Base main SHA of the train.
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  spec-conformance:
-    name: Spec conformance gate
+  statement:
+    name: Check conformance statement
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,9 +48,11 @@ jobs:
           GH_PR_BODY: ${{ github.event.pull_request.body }}
         run: bash tests/spec_conformance/mode_b_detector.sh
 
-      - name: Conformance test suite
+      # Use only this checkout's complete, successful collection as input to
+      # the generator. An execution shard's coverage map is not authoritative.
+      - name: Collect full marker coverage
         run: |
-          uv run --frozen --extra dev pytest tests/spec_conformance \
+          uv run --frozen --extra dev pytest tests --collect-only -p no:xdist \
             -p no:randomly \
             --no-header \
             -q
@@ -64,3 +66,45 @@ jobs:
             || (echo "::error::CONFORMANCE.{json,md} are stale. Run \
             'uv run --frozen --extra dev python -m tests.spec_conformance.gen_statement' \
             and commit the result." && exit 1)
+
+  spec-1:
+    name: Spec tests (1/3)
+    runs-on: ubuntu-24.04
+    env:
+      SHARD: "1"
+    steps: &spec-tests
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Execute conformance tests
+        run: |
+          uv run --frozen --extra dev python -m pytest tests/spec_conformance -p no:randomly --no-header -q \
+            -p scripts.ci_sharding --shard-count 3 --shard-index "$SHARD" \
+            --shard-durations .github/ci-durations/spec-conformance.json
+
+  spec-2:
+    name: Spec tests (2/3)
+    runs-on: ubuntu-24.04
+    env:
+      SHARD: "2"
+    steps: *spec-tests
+
+  spec-3:
+    name: Spec tests (3/3)
+    runs-on: ubuntu-24.04
+    env:
+      SHARD: "3"
+    steps: *spec-tests
+
+  spec-conformance:
+    name: Spec conformance gate
+    if: always()
+    needs: [statement, spec-1, spec-2, spec-3]
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require statement and all execution shards
+        env:
+          RESULTS: ${{ needs.statement.result }}:${{ needs.spec-1.result }}:${{ needs.spec-2.result }}:${{ needs.spec-3.result }}
+        run: |
+          echo "Statement / spec 1 / spec 2 / spec 3: $RESULTS"
+          test "$RESULTS" = "success:success:success:success"

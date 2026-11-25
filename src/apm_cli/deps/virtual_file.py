@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.models.apm_package import APMPackage, invalidate_apm_yml_cache_entry
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.dependency.host_virtual import dependency_repository_owner
@@ -49,7 +50,7 @@ def materialize_virtual_file_package(
     subdirectory = virtual_file_subdirectory(filename)
     primitive_path = target_path / ".apm" / subdirectory / filename
     ensure_path_within(primitive_path, target_path)
-    manifest_path = target_path / "apm.yml"
+    manifest_path = manifest_file(target_path)
     ensure_path_within(manifest_path, target_path)
 
     name = dep_ref.get_virtual_package_name()

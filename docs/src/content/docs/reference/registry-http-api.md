@@ -11,7 +11,7 @@ sidebar:
 <dt>Format</dt><dd>JSON over HTTPS</dd>
 </dl>
 
-This document is the wire-level contract. It is self-contained — a server implementer should be able to build a conformant registry from this doc alone. For the client side and how to declare registries in `apm.yml`, see the [Registries guide](../../guides/registries/).
+This document is the wire-level contract. It is self-contained — a server implementer should be able to build a conformant registry from this doc alone. For the client side and how to declare registries in `apm.yml`, see the [Registries guide](../registries/).
 
 ::::caution[Experimental client support]
 The HTTP API contract is implementable, but APM client consumption of package registries is currently behind an experimental flag. Users must run `apm experimental enable registries` before installing from `registries:` entries.
@@ -45,13 +45,13 @@ The registry's **base URL** is vendor-defined — for example, `https://registry
 
 ### 1.2 Identity
 
-`{owner}/{repo}` in path segments matches `DependencyReference.get_identity()` for GitHub-origin packages. For non-GitHub origins, identity is **percent-encoded** (each `/` in the identity becomes `%2F`):
+`{owner}/{repo}` is the package identity at the registry (the `id:` of a registry dependency). The last `/`-separated part of the identity is `{repo}`; everything before it, including any host, is `{owner}`. The client percent-encodes each parameter, so a `/` inside `{owner}` becomes `%2F` and the path always carries exactly two identity segments:
 
-| Origin | Identity | Path segment |
+| Origin | Identity | Path segments |
 |---|---|---|
-| GitHub | `acme/web-skills` | `acme/web-skills` (two segments) |
-| GitLab | `gitlab.com/acme/web-skills` | `gitlab.com%2Facme%2Fweb-skills` (one encoded segment) |
-| Azure DevOps | `dev.azure.com/org/proj/repo` | `dev.azure.com%2Forg%2Fproj%2Frepo` (one encoded segment) |
+| GitHub | `acme/web-skills` | `acme/web-skills` |
+| GitLab | `gitlab.com/acme/web-skills` | `gitlab.com%2Facme/web-skills` |
+| Azure DevOps | `dev.azure.com/org/proj/repo` | `dev.azure.com%2Forg%2Fproj/repo` |
 
 Servers MUST decode percent-encoded path segments before lookup.
 
@@ -92,6 +92,19 @@ The leading `/v1/` path segment is the API version. Future breaking changes ship
 - **Versions are immutable.** A successful `PUT .../versions/{version}` cannot be overwritten — subsequent PUTs return `409 Conflict`. This is a hard requirement; clients depend on it for the lockfile trust model.
 - **List queries are idempotent.** `GET /versions` MUST return the same set of versions on identical inputs.
 
+
+### 1.7 Redirects
+
+The client follows a redirect only when it stays inside the configured registry:
+
+- The response is `301`, `302`, `303`, `307` or `308` with a `Location` header.
+- The target keeps the base URL's scheme, host and port, and its path stays at or under the base path. Dot segments, percent-encoded dots and slashes, and doubled slashes are resolved before the check.
+- At most 3 hops. HTTPS never downgrades to HTTP, and a `Location` with user info is refused.
+- `307` and `308` keep the method and body, so a publish `PUT` is re-sent to the new path. `301`, `302` and `303` are followed only for `GET` and `HEAD`.
+
+Credentials are re-sent only on those hops. Any other redirect fails with `registry redirected outside the configured registry (<origin>); refusing`. The lockfile `resolved_url` keeps the canonical, pre-redirect URL.
+
+Gateways in front of a registry should pass `%2F` through unchanged. In Envoy that is `path_with_escaped_slashes_action: KEEP_UNCHANGED`, which is also Envoy's default. A gateway set to redirect to the decoded path (`UNESCAPE_AND_REDIRECT`) still works when the redirect stays on the registry origin, at the cost of one extra round trip per request.
 
 ---
 
@@ -344,7 +357,7 @@ A **fully-featured v1 server** SHOULD additionally implement:
 - Conditional `GET` (`If-None-Match`) returning `304`
 - Per-version `size_bytes` field
 
-Clients MUST NOT crash on missing optional fields; they MUST parse `versions[]` even with no `published_at`.
+Clients MUST NOT crash on missing optional fields; they MUST parse `versions[]` entries that omit `size_bytes`.
 
 ---
 
@@ -408,6 +421,7 @@ For client implementers (informational):
 - [ ] Verify sha256 against `versions[].digest` before extraction.
 - [ ] Reject `..`, absolute paths, symlinks, and hardlinks during extraction.
 - [ ] Persist `resolved_url` in the lockfile (not the registry name) — it's the trust anchor for re-installs.
+- [ ] Follow redirects only inside the base URL's origin and path ([section 1.7](#17-redirects)); never re-send credentials anywhere else.
 - [ ] On `401/403`, surface a remediation message pointing at `APM_REGISTRY_TOKEN_<NAME>`.
 
 ---
@@ -438,7 +452,7 @@ A conformance test suite for server implementers SHOULD exercise:
 ### 9.4 Validation
 
 1. `PUT` with a tarball missing `apm.yml` → `422` with appropriate error message.
-2. `PUT` with `apm.yml.version` ≠ URL version → `422`.
+2. `PUT` with `apm.yml.version` ≠ URL version → `422` when the server enforces manifest/version lockstep (section 6, rule 5).
 3. `PUT` with absolute paths in tar → `422`.
 4. `PUT` with symlink in zip → `422`.
 
@@ -458,4 +472,5 @@ A conformance test suite for server implementers SHOULD exercise:
 
 ## Changelog
 
+- Clients follow same-origin redirects under the base path, up to 3 hops ([section 1.7](#17-redirects)).
 - Initial release — `versions`, `download`, `publish`. tar.gz + zip both supported. RFC 7807 errors. Bearer auth. Immutable versions.

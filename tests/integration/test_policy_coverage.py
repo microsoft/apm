@@ -540,7 +540,7 @@ dependencies:
         policy_file.write_text("name: test\n", encoding="utf-8")
 
         # Mock network error
-        with patch("apm_cli.policy.discovery.requests.get") as mock_get:
+        with patch("apm_cli.policy.discovery.policy_get") as mock_get:
             mock_get.side_effect = Exception("Network error")
 
             # Should handle gracefully

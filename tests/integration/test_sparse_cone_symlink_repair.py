@@ -193,7 +193,15 @@ def test_downloader_rejects_real_symlink_into_git_metadata(tmp_path: Path) -> No
     downloader.persistent_git_cache = MagicMock()
     downloader.persistent_git_cache.get_checkout.return_value = consumer
     downloader._persistent_cache_checkout = lambda *args, **kwargs: consumer
-    downloader.resolve_git_reference = lambda dep: MagicMock(resolved_commit="a" * 40)
+    # Admission resolves the named ref to the fixture's commit at its origin.
+    commit = subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", "main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    downloader.resolve_git_reference = lambda dep: MagicMock(resolved_commit=commit)
+    downloader._build_repo_url = lambda *args, **kwargs: str(bare)
     downloader._cache_git_env = lambda dep: os.environ.copy()
     downloader._git_env_dict = lambda: os.environ.copy()
     dep = DependencyReference(
@@ -231,7 +239,15 @@ def test_downloader_treats_colon_prefixed_package_path_literally(tmp_path: Path)
     downloader.persistent_git_cache = MagicMock()
     downloader.persistent_git_cache.get_checkout.return_value = consumer
     downloader._persistent_cache_checkout = lambda *args, **kwargs: consumer
-    downloader.resolve_git_reference = lambda dep: MagicMock(resolved_commit="a" * 40)
+    # Admission resolves the named ref to the fixture's commit at its origin.
+    commit = subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", "main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    downloader.resolve_git_reference = lambda dep: MagicMock(resolved_commit=commit)
+    downloader._build_repo_url = lambda *args, **kwargs: str(bare)
     downloader._cache_git_env = lambda dep: os.environ.copy()
     downloader._git_env_dict = lambda: os.environ.copy()
     dep = DependencyReference(
@@ -268,6 +284,10 @@ def test_full_clone_fallback_materializes_out_of_cone_links(tmp_path: Path) -> N
     downloader._try_sparse_checkout = MagicMock(return_value=False)
     downloader._clone_with_fallback = lambda _url, target, **_kwargs: clone_git_worktree(
         str(bare), target, env=env
+    )
+    # Commit admission contacts the same origin over the clone's transport plan.
+    downloader._execute_transport_plan = lambda _base, target, *, clone_action, **_kw: clone_action(
+        str(bare), env, target
     )
     dep = DependencyReference(
         repo_url="owner/repo", reference=sha, is_virtual=True, virtual_path="pkg"

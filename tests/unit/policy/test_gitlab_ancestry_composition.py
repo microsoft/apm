@@ -19,6 +19,8 @@ from apm_cli.policy import discovery
 from apm_cli.policy.discovery import discover_policy_with_chain
 from apm_cli.policy.inheritance import PolicyInheritanceError
 
+pytestmark = pytest.mark.component
+
 _REMOTE = "https://gitlab.com/acme/dept-a/team-x/service.git"
 _ACME = "name: company\nenforcement: block\ndependencies:\n  deny: [evil/pkg]\n"
 _DEPT = "name: dept\nenforcement: warn\ndependencies:\n  deny: [dept/pkg]\n"
@@ -278,7 +280,7 @@ def test_refresh_failure_serves_complete_stale_composition(project: Path) -> Non
     _discover(project, _GitLab(projects))
     later = time.time() + 2 * discovery.DEFAULT_CACHE_TTL
 
-    with patch("apm_cli.policy.discovery.time.time", return_value=later):
+    with patch("time.time", return_value=later):
         result = _discover(project, _GitLab({**projects, "acme/apm-policy": 503}))
 
     assert result.outcome == "cached_stale"

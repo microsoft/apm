@@ -28,6 +28,14 @@ import pytest
 
 from apm_cli.integration.hook_source_selection import HookSourceSelection
 
+
+@pytest.fixture
+def _helpers_on_path():
+    """Resolve every helper to its bare name; these cases mock the launch itself."""
+    with patch("apm_cli.utils.git_env.trusted_executable", side_effect=lambda name: name):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # kiro_hook_integrator -- pure helpers
 # ---------------------------------------------------------------------------
@@ -240,6 +248,7 @@ class TestIntegrateKiroHooksFlow:
         integrator._rewrite_hooks_data.return_value = ({}, [])
         integrator.check_collision.return_value = False
         integrator.try_adopt_identical.return_value = False
+        integrator.keeps_edited_output.return_value = False
         return integrator
 
     def test_returns_empty_when_kiro_dir_missing(self, tmp_path: Path) -> None:
@@ -1235,6 +1244,7 @@ class TestRuntimeManager:
         result = mgr.remove_runtime("no-such-runtime")
         assert result is False
 
+    @pytest.mark.usefixtures("_helpers_on_path")
     def test_remove_copilot_runtime_calls_npm(self) -> None:
         """remove_runtime for copilot calls npm uninstall."""
         from apm_cli.runtime.manager import RuntimeManager
@@ -1357,6 +1367,7 @@ class TestRuntimeAdapterStr:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_helpers_on_path")
 class TestCodexRuntime:
     """Tests for CodexRuntime."""
 
@@ -1453,6 +1464,7 @@ class TestCodexRuntime:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_helpers_on_path")
 class TestCopilotRuntime:
     """Tests for CopilotRuntime."""
 
@@ -1580,6 +1592,7 @@ class TestCopilotRuntime:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_helpers_on_path")
 class TestLLMRuntime:
     """Tests for LLMRuntime."""
 
@@ -2058,6 +2071,7 @@ class TestRuntimeManagerScripts:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_helpers_on_path")
 class TestCopilotRuntimeExecute:
     """Tests for CopilotRuntime.execute_prompt()."""
 

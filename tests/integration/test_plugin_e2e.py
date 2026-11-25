@@ -14,6 +14,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import frontmatter
 import pytest
 
 from apm_cli.deps.lockfile import LockFile
@@ -642,8 +643,11 @@ class TestPluginHeroScenarios:
 
         project = workspace / "project"
         project.mkdir()
+        # Codex keeps the loose, split route; a .claude-plugin plugin targeting
+        # claude or copilot installs whole at project scope (#3921).
         (project / "apm.yml").write_text(
-            "name: root-declared-skill-test\nversion: 1.0.0\ndependencies:\n  apm: []\n"
+            "name: root-declared-skill-test\nversion: 1.0.0\ntargets: [codex]\n"
+            "dependencies:\n  apm: []\n"
         )
         (project / ".github").mkdir()
         (project / ".github" / "copilot-instructions.md").write_text("# test\n")
@@ -722,8 +726,11 @@ class TestPluginHeroScenarios:
 
         project = workspace / "project"
         project.mkdir()
+        # Cursor keeps the loose, split route; a .claude-plugin plugin targeting
+        # claude or copilot installs whole at project scope (#3921).
         (project / "apm.yml").write_text(
-            "name: prepositioned-commands-test\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            "name: prepositioned-commands-test\nversion: 1.0.0\ntargets: [cursor]\n"
+            "dependencies:\n  apm: []\n",
             encoding="utf-8",
         )
         (project / ".github").mkdir()
@@ -732,9 +739,10 @@ class TestPluginHeroScenarios:
         install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
 
         assert install.returncode == 0, f"Command plugin install failed:\n{install.stderr}"
-        assert (project / ".github" / "prompts" / "run.prompt.md").read_text(
-            encoding="utf-8"
-        ) == "# Run\n"
+        deployed = frontmatter.loads(
+            (project / ".cursor" / "commands" / "run.md").read_text(encoding="utf-8")
+        )
+        assert deployed.content == "# Run"
 
 
 # ===========================================================================
@@ -767,7 +775,8 @@ class TestPluginBinDeployPermissionsE2E:
     Regression guard for issue #1620 item 3: ``shutil.copy2`` preserves the
     source mode, so a shipped 0o4755 tool would otherwise land group/other
     readable with a special bit. The real ``apm install -g`` path must tighten
-    it to 0o700.
+    it to 0o700. A Claude plugin installs intact at user scope (#3290), so its
+    bin/ lands inside the native plugin root, not under ~/.claude/skills.
     """
 
     def test_install_global_deploys_plugin_bin_as_0700(self, tmp_path, apm_binary_path: Path):
@@ -795,7 +804,8 @@ class TestPluginBinDeployPermissionsE2E:
         )
         assert result.returncode == 0, f"Global install failed:\n{result.stdout}\n{result.stderr}"
 
-        deployed = list((fake_home / ".claude" / "skills").glob("*/bin/mytool"))
+        assert not list((fake_home / ".claude" / "skills").glob("*/bin/mytool"))
+        deployed = list((fake_home / ".agents" / "plugins").glob("*/bin/mytool"))
         assert len(deployed) == 1, (
             f"Expected exactly one deployed bin executable, found {deployed}.\n"
             f"stdout:\n{result.stdout}"
@@ -913,10 +923,23 @@ class TestPluginNetworkE2E:
         combined = result.stdout + result.stderr
         assert "no native harness is binary-qualified" not in combined
         assert "does not include 'copilot'" not in combined
-        settings_path = temp_project / ".github" / "copilot" / "settings.local.json"
+        # At project scope the plugin deploys whole under .agents/plugins and is
+        # declared in the committed Copilot settings, not settings.local.json (#3921).
+        root = temp_project / ".agents" / "plugins"
+        assert (root / "context-engineering" / "plugin.json").read_bytes() == (
+            temp_project / "apm_modules" / self.NATIVE_PLUGIN_REF.split("#")[0] / "plugin.json"
+        ).read_bytes()
+        catalog = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())
+        settings_path = temp_project / ".github" / "copilot" / "settings.json"
         assert settings_path.exists(), (
             f"Expected native Copilot marketplace registration at {settings_path}"
         )
+        declared = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert declared["extraKnownMarketplaces"] == {
+            catalog["name"]: {"source": {"source": "directory", "path": "./.agents/plugins"}}
+        }
+        assert declared["enabledPlugins"] == {f"context-engineering@{catalog['name']}": True}
+        assert not (temp_project / ".github" / "copilot" / "settings.local.json").exists()
 
     # ---- Test 2: deps list — no false orphans ---------------------------
 
@@ -1241,10 +1264,10 @@ class TestPluginNetworkE2E:
         assert plugin_entry is not None, (
             f"Plugin not found in lockfile. Deps: {lockfile['dependencies']}"
         )
-        # The normalized apm.yml/.apm package outranks its plugin publishing
-        # surface and retains the root skills/ bundle classification.
-        assert plugin_entry.get("package_type") == "skill_bundle", (
-            f"Expected package_type 'skill_bundle', got: {plugin_entry.get('package_type')}"
+        # reference/package-types.md (layout table; "Plugin collection"): a
+        # plugin.json without $schema is a Claude plugin collection (#4270).
+        assert plugin_entry.get("package_type") == "marketplace_plugin", (
+            f"Expected package_type 'marketplace_plugin', got: {plugin_entry.get('package_type')}"
         )
 
     # ---- Test 11: idempotent reinstall ----------------------------------

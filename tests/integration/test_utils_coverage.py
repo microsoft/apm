@@ -14,7 +14,6 @@ No network calls; all tests are hermetic.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,8 +38,6 @@ from apm_cli.utils.diagnostics import (
 from apm_cli.utils.exclude import should_exclude, validate_exclude_patterns
 from apm_cli.utils.helpers import (
     detect_platform,
-    get_available_package_managers,
-    is_tool_available,
 )
 from apm_cli.utils.install_tui import should_animate
 from apm_cli.utils.reflink import clone_file, reflink_supported
@@ -365,11 +362,6 @@ class TestReflink:
         result = reflink_supported()
         assert isinstance(result, bool)
 
-    def test_reflink_supported_respects_env_var(self):
-        """reflink_supported() respects APM_NO_REFLINK."""
-        with patch.dict(os.environ, {"APM_NO_REFLINK": "1"}):
-            assert reflink_supported() is False
-
     def test_reflink_supported_clear_env(self):
         """reflink_supported() works with clear env."""
         with patch.dict(os.environ, {"APM_NO_REFLINK": ""}, clear=False):
@@ -386,14 +378,14 @@ class TestReflink:
         assert isinstance(result, bool)
 
     def test_clone_file_respects_no_reflink(self, tmp_path: Path):
-        """clone_file() respects APM_NO_REFLINK."""
+        """APM_NO_REFLINK disables reflink support and clone_file()."""
         src = tmp_path / "source.txt"
         src.write_text("test")
         dst = tmp_path / "dest.txt"
 
         with patch.dict(os.environ, {"APM_NO_REFLINK": "1"}):
-            result = clone_file(src, dst)
-            assert result is False
+            assert reflink_supported() is False
+            assert clone_file(src, dst) is False
 
     def test_clone_file_pathlib_objects(self, tmp_path: Path):
         """clone_file() accepts Path objects."""
@@ -441,88 +433,29 @@ class TestHelpers:
             result = detect_platform()
             assert result == "windows"
 
-    def test_is_tool_available_existing(self):
-        """is_tool_available() finds existing tools."""
-        # 'python' should be available since tests are running
-        result = is_tool_available("python3")
-        assert isinstance(result, bool)
-        # Most systems have python3
-        if sys.platform != "win32":
-            assert result is True or result is False
-
-    def test_is_tool_available_nonexistent(self):
-        """is_tool_available() returns False for nonexistent tools."""
-        result = is_tool_available("_definitely_not_a_real_tool_xyz_")
-        assert result is False
-
-    def test_is_tool_available_with_path(self):
-        """is_tool_available() works with common tools."""
-        # Test with a tool that should exist
-        result = is_tool_available("ls" if sys.platform != "win32" else "dir")
-        assert isinstance(result, bool)
-
-    @patch("shutil.which")
-    def test_is_tool_available_uses_shutil_which(self, mock_which):
-        """is_tool_available() uses shutil.which first."""
-        mock_which.return_value = "/usr/bin/test"
-        result = is_tool_available("test")
-        assert result is True
-        mock_which.assert_called_once()
-
-    def test_get_available_package_managers_returns_dict(self):
-        """get_available_package_managers() returns a dictionary."""
-        result = get_available_package_managers()
-        assert isinstance(result, dict)
-
-    def test_get_available_package_managers_checks_tools(self):
-        """get_available_package_managers() checks for known tools."""
-        result = get_available_package_managers()
-        # Should check for common package managers
-        # At least one should typically be available
-        assert len(result) >= 0  # Might be 0 in minimal test environment
-
-    @patch("apm_cli.utils.helpers.is_tool_available")
-    def test_get_available_package_managers_mocked(self, mock_available):
-        """get_available_package_managers() finds mocked tools."""
-        mock_available.side_effect = lambda x: x == "pip"
-        result = get_available_package_managers()
-        assert "pip" in result
-
 
 class TestInstallTui:
     """Test install TUI animation control."""
 
-    def test_should_animate_never_mode(self):
-        """should_animate() returns False for APM_PROGRESS=never."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "never"}):
-            assert should_animate() is False
-
-    def test_should_animate_quiet_mode(self):
-        """should_animate() returns False for APM_PROGRESS=quiet."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "quiet"}):
-            assert should_animate() is False
-
-    def test_should_animate_off_mode(self):
-        """should_animate() returns False for APM_PROGRESS=off."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "off"}):
-            assert should_animate() is False
-
-    def test_should_animate_false_values(self):
-        """should_animate() returns False for 0/false/no."""
-        for val in ["0", "false", "no"]:
-            with patch.dict(os.environ, {"APM_PROGRESS": val}):
-                assert should_animate() is False
-
-    def test_should_animate_always_mode(self):
-        """should_animate() returns True for APM_PROGRESS=always."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "always"}):
-            assert should_animate() is True
-
-    def test_should_animate_true_values(self):
-        """should_animate() returns True for 1/true/yes."""
-        for val in ["1", "true", "yes"]:
-            with patch.dict(os.environ, {"APM_PROGRESS": val}):
-                assert should_animate() is True
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("never", False),
+            ("quiet", False),
+            ("off", False),
+            ("0", False),
+            ("false", False),
+            ("no", False),
+            ("always", True),
+            ("1", True),
+            ("true", True),
+            ("yes", True),
+        ],
+    )
+    def test_should_animate_progress_override(self, value, expected):
+        """APM_PROGRESS explicitly forces animation on or off."""
+        with patch.dict(os.environ, {"APM_PROGRESS": value}):
+            assert should_animate() is expected
 
     def test_should_animate_ci_environment(self):
         """should_animate() returns False in CI environment."""

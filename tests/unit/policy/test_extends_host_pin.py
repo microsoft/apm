@@ -10,12 +10,12 @@ policy's origin host and verify HTTP redirects are refused.
 from __future__ import annotations
 
 import re
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-from urllib.parse import urlparse
+from unittest.mock import patch
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 
 def _assert_extends_host_in_message(msg: str, expected_host: str) -> None:
@@ -39,23 +39,8 @@ def _assert_leaf_host_in_message(msg: str, expected_host: str) -> None:
     assert match.group(1) == expected_host
 
 
-def _assert_redirect_target_host(error: str, expected_host: str) -> None:
-    """Extract the redirect *target* URL from *error* and compare hostname.
-
-    Production format: ``Refusing HTTP redirect (NNN) from <src> to <dst>``.
-    We parse the destination URL and compare ``urlparse(...).hostname``
-    so CodeQL's ``py/incomplete-url-substring-sanitization`` rule is
-    satisfied.
-    """
-    match = re.search(r"\bto\s+(https?://\S+)", error)
-    assert match is not None, f"no redirect target URL in error: {error!r}"
-    parsed = urlparse(match.group(1).rstrip(").,;"))
-    assert parsed.hostname == expected_host
-
-
 from apm_cli.policy.discovery import (  # noqa: E402
     PolicyFetchResult,
-    _fetch_from_url,
     discover_policy_with_chain,
 )
 from apm_cli.policy.inheritance import PolicyInheritanceError  # noqa: E402
@@ -215,56 +200,3 @@ class TestExtendsHostPin:
 # ----------------------------------------------------------------------
 # Redirect refusal in _fetch_from_url
 # ----------------------------------------------------------------------
-
-
-class TestFetchFromUrlRedirectRefusal:
-    """_fetch_from_url must NOT follow HTTP redirects (SSRF / Referer leak)."""
-
-    @patch("apm_cli.policy.discovery.requests")
-    def test_fetch_from_url_disables_redirects(self, mock_requests):
-        """A 301 response is returned as fetch failure, not silently followed."""
-        import requests as real_requests
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 301
-        mock_resp.headers = {"Location": "https://attacker.example.com/leak"}
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = real_requests.exceptions
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_url(
-                "https://example.com/policy.yml",
-                Path(tmpdir),
-                no_cache=True,
-            )
-
-        # requests.get must have been invoked with allow_redirects=False.
-        call_kwargs = mock_requests.get.call_args.kwargs
-        assert call_kwargs.get("allow_redirects") is False
-
-        # Result is a fetch failure with a clear error message.
-        assert result.policy is None
-        assert result.outcome == "cache_miss_fetch_fail"
-        assert "redirect" in (result.error or "").lower()
-        _assert_redirect_target_host(result.error or "", "attacker.example.com")
-
-    @patch("apm_cli.policy.discovery.requests")
-    def test_fetch_from_url_302_also_refused(self, mock_requests):
-        """Any 3xx redirect class is refused, not just 301."""
-        import requests as real_requests
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 302
-        mock_resp.headers = {"Location": "https://other.example.com/x"}
-        mock_requests.get.return_value = mock_resp
-        mock_requests.exceptions = real_requests.exceptions
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_url(
-                "https://example.com/policy.yml",
-                Path(tmpdir),
-                no_cache=True,
-            )
-
-        assert result.policy is None
-        assert "redirect" in (result.error or "").lower()

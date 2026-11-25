@@ -17,20 +17,17 @@ from apm_cli.bundle.plugin_exporter import (
     _collect_hooks_from_root,
     _collect_mcp,
     _collect_root_plugin_components,
-    _deep_merge,
-    _deployed_path_parts,
     _get_dev_dependency_urls,
     _merge_file_map,
-    _plugin_rel_for_deployed_path,
     _reconcile_plugin_json_version,
-    _rename_prompt,
-    _update_plugin_json_paths,
-    _validate_output_rel,
+    _warn_unpacked_dependency_config,
     export_plugin_bundle,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.plugin_parser import synthesize_plugin_json_from_apm_yml
 from apm_cli.utils.content_hash import compute_file_hash
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -168,137 +165,6 @@ def _write_deployed_agent_at(project: Path, target: str, filename: str, content:
 # ---------------------------------------------------------------------------
 # Unit tests: helpers
 # ---------------------------------------------------------------------------
-
-
-class TestValidateOutputRel:
-    def test_valid_paths(self):
-        assert _validate_output_rel("agents/a.md") is True
-        assert _validate_output_rel("commands/deep/b.md") is True
-
-    def test_rejects_traversal(self):
-        assert _validate_output_rel("../escape.md") is False
-        assert _validate_output_rel("agents/../../etc/passwd") is False
-
-    def test_rejects_absolute_unix(self):
-        assert _validate_output_rel("/etc/passwd") is False
-
-    def test_rejects_absolute_windows(self):
-        assert _validate_output_rel("C:\\Windows\\System32") is False
-
-
-class TestDeployedPathParts:
-    def test_normalizes_backslashes_to_posix_parts(self):
-        assert _deployed_path_parts(".agents\\skills\\alpha\\SKILL.md") == (
-            ".agents",
-            "skills",
-            "alpha",
-            "SKILL.md",
-        )
-
-    def test_rejects_absolute_posix_path(self):
-        with pytest.raises(ValueError, match=r"absolute deployed file path"):
-            _deployed_path_parts("/etc/passwd")
-
-    def test_rejects_absolute_windows_path(self):
-        with pytest.raises(ValueError, match=r"absolute deployed file path"):
-            _deployed_path_parts("C:\\Windows\\System32\\cmd.exe")
-
-    def test_rejects_traversal_path(self):
-        with pytest.raises(ValueError, match=r"unsafe deployed file path"):
-            _deployed_path_parts(".agents/skills/../../escape")
-
-
-class TestPluginRelForDeployedPath:
-    def test_top_level_skills_honor_subset(self):
-        dep = LockedDependency(
-            repo_url="acme/skill-bundle",
-            depth=1,
-            package_type="skill_bundle",
-            skill_subset=["alpha"],
-        )
-        skill_subset = set(dep.skill_subset)
-
-        assert _plugin_rel_for_deployed_path("skills/alpha/SKILL.md", skill_subset) == (
-            "skills/alpha/SKILL.md"
-        )
-        assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", skill_subset) is None
-
-    @pytest.mark.parametrize(
-        ("deployed_path", "expected"),
-        [
-            (".agents/skills/alpha/SKILL.md", "skills/alpha/SKILL.md"),
-            (".agents/agents/helper.agent.md", "agents/helper.agent.md"),
-            (".agents/prompts/do-thing.prompt.md", "commands/do-thing.md"),
-            (".github/instructions/team.instructions.md", "instructions/team.instructions.md"),
-            (".claude/hooks/pre-commit.sh", "hooks/pre-commit.sh"),
-            (".codex/extensions/acme/manifest.json", "extensions/acme/manifest.json"),
-            (".claude/hooks.json", "hooks.json"),
-        ],
-    )
-    def test_target_deployed_paths_map_to_plugin_layout(
-        self,
-        deployed_path: str,
-        expected: str,
-    ) -> None:
-        assert _plugin_rel_for_deployed_path(deployed_path, {"alpha"}) == expected
-
-    def test_target_deployed_skills_honor_subset(self) -> None:
-        assert _plugin_rel_for_deployed_path(".agents/skills/gamma/SKILL.md", {"alpha"}) is None
-
-
-class TestRenamePrompt:
-    def test_strips_prompt_infix(self):
-        assert _rename_prompt("foo.prompt.md") == "foo.md"
-
-    def test_preserves_plain_md(self):
-        assert _rename_prompt("foo.md") == "foo.md"
-
-    def test_preserves_non_md(self):
-        assert _rename_prompt("foo.txt") == "foo.txt"
-
-
-class TestDeepMerge:
-    def test_first_wins_by_default(self):
-        base = {"a": 1, "b": 2}
-        _deep_merge(base, {"a": 99, "c": 3})
-        assert base == {"a": 1, "b": 2, "c": 3}
-
-    def test_overwrite_mode(self):
-        base = {"a": 1, "b": 2}
-        _deep_merge(base, {"a": 99, "c": 3}, overwrite=True)
-        assert base == {"a": 99, "b": 2, "c": 3}
-
-    def test_nested_first_wins(self):
-        base = {"hooks": {"preCommit": "old"}}
-        _deep_merge(base, {"hooks": {"preCommit": "new", "postCommit": "added"}})
-        assert base == {"hooks": {"preCommit": "old", "postCommit": "added"}}
-
-    def test_nested_overwrite(self):
-        base = {"hooks": {"preCommit": "old"}}
-        _deep_merge(
-            base,
-            {"hooks": {"preCommit": "new", "postCommit": "added"}},
-            overwrite=True,
-        )
-        assert base == {"hooks": {"preCommit": "new", "postCommit": "added"}}
-
-    def test_depth_limit_raises(self):
-        """Deeply nested dicts beyond _MAX_MERGE_DEPTH raise ValueError."""
-        from apm_cli.bundle.plugin_exporter import _MAX_MERGE_DEPTH
-
-        # Build two dicts nested deeper than the limit with overlapping keys
-        # so _deep_merge actually recurses on every level
-        def _nested(depth: int) -> dict:
-            d = {"leaf": True}
-            for _ in range(depth):
-                d = {"k": d}
-            return d
-
-        base = _nested(_MAX_MERGE_DEPTH + 5)
-        overlay = _nested(_MAX_MERGE_DEPTH + 5)
-
-        with pytest.raises(ValueError, match="maximum nesting depth"):
-            _deep_merge(base, overlay)
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +402,40 @@ class TestCollectMcp:
         assert _collect_mcp(tmp_path) == {}
 
 
+class TestUnpackedDependencyConfigWarning:
+    """The warning names only dependency config the bundle will not carry."""
+
+    @staticmethod
+    def _warn(tmp_path, capsys, components, *, mcp=False) -> str:
+        install_path = tmp_path / "cache"
+        hooks_dir = install_path / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "session.json").write_text(json.dumps({"hooks": {"SessionStart": []}}))
+        if mcp:
+            (install_path / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"db": {"command": "db"}}})
+            )
+        _warn_unpacked_dependency_config(
+            LockedDependency(repo_url="acme/hooky"), install_path, components
+        )
+        captured = capsys.readouterr()
+        return " ".join(f"{captured.out} {captured.err}".split())
+
+    def test_packed_hooks_file_is_not_reported(self, tmp_path, capsys):
+        packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
+        assert "acme/hooky" not in self._warn(tmp_path, capsys, packed)
+
+    def test_hook_scripts_alone_do_not_carry_the_config(self, tmp_path, capsys):
+        scripts = [(tmp_path / "run.sh", "hooks/scripts/hooky/run.sh")]
+        output = self._warn(tmp_path, capsys, scripts)
+        assert "acme/hooky contributed hooks config that is not attested" in output
+
+    def test_mcp_config_is_reported_beside_packed_hooks(self, tmp_path, capsys):
+        packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
+        output = self._warn(tmp_path, capsys, packed, mcp=True)
+        assert "acme/hooky contributed MCP config that is not attested" in output
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: devDependencies filtering
 # ---------------------------------------------------------------------------
@@ -648,57 +548,6 @@ class TestSynthesizePluginJson:
 # ---------------------------------------------------------------------------
 # Unit tests: plugin.json path updating
 # ---------------------------------------------------------------------------
-
-
-class TestUpdatePluginJsonPaths:
-    def test_strips_convention_dir_keys(self):
-        """Convention dirs are auto-discovered; keys must be absent for schema validity."""
-        pj = {"name": "test"}
-        files = ["agents/a.md", "commands/b.md"]
-        result = _update_plugin_json_paths(pj, files)
-        assert "agents" not in result
-        assert "commands" not in result
-        assert "skills" not in result
-
-    def test_strips_existing_invalid_keys(self):
-        """Pre-existing invalid convention-dir entries are stripped."""
-        pj = {"name": "test", "skills": ["skills/"], "agents": ["agents/"]}
-        files = ["agents/a.md"]
-        result = _update_plugin_json_paths(pj, files)
-        assert "skills" not in result
-        assert "agents" not in result
-        assert result["name"] == "test"
-
-    def test_warns_when_stripping_authored_keys(self):
-        """When authored plugin.json has the keys, emit a warning naming what was stripped."""
-        import logging
-
-        pj = {"name": "test", "skills": ["skills/"], "agents": ["agents/"]}
-        captured = []
-
-        class _StubLogger:
-            def warning(self, msg):
-                captured.append(msg)
-
-        _update_plugin_json_paths(pj, [], logger=_StubLogger())
-        assert len(captured) == 1
-        assert "Stripped schema-invalid keys" in captured[0]
-        assert "skills" in captured[0]
-        assert "agents" in captured[0]
-        assert "auto-discovered" in captured[0]
-        del logging  # silence unused
-
-    def test_no_warning_when_no_authored_keys(self):
-        """Synthesized manifests don't carry the keys; no warning to noise the user."""
-        pj = {"name": "test"}
-        captured = []
-
-        class _StubLogger:
-            def warning(self, msg):
-                captured.append(msg)
-
-        _update_plugin_json_paths(pj, [], logger=_StubLogger())
-        assert captured == []
 
 
 class _CapturingLogger:
@@ -1255,6 +1104,212 @@ class TestExportPluginBundle:
         content = (result.bundle_path / "agents" / "shared.agent.md").read_text()
         assert content == "from-second"
 
+    @pytest.mark.parametrize(
+        ("deps", "force", "expected"),
+        [
+            # A's Copilot rendering is dropped; B's distinct Claude agent wins.
+            (
+                [
+                    ("acme/a", [(".claude", "rv.md"), (".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                False,
+                {"agents/rv.md": ".md", "agents/rv.agent.md": ".md"},
+            ),
+            # Collision on agents/rv.agent.md: first writer (Copilot) wins.
+            (
+                [
+                    ("acme/a", [(".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                False,
+                {"agents/rv.agent.md": ".agent.md"},
+            ),
+            # --force: last writer (Claude) wins, and so does its provenance.
+            (
+                [
+                    ("acme/a", [(".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                True,
+                {"agents/rv.agent.md": ".md"},
+            ),
+        ],
+    )
+    def test_pack_records_the_winning_rendering_provenance(self, tmp_path, deps, force, expected):
+        """#3686: pack.renderings follows the final packed file, never a dropped one."""
+        project = _setup_plugin_project(tmp_path)
+        locked = []
+        for repo_url, files in deps:
+            deployed = []
+            for root, name in files:
+                deployed += _write_deployed_agent_at(project, root, name, f"{repo_url} {root}")
+            locked.append(LockedDependency(repo_url=repo_url, depth=1, deployed_files=deployed))
+        _write_lockfile(project, locked)
+
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+            result = export_plugin_bundle(project, tmp_path / "build", force=force)
+
+        pack = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())["pack"]
+        assert pack["renderings"] == expected
+
+    @pytest.mark.parametrize("copilot_first", [False, True])
+    @pytest.mark.parametrize(
+        ("claude", "copilot", "packed"),
+        [
+            ("review.md", "review.prompt.md", "review.md"),
+            # A dotted prompt stem: the Claude command keeps its own name.
+            ("review.prompt.md", "review.prompt.prompt.md", "review.prompt.md"),
+        ],
+    )
+    def test_claude_and_copilot_commands_pack_once(
+        self, tmp_path, claude, copilot, packed, copilot_first
+    ):
+        """#3686: one command rendering per primitive, the Claude one, in either lock order."""
+        project = _setup_plugin_project(tmp_path)
+        renderings = [
+            (".claude/commands", claude, "claude"),
+            (".github/prompts", copilot, "copilot"),
+        ]
+        if copilot_first:
+            renderings.reverse()
+        deployed = []
+        for root, name, body in renderings:
+            path = project / root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            deployed.append(f"{root}/{name}")
+        _write_lockfile(
+            project, [LockedDependency(repo_url="acme/cmd", depth=1, deployed_files=deployed)]
+        )
+
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning,
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as info,
+        ):
+            result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert sorted(p.name for p in (result.bundle_path / "commands").iterdir()) == [packed]
+        assert (result.bundle_path / "commands" / packed).read_text() == "claude"
+        assert not any("collision" in str(call) for call in warning.call_args_list)
+        lines = [str(call) for call in info.call_args_list if "rendering" in str(call)]
+        assert len(lines) == 1 and f".github/prompts/{copilot}" in lines[0], lines
+
+    @staticmethod
+    def _pack_deployed(tmp_path, deployed: list[tuple[str, str]]):
+        project = _setup_plugin_project(tmp_path)
+        for rel, body in deployed:
+            path = project / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        _write_lockfile(
+            project,
+            [
+                LockedDependency(
+                    repo_url="acme/dep", depth=1, deployed_files=[r for r, _ in deployed]
+                )
+            ],
+        )
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+            return export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+    @pytest.mark.parametrize(
+        "deployed",
+        [
+            [".grok/rules/py.instructions.md"],
+            [".grok/rules/py.instructions.md", ".github/instructions/py.instructions.md"],
+        ],
+    )
+    def test_grok_instructions_pack_as_the_apm_rendering(self, tmp_path, deployed):
+        """#3686: Grok Build copies instructions under their source name, not as .md."""
+        project = _setup_plugin_project(tmp_path)
+        for rel in deployed:
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text('---\napplyTo: "**/*.py"\n---\n# py\n', encoding="utf-8")
+        _write_lockfile(
+            project, [LockedDependency(repo_url="acme/dep", depth=1, deployed_files=deployed)]
+        )
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning:
+            bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+        assert [p.name for p in (bundle / "instructions").iterdir()] == ["py.instructions.md"]
+        pack = yaml.safe_load((bundle / "apm.lock.yaml").read_text())["pack"]
+        assert pack["renderings"] == {"instructions/py.instructions.md": ".instructions.md"}
+        assert not any("collision" in str(call) for call in warning.call_args_list)
+
+    @pytest.mark.parametrize("claude_first", [True, False])
+    def test_dotted_instruction_stems_keep_each_apm_rendering(self, tmp_path, claude_first):
+        """#3686: py and py.instructions both ship their APM (applyTo) rendering."""
+        claude = [
+            (".claude/rules/py.md", "claude py"),
+            (".claude/rules/py.instructions.md", "claude py.instructions"),
+        ]
+        copilot = [
+            (".github/instructions/py.instructions.md", "copilot py"),
+            (".github/instructions/py.instructions.instructions.md", "copilot py.instructions"),
+        ]
+        bundle = self._pack_deployed(
+            tmp_path, claude + copilot if claude_first else copilot + claude
+        )
+        instructions = bundle / "instructions"
+        assert sorted(p.name for p in instructions.iterdir()) == [
+            "py.instructions.instructions.md",
+            "py.instructions.md",
+        ]
+        assert (instructions / "py.instructions.md").read_text() == "copilot py"
+
+    @pytest.mark.parametrize(
+        ("rules", "shared"),
+        [
+            # Claude and Kiro rules never convert, so neither is a duplicate.
+            (
+                [(".claude/rules/py.md", "claude"), (".kiro/steering/py.md", "kiro")],
+                "instructions/py.md",
+            ),
+            # Stems rv.agent (Claude) and rv (Copilot) are two primitives.
+            (
+                [
+                    (".claude/agents/rv.agent.md", "claude"),
+                    (".github/agents/rv.agent.md", "copilot"),
+                ],
+                "agents/rv.agent.md",
+            ),
+        ],
+    )
+    def test_shared_path_without_one_primitive_reports_a_collision(self, tmp_path, rules, shared):
+        """#3686: only renderings of one primitive drop; others keep the collision report."""
+        project = _setup_plugin_project(tmp_path)
+        for rel, body in rules:
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text(body, encoding="utf-8")
+        _write_lockfile(
+            project,
+            [LockedDependency(repo_url="acme/dep", depth=1, deployed_files=[r for r, _ in rules])],
+        )
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning,
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as info,
+        ):
+            bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+        # First writer wins; the collision names the shared path.
+        assert (bundle / shared).read_text() == "claude"
+        warnings = [str(call) for call in warning.call_args_list]
+        assert any(f"{shared} -- collision" in w for w in warnings), warnings
+        assert not any("rendering" in str(call) for call in info.call_args_list)
+
+    def test_native_markdown_prompts_keep_their_stem(self, tmp_path):
+        """#3686: a Kiro prompt review.prompt.md pairs with its Claude command, not review.md."""
+        bundle = self._pack_deployed(
+            tmp_path,
+            [
+                (".claude/commands/review.prompt.md", "claude"),
+                (".kiro/prompts/review.prompt.md", "kiro"),
+            ],
+        )
+        assert sorted(p.name for p in (bundle / "commands").iterdir()) == ["review.prompt.md"]
+        assert (bundle / "commands" / "review.prompt.md").read_text() == "claude"
+
     def test_hooks_merged(self, tmp_path):
         """Root (first-party) hooks are packed; dependency cache hooks are not.
 
@@ -1420,15 +1475,23 @@ class TestExportPluginBundle:
         assert (result.bundle_path / "agents" / "root-bot.agent.md").is_file()
 
     def test_omitted_includes_with_apm_dir_skips_root_components(self, tmp_path):
-        """An omitted includes field does not weaken .apm authority."""
+        """An omitted includes field does not weaken .apm authority over root primitives.
+
+        Root skills are the exception when .apm/ authors none: a path install
+        deploys them, so the bundle carries them (#4709).
+        """
         project = _setup_plugin_project(tmp_path)
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "draft.agent.md").write_text("draft", encoding="utf-8")
         root_skills = project / "skills" / "root-skill"
         root_skills.mkdir(parents=True)
         (root_skills / "SKILL.md").write_text("# Root\n", encoding="utf-8")
 
         result = export_plugin_bundle(project, tmp_path / "build")
 
-        assert not (result.bundle_path / "skills" / "root-skill").exists()
+        assert not (result.bundle_path / "agents" / "draft.agent.md").exists()
+        assert (result.bundle_path / "skills" / "root-skill" / "SKILL.md").is_file()
 
     def test_explicit_includes_are_exhaustive(self, tmp_path):
         """An explicit path list packs no unlisted local primitives."""
@@ -1673,6 +1736,57 @@ class TestExportPluginBundle:
             "Move plugin-native content into .apm/, or remove .apm/ to restore "
             "root convention discovery.",
         ]
+
+    def test_root_skills_ship_when_apm_dir_authors_no_skill(self, tmp_path):
+        """A path install deploys root skills beside .apm/; the bundle carries them too."""
+        project = _setup_plugin_project(tmp_path, instructions=["style.instructions.md"])
+        skill = project / "skills" / "review"
+        (skill / "refs").mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: review\n---\nbody\n", encoding="utf-8")
+        (skill / "refs" / "guide.md").write_text("guide\n", encoding="utf-8")
+        captured: list[str] = []
+
+        class _StubLogger:
+            def info(self, message, symbol=None):
+                pass
+
+            def warning(self, message):
+                captured.append(message)
+
+        result = export_plugin_bundle(project, tmp_path / "build", logger=_StubLogger())
+
+        assert (result.bundle_path / "skills" / "review" / "SKILL.md").is_file()
+        assert (result.bundle_path / "skills" / "review" / "refs" / "guide.md").is_file()
+        assert (result.bundle_path / "instructions" / "style.instructions.md").is_file()
+        assert not any("root-level skills/" in message for message in captured), captured
+
+    @pytest.mark.parametrize("marker", ["directory", "dangling-link"])
+    def test_a_non_file_skill_marker_under_apm_does_not_hide_root_skills(self, tmp_path, marker):
+        project = _setup_plugin_project(tmp_path, instructions=["style.instructions.md"])
+        stub = project / ".apm" / "skills" / "draft" / "SKILL.md"
+        stub.parent.mkdir(parents=True)
+        if marker == "directory":
+            stub.mkdir()
+        else:
+            stub.symlink_to(tmp_path / "missing.md")
+        skill = project / "skills" / "review"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: review\n---\nbody\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "skills" / "review" / "SKILL.md").is_file()
+
+    def test_root_skills_stay_skipped_when_apm_dir_authors_skills(self, tmp_path):
+        project = _setup_plugin_project(tmp_path, skills={"published": ["SKILL.md"]})
+        draft = project / "skills" / "draft"
+        draft.mkdir(parents=True)
+        (draft / "SKILL.md").write_text("draft\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "skills" / "published" / "SKILL.md").is_file()
+        assert not (result.bundle_path / "skills" / "draft").exists()
 
     def test_empty_apm_dir_warns_when_no_local_primitives_exist(self, tmp_path):
         """An empty APM-native layout explains how to recover."""

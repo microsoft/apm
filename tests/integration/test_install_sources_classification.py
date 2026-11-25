@@ -101,7 +101,8 @@ class TestMaterialization:
             install_path=tmp_path,
             dep_key="owner/repo",
         )
-        assert m.deltas == {"installed": 1}
+        # A local copy is not a fetch; integration decides installed (#4184).
+        assert m.deltas == {"installed": 0}
 
     def test_custom_deltas(self, tmp_path):
         m = Materialization(
@@ -175,7 +176,7 @@ class TestLocalDependencySourceUserScope:
         source = LocalDependencySource(ctx, dep_ref, tmp_path / "pkg", "owner/repo")
         result = source.acquire()
         assert result is None
-        ctx.diagnostics.warn.assert_called_once()
+        ctx.diagnostics.error.assert_called_once()
 
     def test_rejects_empty_local_path_at_user_scope(self, tmp_path):
         from apm_cli.install.sources import LocalDependencySource

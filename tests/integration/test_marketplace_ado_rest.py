@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -77,7 +78,10 @@ def test_fetch_marketplace_ado_uses_rest_and_then_sidecar_cache(monkeypatch) -> 
     calls: list[tuple[str, dict]] = []
 
     def fake_get(url, headers=None, timeout=None, **kwargs):
-        calls.append((url, dict(headers or {})))
+        sent = SimpleNamespace(headers=dict(headers or {}))
+        if callable(kwargs.get("auth")):
+            kwargs["auth"](sent)
+        calls.append((url, sent.headers))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
     with patch("apm_cli.marketplace.client._http_get", side_effect=fake_get):

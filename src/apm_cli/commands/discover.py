@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,10 @@ def discover_options(command: Any) -> Any:
                 "--write",
                 "write",
                 is_flag=True,
-                help="Add existing local package references to consumer apm.yml; never install.",
+                help=(
+                    "Add existing local package references to consumer apm.yml "
+                    "(implies --discover); never install."
+                ),
             ),
             click.option(
                 "--format",
@@ -64,7 +66,10 @@ def run_discover(
                     "Unsafe paths or install identity collisions found. Repair the listed inputs and retry."
                 )
             if not yes:
-                if not sys.stdin.isatty() or output_format != "text":
+                from apm_cli.commands.auth import is_interactive
+
+                # APM_NON_INTERACTIVE and CI forbid a prompt even on a console (#4411).
+                if not is_interactive() or output_format != "text":
                     raise click.ClickException(
                         "Applying discovery requires consent. Review --discover, then rerun --apply --yes."
                     )

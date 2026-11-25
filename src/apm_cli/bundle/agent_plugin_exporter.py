@@ -9,6 +9,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
 from ..agent_plugins import (
     MCP_SCHEMA_ID,
     PLUGIN_SCHEMA_ID,
@@ -20,12 +22,20 @@ from ..agent_plugins import (
     load_agent_plugin,
     url_contains_literal_secret,
 )
+from ..core.remediation import (
+    AGENT_PLUGIN_MCP_UNPORTABLE,
+    AGENT_PLUGIN_SURFACES_DROPPED,
+    PACK_DEPENDENCY_UNATTESTED,
+    PACK_LOCKFILE_MISSING,
+    PACK_SKILL_SUBSET_MISSING,
+)
 from ..deps.lockfile import (
     LockFile,
     resolve_lockfile_path_for_read,
     resolve_reproducible_timestamp,
 )
 from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
+from ..deps.plugin_root_render import contains_plugin_root
 from ..models.apm_package import APMPackage
 from ..utils.archive import (
     projected_archive_path,
@@ -34,8 +44,8 @@ from ..utils.archive import (
 from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import ensure_path_within, safe_rmtree
+from .credential_files import refuse_credential_files
 from .export_common import (
-    _cache_would_contribute_hooks_or_mcp,
     _cache_would_contribute_primitives,
     _collect_apm_components,
     _collect_deployed_components,
@@ -47,8 +57,10 @@ from .export_common import (
     _sanitize_bundle_name,
     _scan_bundle_sources,
     _warn_no_local_primitives,
+    _warn_parked_executables,
     _warn_skipped_root_components,
     _warn_skipped_source_links,
+    _warn_unpacked_dependency_config,
     _write_bundle_sources,
 )
 from .formats import BundleFormat, agent_plugin_warning
@@ -91,13 +103,12 @@ def _require_portable_agent_plugin(dropped_surfaces: set[str]) -> None:
     legacy_surfaces = sorted(dropped_surfaces - {"lsp"})
     if legacy_surfaces:
         message += (
-            " Use 'apm pack --format claude-plugin' to preserve "
-            f"{', '.join(legacy_surfaces)} in the legacy Claude client format."
+            " " + AGENT_PLUGIN_SURFACES_DROPPED.bind(surfaces=", ".join(legacy_surfaces)).sentence()
         )
     if "lsp" in dropped_surfaces:
         message += (
-            " LSP configuration is carried by neither 'agent-plugin' nor "
-            "'claude-plugin'; configure LSP in the target client instead."
+            " LSP servers are not carried by 'agent-plugin'; pack with "
+            "'--format claude-plugin', which writes them to the bundle's .lsp.json."
         )
     raise ValueError(message)
 
@@ -165,6 +176,13 @@ def _agent_mcp_document(package: APMPackage, lockfile: LockFile) -> dict:
             continue
         if not isinstance(raw_config, dict):
             raise ValueError(f"Cannot pack MCP server {name!r}: resolved config is not an object")
+        if contains_plugin_root(raw_config):
+            raise ValueError(
+                f"Cannot pack MCP server {name!r}: it runs files from its Claude plugin "
+                "package through ${CLAUDE_PLUGIN_ROOT}, which Agent Plugins v1 does not "
+                "resolve and this bundle does not include. Have consumers install that "
+                "plugin as their own dependency instead."
+            )
 
         transport = str(raw_config.get("transport") or raw_config.get("type") or "").lower()
         if transport == "http":
@@ -177,7 +195,7 @@ def _agent_mcp_document(package: APMPackage, lockfile: LockFile) -> dict:
             raise ValueError(
                 f"Cannot pack MCP server {name!r}: transport {transport or '<missing>'!r} "
                 "is not representable by Agent Plugins v1. Use a portable stdio, "
-                "streamable-http, or sse config, or run 'apm pack --claude-plugin'."
+                f"streamable-http, or sse config, or {AGENT_PLUGIN_MCP_UNPORTABLE.clause()}."
             )
 
         projected = {"type": transport}
@@ -192,8 +210,8 @@ def _agent_mcp_document(package: APMPackage, lockfile: LockFile) -> dict:
         ):
             raise ValueError(
                 f"Cannot pack MCP server {name!r}: secret-shaped environment, header, URL, "
-                "or argument values must use ${VAR} references. Replace the literal secret or run "
-                "'apm pack --claude-plugin'."
+                "or argument values must use ${VAR} references. Replace the literal secret, "
+                f"or {AGENT_PLUGIN_MCP_UNPORTABLE.clause()}."
             )
         servers[str(name)] = projected
 
@@ -307,13 +325,19 @@ def export_agent_plugin_bundle(
     """Export the project as an Agent Plugin bundle."""
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
-    if lockfile is None:
-        raise FileNotFoundError(
-            "apm.lock.yaml not found -- run 'apm install' first to resolve dependencies."
-        )
-
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     package = APMPackage.from_apm_yml(apm_yml_path)
+    if lockfile is None:
+        # Nothing to resolve: a fresh 'apm plugin init' scaffold packs as is,
+        # like the Claude plugin format (#3994).
+        if (
+            package.get_apm_dependencies()
+            or package.get_mcp_dependencies()
+            or package.get_lsp_dependencies()
+        ):
+            raise FileNotFoundError(f"apm.lock.yaml not found -- {PACK_LOCKFILE_MISSING.clause()}.")
+        lockfile = LockFile()
+
     pkg_name = package.name
     pkg_version = package.version or "0.0.0"
 
@@ -355,6 +379,7 @@ def export_agent_plugin_bundle(
 
             dep_name = dep.repo_url
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger, format_carries=False)
             if dep.deployed_files:
                 dep_components, dep_dropped = _portable_components(
                     _collect_deployed_components(project_root, dep)
@@ -365,30 +390,19 @@ def export_agent_plugin_bundle(
                     raise ValueError(
                         f"Cannot pack dependency {dep.repo_url}: the skills recorded "
                         f"in apm.lock.yaml (skill_subset: {declared_skills}) were not "
-                        "found among its installed files. Run 'apm install' to "
-                        "re-deploy the expected skills, then pack again."
+                        f"found among its installed files. {PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
             elif _cache_would_contribute_primitives(install_path, dep):
                 raise ValueError(
                     f"Cannot pack dependency {dep.repo_url}: the lockfile records no "
                     "deployed files for it, but installed content that cannot be "
                     "verified exists in the apm_modules cache (a stale or partial "
-                    "install). Run 'apm install' to record provenance in apm.lock.yaml, "
-                    "then pack again."
+                    f"install). {PACK_DEPENDENCY_UNATTESTED.sentence()}"
                 )
             else:
                 dep_components = []
 
-            if _cache_would_contribute_hooks_or_mcp(install_path):
-                _warn = (
-                    f"dependency {dep.repo_url} contributed hooks/MCP config that is "
-                    "not attested in apm.lock.yaml; it will NOT be packed. "
-                    "Attested primitives (skills/agents/etc.) are unaffected."
-                )
-                if logger:
-                    logger.warning(_warn)
-                else:
-                    _rich_warning(_warn, symbol="warning")
+            _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
@@ -442,6 +456,7 @@ def export_agent_plugin_bundle(
         else:
             _rich_warning(msg)
 
+    refuse_credential_files(file_map)
     output_files = sorted(file_map.keys())
     output_files.append("mcp.json")
     output_files.append("plugin.json")

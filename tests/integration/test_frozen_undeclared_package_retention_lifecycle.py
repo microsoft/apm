@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from apm_cli.core.remediation import ORPHANED_PACKAGES
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._lockfile_chain_kit import build_kit, output, tree
 
@@ -18,6 +19,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 _KEPT = (
@@ -39,7 +41,7 @@ def test_frozen_keeps_undeclared_package_until_normal_install(tmp_path, apm_bina
         frozen = kit.run("install", "--no-policy", "--frozen")
         text = output(frozen)
         assert frozen.returncode == 0, text
-        assert _KEPT in text and "Run 'apm install' to remove them." in text, text
+        assert _KEPT in text and ORPHANED_PACKAGES.sentence() in text, text
         assert tree(project) == before
         assert (project / "apm_modules/test/kit").is_dir()
 

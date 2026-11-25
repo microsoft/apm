@@ -10,11 +10,13 @@ Covers:
 
 import json
 import os
+import re
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.marketplace.version_pins import (
+    RefPinStoreError,
     _pin_key,
     _pins_path,
     check_ref_pin,
@@ -55,19 +57,14 @@ class TestLoadRefPins:
         assert "expected but missing" in caplog.text
         assert "ref-swap detection is disabled" in caplog.text
 
-    def test_load_corrupt_json(self, tmp_path):
-        """Corrupt JSON returns empty dict without raising."""
+    @pytest.mark.parametrize("content", ["{not valid json!!!", '["a list", "not a dict"]'])
+    def test_an_unreadable_pins_file_fails_closed(self, tmp_path, content):
+        """Corrupt or non-object JSON refuses instead of disabling detection."""
         path = tmp_path / "version-pins.json"
-        path.write_text("{not valid json!!!")
-        result = load_ref_pins(pins_dir=str(tmp_path))
-        assert result == {}
-
-    def test_load_non_dict_json(self, tmp_path):
-        """JSON that is not an object returns empty dict."""
-        path = tmp_path / "version-pins.json"
-        path.write_text('["a list", "not a dict"]')
-        result = load_ref_pins(pins_dir=str(tmp_path))
-        assert result == {}
+        path.write_text(content)
+        with pytest.raises(RefPinStoreError, match="delete it to start a new record"):
+            load_ref_pins(pins_dir=str(tmp_path))
+        assert path.read_text() == content
 
     def test_load_valid(self, tmp_path):
         """Valid JSON is returned as-is."""
@@ -206,11 +203,13 @@ class TestPinsPath:
         result = _pins_path(pins_dir=str(tmp_path))
         assert result == os.path.join(str(tmp_path), "version-pins.json")
 
-    def test_default_dir(self):
-        """Default path (no pins_dir) includes version-pins.json under CONFIG_DIR."""
-        with patch("apm_cli.config.CONFIG_DIR", "/fake/.apm"):
-            result = _pins_path(pins_dir=None)
-        assert result == os.path.join("/fake/.apm", "cache", "marketplace", "version-pins.json")
+    def test_default_dir_follows_apm_home_at_call_time(self, tmp_path, monkeypatch):
+        """Default path (no pins_dir) is under the APM_HOME in effect for the call."""
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        result = _pins_path(pins_dir=None)
+        assert result == os.path.join(
+            str(tmp_path / "home"), "cache", "marketplace", "version-pins.json"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +224,7 @@ class TestAtomicWrite:
         """os.replace is called to atomically move the temp file."""
         pins = {"mkt/plug": "ref1"}
 
-        with patch("apm_cli.marketplace.version_pins.os.replace", wraps=os.replace) as mock_replace:
+        with patch("os.replace", wraps=os.replace) as mock_replace:
             save_ref_pins(pins, pins_dir=str(tmp_path))
             mock_replace.assert_called_once()
             args = mock_replace.call_args[0]
@@ -252,12 +251,12 @@ class TestFailOpen:
         bad_dir = "/dev/null/impossible"
         save_ref_pins({"k": "r"}, pins_dir=bad_dir)
 
-    def test_check_with_corrupt_file_returns_none(self, tmp_path):
-        """check_ref_pin with corrupt file returns None (no warning)."""
+    def test_check_with_corrupt_file_refuses(self, tmp_path):
+        """check_ref_pin with a corrupt file refuses the install."""
         path = tmp_path / "version-pins.json"
         path.write_text("CORRUPT!!!")
-        result = check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
-        assert result is None
+        with pytest.raises(RefPinStoreError, match=re.escape(str(path))):
+            check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
 
     def test_check_with_non_string_plugin_entry(self, tmp_path):
         """If the plugin entry is not a string, return None gracefully."""
@@ -266,3 +265,85 @@ class TestFailOpen:
         path.write_text(json.dumps(data))
         result = check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
         assert result is None
+
+
+def test_an_unreadable_pins_file_refuses_a_marketplace_resolution(tmp_path):
+    """The resolver's pin gate refuses rather than staging an unchecked ref."""
+    from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
+
+    path = tmp_path / "version-pins.json"
+    path.write_text("{truncated")
+    stage = open_ref_pin_stage()
+    try:
+        with pytest.raises(RefPinStoreError, match=re.escape(str(path))):
+            enforce_ref_pin("mkt", "plug", "v1", pins_dir=str(tmp_path))
+        assert stage.keys() == frozenset()
+    finally:
+        stage.discard()
+    assert path.read_text() == "{truncated"
+
+
+def test_a_github_enterprise_pin_identity_ignores_owner_and_repo_case(tmp_path):
+    """Re-registering a GitHub catalog with another case keeps its pins (#5169)."""
+    from apm_cli.marketplace.models import MarketplaceSource
+    from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+    upper = catalog_pin_identity(MarketplaceSource(name="a", url="https://acme.ghe.com/Org/Repo"))
+    lower = catalog_pin_identity(MarketplaceSource(name="a", url="https://acme.ghe.com/org/repo"))
+    other = catalog_pin_identity(
+        MarketplaceSource(name="a", url="https://gitlab.example.com/Org/Repo")
+    )
+    assert upper == lower
+    assert "Org/Repo" in other
+    (tmp_path / "version-pins.json").write_text(
+        json.dumps({"acme.ghe.com/Org/Repo:marketplace.json#tool/1.0.0": "v1"})
+    )
+    assert check_ref_pin("a", "tool", "v2", "1.0.0", str(tmp_path), catalog=lower) == "v1"
+
+
+def test_a_hosted_catalog_query_never_reaches_the_pins_file(tmp_path):
+    """A hosted catalog URL's query is hashed in its pin key, never persisted (#5169)."""
+    from apm_cli.marketplace.models import MarketplaceSource
+    from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+    def identity(query: str) -> str:
+        url = f"https://example.com/x/marketplace.json?{query}"
+        return catalog_pin_identity(MarketplaceSource(name="a", url=url, path=""))
+
+    catalog = identity("token=s3cret")
+    assert "s3cret" not in catalog
+    assert catalog != identity("token=other")
+    legacy = "url:example.com/x/marketplace.json?token=s3cret#tool/1.0.0"
+    (tmp_path / "version-pins.json").write_text(json.dumps({legacy: "v1"}))
+    assert check_ref_pin("a", "tool", "v2", "1.0.0", str(tmp_path), catalog=catalog) == "v1"
+
+    record_ref_pin("a", "tool", "v1", "1.0.0", str(tmp_path), catalog=catalog)
+
+    assert "s3cret" not in (tmp_path / "version-pins.json").read_text()
+    assert load_ref_pins(str(tmp_path)) == {f"{catalog}#tool/1.0.0": "v1"}
+
+
+def test_a_pins_lock_that_cannot_be_taken_skips_advisory_writes_and_fails_strict_ones(
+    tmp_path,
+):
+    """An unavailable pins lock never fails a committed install; adoption refuses (#5169)."""
+    from apm_cli.marketplace.version_pins import (
+        RefPinWriteError,
+        adopt_alias_ref_pins,
+        open_ref_pin_stage,
+    )
+
+    pins_dir = str(tmp_path)
+    save_ref_pins({"mkt/plug/1.0.0": "v1"}, pins_dir)
+    (tmp_path / "version-pins.lock").mkdir()
+    before = (tmp_path / "version-pins.json").read_bytes()
+    stage = open_ref_pin_stage()
+    stage.add("mkt", "other", "v2", "1.0.0", catalog="cat")
+
+    stage.commit(pins_dir=pins_dir)
+    record_ref_pin("mkt", "plug", "v3", "1.0.0", pins_dir)
+
+    assert (tmp_path / "version-pins.json").read_bytes() == before
+    with pytest.raises(RefPinWriteError):
+        adopt_alias_ref_pins("mkt", "cat", pins_dir)
+    assert (tmp_path / "version-pins.json").read_bytes() == before
