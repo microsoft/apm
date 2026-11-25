@@ -345,3 +345,9 @@
 07:38 | Bets: A3 ratio/B/combined on c2 heads -> doc marked pending; clean re-measure on ea0ec45e (B b50d8097) gated on audit | audit+clean ~08:20 | W+L restate
 07:40 | no-c2 stack VERIFIED (provisional pending audit): W 0.702 [45558776176] ~7.4 s at line; L 0.875 [45558797634] ~5.3 s; M 0.717; c2-copyfile 0.965 = M2 -> nlink was whole c2 gain; Lane N oracles re-run on no-c2 heads; mode added to final audit | audit ~08:15, clean ~08:20 | W+L restate
 07:41 | doc v4.0 summary rewritten (no-c2, correction stated plainly, W 2/4 classes over, L ~5.3 s, M2 killed, regent L milestone restatement requested); pending audit | audit ~08:15 | none
+07:41 | VP approved v4.0 summary; L milestone ruling sent to regent, default (~5.3 s measured) stands if no answer by 11:00 | audit ~08:15; regent by 11:00 | none
+07:42 | regent ruling 07:43 into section 6 verbatim (L ~5.3 s milestone, NS 3.5 unchanged, W at line, c2 strike note); summary placeholder replaced; conditional on audit | audit ~08:15 | alert VP if W crosses 7.5
+07:52 | CEO ORDER: 0.39 frozen, bugfix + red teaming; doc minimum effort. SoL -> red-team #5382; Bets -> #5377/#5372/#5366/#5368 after audit read; reports 08:30 then 30 min | audit ~08:15 -> publish; red-team 08:30 | none
+07:52 | red-team de-dupe: SoL/Bets file into QL redteam-0.39.md; target RC 42878803+#5426; security finds private+neutral issue; SoL narrowed to #5382 proof-lifetime (W3d RT1 owns rest), Bets monorepo; lanes RT5/RT6 declared in plan | reports 08:30 | none
+07:53 | CEO load order: SoL/Bets paused local, CI-only; host load 39; top consumers QL RT4 pytest + apm install -g regent (not mine); VP told | reports 08:30 | none
+07:54 | audit verified (no-c2 L/W heads pass on non-policy fixtures); clean Lane N + prompts rows hold; doc FINAL

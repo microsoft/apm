@@ -1,7 +1,7 @@
-# APM v0.40.0 -- "5x of floor" install architecture (REVIEW COPY v1)
+# APM v0.40.0 -- "5x of floor" install architecture (FINAL)
 
 Owner: [PERF] Lead, Perf Architecture Research. Co-signers: W3d (security), PERF VP.
-Status: REVIEW COPY v1, assembled 2026-11-25 ~03:40 CET from section files (SoL perf-sol-notes; Bets bets-notes 97d78531). Due WED 12:00 CET.
+Status: FINAL, published 2026-11-25 ~08:10 CET (VP review edits closed; c2 struck 07:30 and every headline restated on output-verified heads; regent ruling 07:43 in section 6). Sources: SoL perf-sol-notes; Bets bets-notes.
 Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 684 deployed files).
 
 ## 0. Summary
@@ -17,7 +17,7 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
   - The in-process fetch emits a per-package manifest (path, mode, content hash, primitive class).
   - Integrate consumes the manifest, with no re-walk, re-hash or re-classify. (Materialize-once, M2, was dropped: ~3-6% at most.)
   - Containment is proved by construction for APM-created trees.
-- **Result** (stacked measured ceiling WITHOUT c2, one head per OS, unsafe upper bounds; PENDING the deployed-output audit of the same heads):
+- **Result** (stacked measured ceiling WITHOUT c2, one head per OS, unsafe upper bounds; OUTPUT-VERIFIED by render diff vs base: L ea0ec45e [45561435137], W 288927c8 [45561584579]. tree-10-mcp and tree-10-multi are byte-identical; monorepo-4 differs only by the #5418 tmp-path class; tree-50-policy cannot run on either side (harness POLICY_DOCUMENT defect); tree-50 is identical by elimination, because the per-fixture line was cut by log truncation; a path+mode+bytes re-run confirms it):
   - **Correction, stated plainly:** the earlier headline (W ~6.0 s "at target", L ~4.3 s) was INFLATED by an invalid bound. c2 (hardlink materialize) was fast because it skipped deploys: find_files_by_glob (base_integrator.py:1636-1639) skips files with st_nlink > 1, so every globbed primitive went undeployed. Found by E1 07:30 CET; c2 is struck, and so is every head that stacked it.
   - **W ~7.4 s on 9V74, AT the target line with no margin; 2 of 4 runner classes over (8573C, 7763).** W 288927c8 vs main+#5374 cc5aac78: 0.702, 18/18 [45558776176]. 10.53 s CPU base x 0.702 = 7.4 s. Per class: 9V45 ~5.6, 9V74 ~7.4, Xeon 8573C ~8.0, EPYC 7763 ~10.2-10.6.
     - Calibration: default-schannel world, main+#5374, cold t50, direct per-VM runs [45534359514]; base = CPU p50 (cpu_p50_s), not wall (wall p50 on 9V74 is 12.26 s). CPU base x paired CPU ratio keeps the units consistent.
@@ -26,7 +26,7 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
   - M 0.717 [45558819800].
   - Materialize-once (Car 2, M2) is KILLED on the merits: a faithful single write reads W 0.979 / L 0.965 / M 0.891, and c2 with real copies (no hardlink) reads L 0.965 [45558963877]. So the hardlink skip was the whole c2 gain.
 - **Native-core gate on Linux:** read as MET (walk+stat+hash+copy = 45% of L CPU [45520769932 / 45530101839]) but SUPERSEDED: that attribution counted fs-named Python frames, not syscall CPU. Zero-cost oracles free ~5%, and Lane N was KILLED (section 8).
-- **Linux bar (REGENT RULING):** L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured L milestone, ruled at ~4.3 s on the c2-inflated stack; the output-verified stack reads ~5.3 s (restatement requested from the regent). A native fs-op core was a 48 h research lane (Lane N), KILLED WED 05:12 (section 8). No measured Python path reaches 3.5 s (section 7-8).
+- **Linux bar (REGENT RULING):** L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at the measured, output-verified stack, ~5.3 s (restated from ~4.3 s after the c2 strike; regent 07:43, section 6). A native fs-op core was a 48 h research lane (Lane N), KILLED WED 05:12 (section 8). No measured Python path reaches 3.5 s (section 7-8).
 
 ## 1. Physics floor per phase on main (PERF-SOL)
 
@@ -457,13 +457,13 @@ W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
   - one lock per proof publish.
 - None changes the order of the measured ceilings (integrate ceiling W 0.718 on main + #5374; stacked W 0.568).
 
-## 6. Linux bar -- REGENT RULING (approved, via PERF VP 03:25 CET)
-"L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured ~4.3 s L milestone."
-- Measured basis: the stacked ceiling, L 0.701, ~4.3 s on 9V74 [45530064444].
-- The native-core gate read as MET: walk+stat+hash+copy = 45% of L CPU (65% with realpath; hash 0.2%) [45520769932 / 45530101839]. Superseded: that gate counted fs-named Python frames, not syscall CPU; the zero-cost oracles free ~5% (section 8).
-- The native filesystem-op core is a RESEARCH lane (Lane N, section 7). It is not part of the v0.40 commitment.
-- Alternative considered, not chosen: revise the L bar to ~4.3 s with no native lane.
-W: stacked ceiling 0.568 vs main+#5374 [45532025700]; ~6.0 s on 9V74 (schannel calibration [45534359514]): AT the 7.5 s target. On the slowest runner class (7763) it is ~8.3-8.6 s.
+## 6. Targets -- REGENT RULING (restated 07:43 CET 25 Nov, via PERF VP; supersedes the 03:25 ruling)
+Output audit PASSED on the no-c2 heads (L ea0ec45e [45561435137], W 288927c8 [45561584579]; see section 0), so the numbers below stand as measured.
+- v0.40 L milestone = "the measured, output-verified stack, ~5.3 s (restated from ~4.3 s after the c2 strike)". Basis: L ea0ec45e vs main 0.875 [45558797634].
+- L <= 3.5 s North Star unchanged, no measured path (v0.41+ research).
+- W <= 7.5 s target unchanged: "at the line, no margin, 2 of 4 runner classes over". Basis: W 288927c8 vs main+#5374 0.702 [45558776176]; ~7.4 s on 9V74 (schannel CPU calibration [45534359514]).
+- Strike note: the 03:25 ruling's ~4.3 s L basis (stacked 0.701) and the W 0.568 (~6.0 s) are WITHDRAWN; they included c2, a hardlink bound that skipped deploying every globbed primitive (nlink guard, base_integrator.py:1636-1639).
+- The native fs-op core research lane (Lane N) was KILLED WED 05:12 (section 8); the 45% native-core gate was superseded (it counted fs-named Python frames, not syscall CPU).
 
 ## 7. Build plan (PERF-Bets; owners per PERF VP)
 
@@ -601,7 +601,7 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
 - Native shape: returns DATA only; policy stays in the Python owners. Proved by a side-by-side differential build. W3d ruling before any code.
 
 ### Replacement North Star research: interpreter + import deletion (FINDING, 04:49 CET; VP-verified)
-- **PENDING CLEAN RE-MEASURE (07:40 CET):** every row in this subsection (A3 fork, B, COMBINED) and the deletion map below ran on c2 heads (d3881480 / 6d67f5aa), which skip globbed primitives (nlink guard). Fork == sub digests compared two c2 runs, not base. A3's absolute import deletion (-0.55..-0.82 s L) should transfer; its RATIO and the B/COMBINED/deletion-map rows are suspect. Re-measure on the no-c2 head ea0ec45e (B cherry-pick b50d8097), gated on ea0ec45e passing the output audit.
+- **MEASURED ON c2 HEADS (07:40 CET; Bets' clean re-measure on b50d8097 is not folded into this doc, per the CEO 07:55 scope freeze):** every row in this subsection (A3 fork, B, COMBINED) and the deletion map below ran on c2 heads (d3881480 / 6d67f5aa), which skip globbed primitives (nlink guard). Fork == sub digests compared two c2 runs, not base. A3's absolute import deletion (-0.55..-0.82 s L) should transfer; its RATIO and the B/COMBINED/deletion-map rows are suspect. Direction-safe: without c2 L is higher, so 'no measured path to 3.5 s' only strengthens. The M2 6-pair control confirms the M2 kill: L 0.960 / W 0.975 [45560564083 / 45560599802].
 - Fork-server oracle (a parent pre-imports all apm_cli + deps, then forks one child per cold install; only the child's wait4 CPU is measured), stacked L/M head d3881480, tree-50, 6 pairs per shard, 3 shards. Rows are `| ORACLE |` lines in the "Lane-N replacement probe (research)" step (harness perf-research/arch-lanen-probe3 @ 3655346e):
   - L [45541271380]: 0.826 (4.561 -> 3.744 s) / 0.807 (3.152 -> 2.551) / 0.806 (2.894 -> 2.346); median 0.807; per-shard absolute -0.55..-0.82 s.
   - M [45541286025]: 0.862 / 0.897 / 0.883; median 0.883.
@@ -633,6 +633,7 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
   - O-resolve (every Path.resolve / os.path.realpath lexical): L 0.956 [45534288568] / W 0.954 [45534253181] / M 0.916 [45534321911]; ~0.19 s L at 9V74.
   - O-walk2 (os.walk / scandir / listdir / glob / rglob served at zero cost in integrate): L 0.992 [45538269139] / W 0.987 [45538289388] / M 1.026 [45538306906]; ~0.03 s L at 9V74.
   - Both are below the 0.5 s L bar.
+  - Re-measured on CLEAN no-c2 heads (output-audited): O-walk2 L 1.005 / W 0.992 [45562019449 / 45562066339]; O-resolve L 0.969 (~0.17 s at 9V74) / W 0.970 (~0.22 s) [45562045355 / 45562104590]. The kill holds on clean heads.
   - O-TIME whole-run absolute bound [45543605433] (per-thread CPU INSIDE every walk/scandir/listdir/glob/rglob/iterdir/stat/lstat/exists/is_* primitive, 3 runs per OS, stacked head):
     - L 0.48-0.50 s of a 2.7-3.7 s process (13-18%); ~80k calls from ~100 call sites; the largest single family is lstat (realpath chains) at 0.09 s / 27.9k calls.
     - M 1.02-1.27 s (16-19%); W 1.53-1.72 s (19-27%).
@@ -644,6 +645,7 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
   - post-fetch route_agent_plugin_package + carry_licenses deleted (ac71b23b): 0.988 [45546139343].
   - The best single owner is ~1.2% = ~0.05 s L at 9V74. Inclusive profile shares (e.g. prompt_integrator 11.8%) hosted shared per-package work and freed ~0 when deleted.
   - What remains: the network floor (auth/ref listing ~17%), one write per file, imports (sized by fork: 0.807), and per-file Python spread over ~100 call sites.
+  - Clean re-run of the prompts+commands row on a no-c2 B head (0e4d469d, which itself passes the audit; B vs ea0ec45e = 0.982 [45561308612]): 0.960 (~0.21 s at 9V74) [45561291006]. Still below the bar.
   - **No third bet: the honest end of v0.40 research.** L <= 3.5 s stays the North Star with no measured path; v0.41+ research.
   - Kept as a candidate, not a lane: on W the whole fs-primitive layer is ~1.2-1.6 s at 9V74 (Windows stat/exists cost 2-3x more). That is a possible future W-only many-call-site redesign. W is already at target, so it is not a v0.40 item.
 - **Lessons:**
