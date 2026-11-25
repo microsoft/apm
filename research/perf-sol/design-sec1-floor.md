@@ -54,27 +54,21 @@ apm plus children) measured on CI. Nothing was measured locally.
 ## Materialization re-measured on main (resolve+fetch row): the copy into apm_modules
 Today, per file: the in-process fetch writes the cache checkout; `robust_copy_entry` copies it into
 apm_modules (github_downloader.py:1922-1926); `require_verified_copy` re-reads and re-verifies the copy (:1927).
-Paired 6 pairs on main 1e4a208e, anon, t50:
-| stub (research only) | cold W | cold L | cold M | warm W | warm L | runs (cold W/L/M; warm W/L) |
-|---|---|---|---|---|---|---|
-| (c1) hardlink instead of copy, verify kept (UNSAFE, upper bound only; W3d M3 rejected) | 0.832 | 0.832 | 0.850 | 0.838 | 0.827 | 45527826943 / 45527848039 / 45527865311; 45527994568 / 45528022070 |
-| (c2) hardlink, no re-verify = one write per file (M2 / fetch-to-final-tree upper bound) | 0.802 | 0.817 | 0.856 | 0.833 | 0.794 | 45527883690 / 45527902064 / 45527922103; 45527956593 / 45527977857 |
-- The second copy plus its re-verify is **15-20% of cold on every OS** (~1.0-1.1 s L, ~2.2-2.6 s W at 9V74)
-  and **16-21% of warm**. The re-verify alone is ~1.5-3% (c1 vs c2).
-- Per file that is ~1.4 ms L / ~3.5 ms W against a raw write of 16 / 67 us: the cost is Python per-file
-  copy machinery (copytree, copy2, copystat, robust wrappers), not bytes. That is why macOS (APFS, where
-  a clone could be cheap) shows the same ~15%.
-- Shapes (W3d w3d:ruling:materialize-once):
-  - **M2, cache = objects only, fetch writes the final tree** (OK under MS1-MS7). Cost line: 1 write per
-    file (was 2), bytes bound by re-hash-as-written (MS1), O_EXCL/NOFOLLOW per file (MS3), mode from the
-    tree entry (MS4). Ceiling ~ the c2 row: ~18-20% cold. On warm it needs inflate + write from the
-    object store; c2-warm (0.79-0.83) bounds it.
-  - **M1, reflink/COW** (OK under MS1-MS7). Cost line: per file 1 create + 1 clone + 1 fchmod, 0 data
-    bytes. CI runners can't show it (ext4 / NTFS have no clone; macOS already 0.85 with c1). Because the
-    cost is per-file Python, not bytes, M1 buys little over a lean copy loop. M2 is the lane.
-  - M3 hardlinks: rejected for any user- or project-nameable tree (shared inode).
-- This makes "materialize once" a v0.40 lane BESIDE integrate: ~1.0 s L / ~2.4 s W of the 2.1 / 4.4 s
-  resolve+fetch block.
+**RETRACTED (25 Nov 07:40): the c1/c2 hardlink bounds were INVALID.** `find_files_by_glob`
+(base_integrator.py:1636-1639) skips any file with st_nlink > 1 (anti-hardlink containment). With
+os.link every globbed primitive in apm_modules had nlink 2, so integrate silently deployed none of
+them. c1/c2 measured "copy + verify + most of integrate", not materialization.
+Valid reads (each keeps nlink 1, so the same output):
+| head (research only) | cold W | cold L | cold M | runs |
+|---|---|---|---|---|
+| c2-copyfile 7cd079c2: plain shutil.copyfile loop, no copystat / reflink try / robust wrappers, no re-verify | - | 0.965 | - | 45558963877 (same-window c2 control 0.809, 45558981578) |
+| faithful M2 57a7e0f0 vs 8f0e5d6b (E1): write each apm_modules file from the fetched blobs, re-hash as written | 0.979 | 0.965 | 0.891 | 45556952859 / 45556969927 / 45556988005 |
+- The whole copy-machinery + re-verify cost is **~3.5% of L cold** (~0.2 s at 9V74), not 15-20%.
+  Any faithful writer (lean copy, M2, M1 reflink) lands at ~0.965 L. The second write per file costs
+  little: ~700 files, 0.6 MB.
+- So materialize-once is NOT a v0.40 lane on the CPU axis. The VP killed Car 2 (07:10) on this.
+- Lesson (now a rule): every ceiling/oracle head carries an output audit (render-diff, deployed
+  path + bytes vs base). A head that changes the output is invalid by construction.
 
 ## Reading
 1. **Integrate is half the gap on both OSes** (2.4 s L, 6.5 s W at 9V74). Per deployed file, main spends
@@ -116,25 +110,20 @@ Paired 6 pairs on main 1e4a208e, anon, t50:
   The floor total (~0.7 s L / ~1.2 s W) matches the morning SoL model (0.7 / 1.5).
 
 ## Stacked ceiling: the doc's headline number (measured on one head, not a paper sum)
-Head = Bets' integrate ceiling (perf-research/arch-integrate-ceiling-skilltree ea0ec45e: main + A+B +
-parse-once + skill tree as one op; UNSAFE upper bound) + my M2 bound c2 (hardlink, no re-verify; UNSAFE).
-L/M: perf-research/arch-stack-ceiling-L d3881480 vs main 1e4a208e. W: perf-research/arch-stack-ceiling-W
-2a69add2 vs its base cc5aac78 (main + #5374), default schannel world. Cold t50, 6 pairs, anon, 0 errors.
-| OS | paired ratio | base -> new (bench runner) | ~s at 9V74 | target | run |
-|---|---|---|---|---|---|
-| L | 0.701 | 7.18 -> 5.03 s | 6.1 x 0.701 = **4.3 s** | 3.5 s (miss by ~0.8 s) | 45530064444 |
-| W | **0.568** (vs main+#5374; head W2 6d67f5aa) | 15.09 -> 8.44 s | schannel calibration [45534359514]: base 10.53 s at 9V74 x 0.568 = **~6.0 s** (9V45 4.5, Xeon 8573C 6.4, 7763 8.3-8.6) | 7.5 s: AT TARGET on 3 of 4 classes | 45532025700 |
-| M | 0.663 | 8.18 -> 5.37 s | n/a (no 9V74 class) | - | 45530082924 |
-W correction: the first W head (2a69add2, 0.719) lacked the lexical-resolve ceiling on Windows, because
-realpath.py redefines resolve_path inside `if sys.platform == "win32":` and the L ceiling's stub sat in
-the generic function. W2 6d67f5aa = Bets' W ceiling 8efedece (lexical override at end of file) + c2 +
-parse-once + skill tree. Caveat: the 13.2 s W reference is the OpenSSL-world calibration (F16); the default
-schannel world was then calibrated directly (run 45534359514: main+#5374 cold t50 = 10.53 s at 9V74), so W is ~6.0 s at 9V74.
-Overlap vs paper (L): c2 alone 0.817, ceiling alone 0.899 (Bets 45528038721). Paper additive = 0.716,
-multiplicative = 0.734; measured 0.701. They stack slightly better than the paper (removing the copy also
-removes integrate-side walks of the copied tree). Per-shard ratios within +-1.5%.
+**Re-measured 25 Nov 07:40 WITHOUT c2** (c2 is retracted: it skipped integrate, see Materialization).
+Head = Bets' integrate ceiling only (ea0ec45e: main + A+B + parse-once + skill tree; UNSAFE upper bound).
+W head 288927c8 = W2 6d67f5aa minus c2 (keeps the end-of-file lexical override that wins after win32).
+Cold t50, 6 pairs, anon. Output audit (render-diff): same result as the base (tree-50-policy errors on
+both sides; monorepo-4 differs only by tmp paths in lockfiles).
+| OS | paired ratio | ~s at 9V74 | target | run |
+|---|---|---|---|---|
+| L | 0.876 (vs main 1e4a208e) | 6.1 x 0.876 = **5.3 s** | 3.5 s (miss by ~1.8 s) | 45558797634 |
+| W | **0.702** (vs main+#5374 cc5aac78) | 10.53 x 0.702 = **7.4 s** (9V45 5.6, Xeon 8573C 8.0, 7763 10.2-10.6) | 7.5 s: at the line on 9V74; met on 2 of 4 classes | 45558776176 |
+| M | 0.717 | n/a | - | 45558819800 |
+Superseded (INVALID, c2 inside): L 0.701 [45530064444], W 0.568 [45532025700], M 0.663 [45530082924].
+Faithful materialize (M2, E1) adds ~3.5% L / ~2.5% W on top; the VP killed it as a car.
 
-## Native-core gate (charter: "native only if the profile shows >= 25% of CPU in walk/stat/hash/copy")
+## Native-core gate (measured on the c2 head; the Lane N oracles were re-run clean below) (charter: "native only if the profile shows >= 25% of CPU in walk/stat/hash/copy")
 cpu_attr leaf kinds, L process CPU, one profiled sample each:
 | head | walk_scan | stat | hash | file_io (copy/read/write) | gate sum | + realpath | run |
 |---|---|---|---|---|---|---|---|
@@ -187,6 +176,8 @@ Engagement counts: trace 45546229005.
 **No single remaining owner is >= 0.5 s L at 9V74 (~12%).** The largest sized one frees ~1.2% (~0.05 s).
 What is left is the network floor (auth + ref listing + fetch), the irreducible one write per file, imports,
 and per-file Python spread over ~100 call sites.
-**No third bet: this is the honest end of v0.40 research.** The two bets are integrate (Bets, section 2)
-and materialize-once (M2, this section). Beyond them, L needs either the revised bar (~4.3 s) or a
-many-call-site redesign, which is not a single lever.
+**No third bet: this is the honest end of v0.40 research.** Re-checked clean (no c2, 25 Nov 08:00):
+O-walk2 L 1.005 / W 0.992 [45562019449 / 45562066339], O-resolve L 0.969 / W 0.970 [45562045355 /
+45562104590], prompts row 0.960 on no-c2 B [45561291006]: all under the 0.5 s bar. The one bet is
+integrate (Bets, section 2); materialize-once is ~3.5% L (not a lane). Beyond integrate, L needs the
+revised bar (~5.3 s measured) or a many-call-site redesign, which is not a single lever.

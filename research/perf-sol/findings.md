@@ -181,3 +181,15 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 ## F33 (03:52) Schannel calibration [45534359514]: main+#5374 cold t50 = 8.0 (9V45) / 10.53 (9V74) / 11.34 (Xeon 8573C) / 14.6-15.1 (7763); stacked W at 9V74 = ~6.0 s (at target).
 ## F34 (05:12) Lane N KILLED: O-walk2 L 0.992 / W 0.987 / M ~1.0; O-resolve 0.956 / 0.954 / 0.916; O-time L 13-18% inside primitives over ~80k calls (~100 sites); single loop <= 0.25 s at 9V74. Runs 45538269139.., 45534288568.., 45543605433.
 ## F35 (05:36) Deletion map on stacked L + B: prompts 1.005, MCP services 0.988, post-fetch 0.988 [45546098738 / 45546121424 / 45546139343]; no owner >= 0.5 s L. No third bet.
+
+## F36 (07:40) c2 RETRACTED: hardlink stubs silently skip integration
+base_integrator.find_files_by_glob (:1636-1639) skips st_nlink > 1; c1/c2 os.link made every globbed primitive invisible.
+c2-copyfile (nlink 1) L 0.965 [45558963877] = faithful M2 (L 0.960 / W 0.975 6-pair [45560564083/45560599802]); c2 re-run 0.809 [45558981578].
+No-c2 stack: W 288927c8 0.702 (~7.4 s at 9V74) [45558776176]; L ea0ec45e 0.876 (~5.3 s) [45558797634]; M 0.717 [45558819800].
+Clean oracles (no-c2): O-walk2 L 1.005 / W 0.992 [45562019449/45562066339]; O-resolve L 0.969 / W 0.970 [45562045355/45562104590]: Lane N kill holds.
+Prompts row (no-c2): 0.960 [45561291006]; B on no-c2 0.982 [45561308612]: "No third bet" holds.
+Rule: every ceiling/oracle head carries a render-diff output audit (audit-render-diff harness).
+
+## F37 (08:3x) RT6 red team #5382 proof lifetime: issue #5443 (neutral)
+robust_copy_entry(dir) -> robust_copytree(symlinks=True) recreates nested links w/o forget_proofs (R4 gap). RED on main 8225ec64 [45566113369], cells perf-research/redteam-5382 @56096e7f.
+Latent (macOS-only, no production trigger found). Held: G3 parked publish across 3 forget entry points; raw dir swap same path new inode.

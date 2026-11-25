@@ -10,3 +10,16 @@ M owalk2 perf-bench/c1cc26a0-1795576316-741dd3
 prompts perf-bench/c970dabc-1795580412-7798ff
 services perf-bench/5c2a9967-1795580425-64d3f8
 postfetch perf-bench/ac71b23b-1795580435-c7fcaf
+W perf-bench/288927c8-1795587079-161e98
+L perf-bench/ea0ec45e-1795587089-d368c8
+M perf-bench/ea0ec45e-1795587100-e97646
+c2on8f-L perf-bench/c98de5a7-1795587944-f57681
+M2-L6 perf-bench/57a7e0f0-1795587953-dcb79f
+c2on8f-W perf-bench/c98de5a7-1795587962-e76434
+M2-W6 perf-bench/57a7e0f0-1795587971-b38099
+c2cf-L perf-bench/7cd079c2-1795587173-d13ac5
+c2-L-rerun perf-bench/85aae507-1795587182-de95b8
+owalk2-noc2 linux perf-bench/bfd6d443-1795588656-57eccc
+oresolve-noc2 linux perf-bench/0d58e852-1795588668-e4c06a
+owalk2-noc2 windows perf-bench/ca148308-1795588678-00a386
+oresolve-noc2 windows perf-bench/686d65d5-1795588689-6983ea
