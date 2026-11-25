@@ -92,8 +92,8 @@ def render(g, srcs):
       + ", Windows " + fin("install-frozen", "windows", "tree-50") + WD + ". Warm: Linux " + fin("install-warm", "linux", "tree-50")
       + ", macOS " + fin("install-warm", "macos", "tree-50") + ", Windows " + W("install-warm") + ("" if IN(5376) else " (#5376, on track, measured Windows default warm 0.856 "
       "of today at its previous head; the rerun at its final head is running)")
-      + ". No-op installs, first re-install / repeat / --frozen no-op. First unchanged re-install (#2): " + ", ".join(f"{OSN[o]} {fin('install-noop', o, 'tree-50')}" for o in OSES)
-      + "; repeat no-op (#3+, footnote 1): " + ", ".join(f"{OSN[o]} {fin('install-noop-replay', o, 'tree-50')}" for o in OSES)
+      + ". No-op installs, first re-install / repeat / --frozen no-op. First unchanged re-install (#2, footnote 1): " + ", ".join(f"{OSN[o]} {fin('install-noop', o, 'tree-50')}" for o in OSES)
+      + "; repeat no-op (#3+): " + ", ".join(f"{OSN[o]} {fin('install-noop-replay', o, 'tree-50')}" for o in OSES)
       + ("; --frozen no-op: Linux " + fin("install-frozen-noop", "linux", "tree-50") + frozen_verdict()
          if any(r["journey"] == "install-frozen-noop" for r in ROWS) else "")
       + (". **Windows default config now engages the in-process fetch** (footnote 2; #5376, merged: default cold 0.449 / 0.447, "
@@ -104,14 +104,14 @@ def render(g, srcs):
       "size: audit " + rng("audit") + "; outdated " + rng("outdated") + "; uninstall " + rng("uninstall") + "; prune "
       + rng("prune") + "; compile " + rng("compile") + "; pack " + rng("pack") + "; boot " + rng("boot-version") + " (flat).")
     a("")
+    a("*Footnote 1 (no-op rows): the bench's first unchanged re-install (#2) is the first unchanged install after a "
+      "full install; every sample starts from a fresh APM home plus a full setup install. Main pays the no-op proof "
+      "there; #5383 turns it into a record hit by attesting at the end of the full install. The repeat no-op (replay) "
+      "is install #3+. Not a product bug (run 45523138212).*")
+    a("")
     if g.get("WIN_FOOTNOTE") and IN(5376):
         a(f"*Footnote 2 (Windows default numbers): {g['WIN_FOOTNOTE']}.*")
         a("")
-    a("*Footnote 1: repeat no-op = an unchanged re-install once the verified-state record exists (the bench allows up "
-      "to 3 untimed no-ops to converge first). Open finding under attribution: when the first re-install runs right "
-      "after cold + warm installs in the same world, it traces 'no record'; standalone it records on main (runs "
-      "45473253493, 45473300740), so it is not a regression by SHA.*")
-    a("")
 
     a("## 1. Install journeys, anonymous public github.com (tree-50, vs " + ("e37400fa)" if srcs["install"] == "final" else "703acd6f)"))
     a("")
