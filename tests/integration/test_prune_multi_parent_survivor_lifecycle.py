@@ -79,6 +79,7 @@ _VARIANTS = {
     ),
 }
 _F_SKILL = ".claude/skills/f-skill/SKILL.md"
+_CROSS_PLATFORM = {"non-ascii-directory", "windows-separators"}
 
 
 def _skill_package(root: Path, name: str, deps: tuple[str, ...]) -> None:
@@ -129,8 +130,15 @@ def _fresh_resolve(world: ReplayWorld) -> bytes:
 
 @pytest.mark.parametrize(
     ("variant", "hash_seed"),
-    [(name, str(seed)) for seed, name in enumerate(_VARIANTS)],
-    ids=list(_VARIANTS),
+    [
+        pytest.param(
+            name,
+            str(seed),
+            id=name,
+            marks=[pytest.mark.windows_compat] if name in _CROSS_PLATFORM else [],
+        )
+        for seed, name in enumerate(_VARIANTS)
+    ],
 )
 def test_install_resolves_a_survivor_of_equally_near_parents_after_prune(
     tmp_path: Path, apm_binary_path: Path, variant: str, hash_seed: str
@@ -149,6 +157,9 @@ def test_install_resolves_a_survivor_of_equally_near_parents_after_prune(
 
     world.apm("prune")
     assert survivors <= set(_rows(world.project)), sorted(_rows(world.project))
+    for name in sorted(survivors):
+        skill = world.project / ".claude" / "skills" / f"{name}-skill" / "SKILL.md"
+        assert skill.is_file(), f"prune deleted the deployed skill of survivor {name}"
     pruned = lock_bytes(world.project)
     world.apm("install", "--frozen")
     assert lock_bytes(world.project) == pruned
