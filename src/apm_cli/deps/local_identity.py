@@ -17,6 +17,7 @@ from typing import Any, TypeVar
 
 from ..models.dependency.reference import DependencyReference
 from ..utils.paths import (
+    bounded_common_ancestor,
     portable_link_relpath,
     portable_relpath,
     relative_posix,
@@ -36,22 +37,28 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     package. The returned value is the package's stable identity only --
     it feeds the ``local:`` cycle key, the lockfile
     ``dependencies[].anchored_local_path`` field, and (via that same owner
-    identity) the deployment-ledger owner rows. It is never re-opened as a
-    filesystem path.
+    identity) the deployment-ledger owner rows. Lookups never open a
+    relative identity to find a row (:func:`locked_spelling` compares
+    directories); a legacy absolute one is opened to confirm the directory
+    it names, and the one-time re-key reads the package manifest at
+    ``base / identity`` to rebind MCP evidence.
 
     A lockfile is a committed, cross-machine artifact, so this identity
     MUST NOT carry a developer's home directory or any absolute prefix.
     Packages inside ``base`` (the project root) are recorded relative to
     it in forward-slash POSIX form -- matching how directly-declared local
     owners already serialize -- which keeps a regenerated lockfile
-    deterministic across machines and CI. A package outside ``base`` but in
-    the same repository (a monorepo sibling, #5418; both sides resolved, one
-    :func:`apm_cli.utils.paths.repository_root`) is recorded relative to
-    ``base`` with ``../``, as direct rows are. Anything else (outside the
-    repository, no repository, another drive, ``base`` unknown, a resolution
-    error) falls back to the resolved absolute POSIX path: such local deps
-    are inherently non-committable, and the fallback preserves a unique
-    identity without inventing one.
+    deterministic across machines and CI. A package outside ``base`` is
+    recorded relative to ``base`` with ``../``, as direct rows are (#5418;
+    both sides resolved), when it is in the same repository (one
+    :func:`apm_cli.utils.paths.repository_root`), or, when ``base`` is in no
+    repository, when their nearest common ancestor is below every shared
+    root, the home directory and its ancestors
+    (:func:`apm_cli.utils.paths.bounded_common_ancestor`). Anything else
+    (another repository, outside the repository, a common ancestor at
+    ``/``, a drive root, HOME or above, another drive, ``base`` unknown, a
+    resolution error) falls back to the resolved absolute POSIX path: the
+    fallback preserves a unique identity without inventing one.
     """
     if base is None:
         return anchored.resolve().as_posix()
@@ -63,7 +70,11 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     if inside is not None:
         return inside
     repository = repository_root(resolved_base)
-    if repository is not None and repository_root(resolved) == repository:
+    if (
+        repository_root(resolved) == repository
+        if repository is not None
+        else bounded_common_ancestor(resolved, resolved_base)
+    ):
         sibling = portable_link_relpath(resolved, resolved_base)
         if sibling is not None:
             return sibling

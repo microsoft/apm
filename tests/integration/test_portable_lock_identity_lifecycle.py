@@ -82,6 +82,13 @@ def _monorepo(
     return app
 
 
+def _install_before_5418(world: ReplayWorld, repo: Path, app: Path, *args: str) -> None:
+    """Write the pre-#5418 absolute form: with HOME at the repository root no bound applies."""
+    env = {**world.env, "HOME": str(repo), "USERPROFILE": str(repo)}
+    result = world.runner.run(("install", *args), cwd=app, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def _transitive_rows(app: Path) -> dict[str, dict]:
     lock = load_yaml(app / "apm.lock.yaml")
     return {row["name"]: row for row in lock["dependencies"] if row.get("anchored_local_path")}
@@ -105,11 +112,16 @@ def _slots(app: Path) -> set[str]:
     return {path.name for path in (app / "apm_modules" / "_local").iterdir() if path.is_dir()}
 
 
-def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_path: Path) -> None:
+@pytest.mark.parametrize("git", [True, False], ids=["git-repository", "no-repository"])
+def test_two_clones_write_byte_identical_lockfiles(
+    tmp_path: Path, apm_binary_path: Path, git: bool
+) -> None:
+    """Both a git checkout and a clean copy with no .git (the issue's cp -r repro)."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     repo_a = world.sources / "A"
     app_a = _monorepo(world, repo_a, mcp=True)
-    world.git(repo_a, "init", "-q", "--initial-branch=main")
+    if git:
+        world.git(repo_a, "init", "-q", "--initial-branch=main")
     repo_b = world.sources / "elsewhere" / "deeper" / "B"
     shutil.copytree(repo_a, repo_b, symlinks=True)
     app_b = repo_b / _APP
@@ -137,7 +149,7 @@ def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_pa
     world.audit_clean(cwd=app_a)
 
 
-def test_outside_repository_and_no_repository_keep_absolute(
+def test_outside_repository_keeps_absolute_and_no_repository_is_relative(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = ReplayWorld.create(tmp_path, apm_binary_path)
@@ -160,20 +172,18 @@ def test_outside_repository_and_no_repository_keep_absolute(
     plain = world.sources / "plain"
     plain_app = _monorepo(world, plain)
     world.apm("install", cwd=plain_app)
+    # No repository: the common ancestor (plain/) is below /, HOME and its ancestors.
     plain_text = (plain_app / "apm.lock.yaml").read_text(encoding="utf-8")
-    assert "anchored_local_path: ../" not in plain_text
+    assert str(plain.resolve().as_posix()) not in plain_text
     rows = _transitive_rows(plain_app)
-    assert rows["lib-b"]["anchored_local_path"] == (
-        (plain / "packages" / "lib-b").resolve().as_posix()
-    )
+    assert rows["lib-b"]["anchored_local_path"] == "../../packages/lib-b"
 
 
 def test_absolute_lock_is_rekeyed_in_place_once(tmp_path: Path, apm_binary_path: Path) -> None:
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     repo = world.sources / "R"
     app = _monorepo(world, repo)
-    # Written before the repository exists: the pre-#5418 absolute form.
-    world.apm("install", cwd=app)
+    _install_before_5418(world, repo, app)
     legacy, legacy_owners, legacy_slots = lock_bytes(app), _owners(app), _slots(app)
     absolute = {name: row["anchored_local_path"] for name, row in _transitive_rows(app).items()}
     assert all(Path(anchor).is_absolute() for anchor in absolute.values()), absolute
@@ -221,7 +231,7 @@ def _legacy_mcp_lock(tmp_path: Path, apm_binary_path: Path) -> tuple[ReplayWorld
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     repo = world.sources / "R"
     app = _monorepo(world, repo, mcp=True)
-    world.apm("install", "--only", "apm", cwd=app)
+    _install_before_5418(world, repo, app, "--only", "apm")
     evidence = load_yaml(app / "apm.lock.yaml")["mcp_omissions"]["echo-srv"]
     assert evidence["reason"] == "only-apm"
     world.git(repo, "init", "-q", "--initial-branch=main")
@@ -269,3 +279,50 @@ def test_rekey_leaves_mismatched_mcp_omission_unbound(
     output = audit.stdout + audit.stderr
     assert "omission evidence is missing, damaged or stale" in " ".join(output.split())
     assert "--only apm" in output
+
+
+def _modules_state(app: Path) -> dict[str, bytes | None]:
+    """Every apm_modules entry: file bytes, or None for a directory."""
+    modules = app / "apm_modules"
+    return {
+        path.relative_to(modules).as_posix(): None if path.is_dir() else path.read_bytes()
+        for path in sorted(modules.rglob("*"))
+    }
+
+
+def _legacy_lock(tmp_path: Path, apm_binary_path: Path) -> tuple[ReplayWorld, Path]:
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    app = _monorepo(world, repo)
+    _install_before_5418(world, repo, app)
+    world.git(repo, "init", "-q", "--initial-branch=main")
+    return world, app
+
+
+def test_declined_update_restores_the_moved_slot(tmp_path: Path, apm_binary_path: Path) -> None:
+    """I7: an update that applies nothing leaves apm_modules and the lock as they were."""
+    world, app = _legacy_lock(tmp_path, apm_binary_path)
+    lock, modules = (app / "apm.lock.yaml").read_bytes(), _modules_state(app)
+
+    world.apm("update", cwd=app)
+
+    assert (app / "apm.lock.yaml").read_bytes() == lock
+    assert _modules_state(app) == modules
+
+
+def test_failed_install_after_rekey_restores_the_moved_slot(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I7: an install that fails after the re-key leaves apm_modules and the lock as they were."""
+    world, app = _legacy_lock(tmp_path, apm_binary_path)
+    lock, modules = (app / "apm.lock.yaml").read_bytes(), _modules_state(app)
+    manifest = app / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "    - ../../packages/missing\n", encoding="utf-8"
+    )
+
+    failed = world.apm("install", cwd=app, expect=1)
+
+    assert "missing" in failed.stdout + failed.stderr
+    assert (app / "apm.lock.yaml").read_bytes() == lock
+    assert _modules_state(app) == modules

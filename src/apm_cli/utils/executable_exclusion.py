@@ -25,12 +25,13 @@ def executable_exclusion_root() -> Path | None:
     above nothing is excluded.
     """
     from apm_cli.core.scope import manifest_file
+    from apm_cli.utils.paths import home_or_above
 
     cwd = Path.cwd().resolve()
     home = Path.home().resolve()
     ancestors = (cwd, *cwd.parents)
     for has_marker in (lambda d: (d / ".git").exists(), lambda d: manifest_file(d).is_file()):
         for directory in ancestors:
-            if directory != home and directory not in home.parents and has_marker(directory):
+            if not home_or_above(directory, home) and has_marker(directory):
                 return directory
-    return None if cwd == home or cwd in home.parents else cwd
+    return None if home_or_above(cwd, home) else cwd

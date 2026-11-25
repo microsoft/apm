@@ -412,6 +412,7 @@ class InstallTransaction:
         self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
         self._migrated_lockfile: tuple[Path, Path, bytes] | None = None
+        self._materialization_moves: tuple[tuple[Path, Path, tuple[Path, ...]], ...] = ()
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -447,6 +448,7 @@ class InstallTransaction:
                         self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
+                    self._settle_materialization_moves()
                     self._ref_pins.commit()
                     self._verdicts.commit()
                     self._completed = True
@@ -617,6 +619,38 @@ class InstallTransaction:
             if not legacy.exists() and current.read_bytes() == snapshot:
                 current.rename(legacy)
 
+    def journal_materialization_moves(
+        self, moved: tuple[tuple[Path, Path, tuple[Path, ...]], ...]
+    ) -> None:
+        """Follow ``apm_modules`` copies this attempt moved (#5418 re-key).
+
+        A rollback, or a declined update, moves them back
+        (:func:`apm_cli.core.deployment_reanchor.restore_materializations`);
+        a commit removes the parent directories the moves left empty.
+        """
+        self._materialization_moves = (*self._materialization_moves, *moved)
+
+    def _restore_materialization_moves(self) -> None:
+        moved, self._materialization_moves = self._materialization_moves, ()
+        if not moved:
+            return
+        from apm_cli.core.deployment_reanchor import restore_materializations
+        from apm_cli.core.remediation import LOCAL_SLOT_RESTORE
+
+        for path in restore_materializations(moved, self.apm_modules_dir):
+            if self._logger is None:
+                continue
+            self._logger.warning(f"Could not move {path} back. {LOCAL_SLOT_RESTORE.sentence()}")
+
+    def _settle_materialization_moves(self) -> None:
+        moved, self._materialization_moves = self._materialization_moves, ()
+        if moved:
+            from apm_cli.integration.base_integrator import BaseIntegrator
+
+            BaseIntegrator.cleanup_empty_parents(
+                [current for current, _target, _created in moved], stop_at=self.apm_modules_dir
+            )
+
     def track_created_target_roots(self, roots: list[Path]) -> None:
         """Follow the target roots this attempt creates; rollback removes empty ones."""
         self._created_target_roots = roots
@@ -742,6 +776,7 @@ class InstallTransaction:
                         cleanup_issues = self._resolution.rollback() or []
                         self._report_resolution_cleanup_issues(cleanup_issues)
                     finally:
+                        self._restore_materialization_moves()
                         self._restore_manifest()
                         self._undo_lockfile_migration()
                 self._rolled_back = True

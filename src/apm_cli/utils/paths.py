@@ -121,34 +121,64 @@ def portable_relpath(path: Path, base: Path) -> str:
         return path.as_posix()
 
 
+def home_or_above(directory: Path, home: Path) -> bool:
+    """Whether resolved *directory* is resolved *home* or one of its ancestors.
+
+    Such a directory is never a project: a ``.git`` or manifest there is a
+    dotfiles repo or a stray marker (#5470), and an identity relative to it
+    would climb through the home directory (#5418).
+    """
+    return directory == home or directory in home.parents
+
+
+def _resolved_home() -> Path | None:
+    try:
+        return resolve_path(Path.home())
+    except (OSError, RuntimeError, KeyError):
+        return None
+
+
 def repository_root(base: Path) -> Path | None:
     """The repository holding *base*, or ``None`` (#5418).
 
     The nearest ancestor of resolved *base* (itself included) with a ``.git``
     entry, directory or file: a submodule or worktree ``.git`` file makes that
-    directory its own repository. A root equal to the home directory or above
-    it (a dotfiles ``~/.git``) does not count. No git subprocess; the walk is
-    cached per resolved *base* and home.
+    directory its own repository. A root at the home directory or above it (a
+    dotfiles ``~/.git``, :func:`home_or_above`) does not count. No git
+    subprocess; the walk is cached per resolved *base* and home.
     """
     try:
         resolved = resolve_path(base)
     except (OSError, RuntimeError):
         return None
-    try:
-        home: Path | None = resolve_path(Path.home())
-    except (OSError, RuntimeError, KeyError):
-        home = None
-    return _repository_root(resolved, home)
+    return _repository_root(resolved, _resolved_home())
 
 
 @functools.lru_cache(maxsize=256)
 def _repository_root(resolved: Path, home: Path | None) -> Path | None:
     for candidate in (resolved, *resolved.parents):
         if os.path.lexists(candidate / ".git"):
-            if home is not None and is_within(home, candidate):
+            if home is not None and home_or_above(candidate, home):
                 return None
             return candidate
     return None
+
+
+def bounded_common_ancestor(path: Path, base: Path) -> bool:
+    """Whether resolved *path* and *base* share an ancestor below every shared root (#5418).
+
+    False when their nearest common ancestor is a filesystem or drive root,
+    the home directory or above it (:func:`home_or_above`), or when they sit
+    on different drives.
+    """
+    try:
+        common = Path(os.path.commonpath([path, base]))
+    except ValueError:
+        return False
+    if common == Path(common.anchor):
+        return False
+    home = _resolved_home()
+    return home is None or not home_or_above(common, home)
 
 
 def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:

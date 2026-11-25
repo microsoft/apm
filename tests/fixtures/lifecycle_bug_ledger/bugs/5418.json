@@ -1,7 +1,7 @@
 {
   "issue": 5418,
   "fixed_in": "Unreleased",
-  "summary": "A local package inside the same repository as the project but outside its root (a monorepo sibling) was recorded with its absolute checkout path in anchored_local_path, declaring_parent, the ledger owners and the MCP omission fingerprint, so two clones at different paths wrote different lockfiles. It is now recorded relative to the project root with ../, and a legacy lock is re-keyed in place once.",
+  "summary": "A local package inside the same repository as the project but outside its root (a monorepo sibling) was recorded with its absolute checkout path in anchored_local_path, declaring_parent, the ledger owners and the MCP omission fingerprint, so two clones at different paths wrote different lockfiles. It is now recorded relative to the project root with ../ (inside one repository, or with no repository when the two share a parent below /, drive roots, HOME and its parents), and a legacy lock is re-keyed in place once.",
   "failure_modes": [
     "outcome"
   ],
@@ -9,9 +9,10 @@
     "portability.byte_deterministic"
   ],
   "regression_tests": [
-    "tests/integration/test_portable_lock_identity_lifecycle.py::test_two_clones_write_byte_identical_lockfiles",
+    "tests/integration/test_portable_lock_identity_lifecycle.py::test_two_clones_write_byte_identical_lockfiles[no-repository]",
     "tests/integration/test_portable_lock_identity_lifecycle.py::test_absolute_lock_is_rekeyed_in_place_once",
     "tests/integration/test_portable_lock_identity_lifecycle.py::test_rekey_leaves_mismatched_mcp_omission_unbound",
-    "tests/unit/deps/test_apm_resolver_helpers.py::TestLegacyAbsoluteLocalIdentity::test_read_path_never_opens_a_dotdot_identity"
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestLegacyAbsoluteLocalIdentity::test_read_path_never_opens_a_dotdot_identity",
+    "tests/integration/test_portable_lock_identity_lifecycle.py::test_failed_install_after_rekey_restores_the_moved_slot"
   ]
 }
