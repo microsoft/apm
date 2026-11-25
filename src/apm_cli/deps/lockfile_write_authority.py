@@ -551,7 +551,7 @@ def _commit(scope: _WriteScope) -> None:
         if not isinstance(document, _Removed) and not on_disk:
             ensure_lockfile_writable(key)
             try:
-                atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
+                pass  # RESEARCH: commit write deleted
             except OSError as exc:
                 raise LockfileCommitError(f"Could not generate {key.name}: {exc}") from exc
         del scope.pending[key]
