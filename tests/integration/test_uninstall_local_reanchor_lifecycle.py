@@ -477,12 +477,14 @@ def test_a_pre_fix_lock_with_two_rows_for_one_folded_directory_upgrades(
     pre_fix = lock_bytes(world.project)
     assert _lock_rows_named(world, "e") == ["_local/E-Pkg", "_local/e-pkg"]
 
-    world.apm("install", "--frozen")
+    frozen = world.apm("install", "--frozen")
+    assert frozen.returncode == 0, frozen.stderr
     assert lock_bytes(world.project) == pre_fix
     world.apm("install")
     assert len(_lock_rows_named(world, "e")) == 1, _lock_rows_named(world, "e")
     collapsed = lock_bytes(world.project)
-    world.apm("install", "--frozen")
+    refrozen = world.apm("install", "--frozen")
+    assert refrozen.returncode == 0, refrozen.stderr
     assert lock_bytes(world.project) == collapsed
 
 
@@ -530,13 +532,15 @@ def test_a_pre_fix_transitive_row_spelled_another_way_stays_frozen(
     shutil.move(modules / slot("vendor/F-Pkg"), modules / slot("vendor/f-pkg"))
     pre_fix = lock_bytes(world.project)
 
-    world.apm("install", "--frozen")
+    frozen = world.apm("install", "--frozen")
+    assert frozen.returncode == 0, frozen.stderr
     assert lock_bytes(world.project) == pre_fix
     world.apm("install")
     rekeyed = _row_named_f(world)
     assert rekeyed["anchored_local_path"] == "vendor/F-Pkg", rekeyed
     collapsed = lock_bytes(world.project)
-    world.apm("install", "--frozen")
+    refrozen = world.apm("install", "--frozen")
+    assert refrozen.returncode == 0, refrozen.stderr
     assert lock_bytes(world.project) == collapsed
 
 

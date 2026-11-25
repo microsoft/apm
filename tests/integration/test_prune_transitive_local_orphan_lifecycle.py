@@ -366,11 +366,13 @@ def test_install_and_prune_keep_one_row_per_folded_directory(
     world = _world(tmp_path, apm_binary_path, f_dir=e_spells_f, a_spells_f=a_spells_f)
     assert len(_lock_rows_named(world, "f")) == 1, sorted(_rows(world))
 
-    world.apm("prune")
+    pruned = world.apm("prune")
 
     rows = _rows(world)
+    assert pruned.returncode == 0, pruned.stderr
     assert "_local/e" not in rows, sorted(rows)
     assert len(_lock_rows_named(world, "f")) == 1, sorted(rows)
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
 
 
 def _lock_rows_named(world: ReplayWorld, name: str) -> list[str]:
@@ -398,9 +400,11 @@ def test_an_exactly_spelled_local_graph_keeps_its_lock_bytes(
     anchors = {row.get("anchored_local_path") for row in _rows(world).values()}
     assert {"vendor/F-Pkg", "vendor/e"} <= anchors, sorted(anchors, key=str)
 
-    world.apm("install", "--frozen")
+    frozen = world.apm("install", "--frozen")
+    assert frozen.returncode == 0, frozen.stderr
     assert lock_bytes(world.project) == locked
-    world.apm("install")
+    reinstalled = world.apm("install")
+    assert reinstalled.returncode == 0, reinstalled.stderr
     assert lock_bytes(world.project) == locked
 
 

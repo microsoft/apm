@@ -475,7 +475,8 @@ class TestOneAnchoredDirectoryIsOneDependency:
             pytest.skip("Windows resolves and compares paths caselessly: no case-only spelling")
         vendor = tmp_path / "vendor"
         (vendor / stored).mkdir(parents=True)
-        monkeypatch.setattr(paths_module, "_same_entry", lambda *_: volume != "sensitive")
+        # The fold probe the volume answers: samefile on two spellings.
+        monkeypatch.setattr(os.path, "samefile", lambda *_: volume != "sensitive")
         if volume == "exact-entry":
             listdir = paths_module.os.listdir
             monkeypatch.setattr(
