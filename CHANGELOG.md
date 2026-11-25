@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Plain `apm audit` exits 1 on drift when a required org policy cannot be resolved, naming the cause; restore access to the org policy. (#4920)
 - Any non-empty org policy now requires an `mcp.allow` entry per transitive MCP server unless it sets `mcp.trust_transitive: true`; add entries or opt in. (#4827)
-- A transitive MCP server you approved in 0.38 with `--trust-transitive-mcp` is removed on your first 0.39 install unless it's allowed; restore it with `apm approve <pkg>` or add it to `mcp.allow`.
+- A self-defined transitive MCP server you trusted in 0.38 with `--trust-transitive-mcp` is parked and removed on your first plain 0.39 install. To keep it, run `apm approve <pkg>` and then `apm install` again; if your org policy blocks transitive servers not listed in `mcp.allow`, the policy owner must also add it there.
 - **BREAKING:** Under a blocking org policy, `apm install` now refuses `manifest.scripts: deny`, `unmanaged_files.action: deny` and `dependencies.max_depth` violations; fix the named field. (#4853)
 - **BREAKING:** A dependency `ref` must exactly name an origin branch or tag (prefix `refs/heads/` or `refs/tags/` if both exist), and pinned commits must be reachable; Artifactory pins are exempt. (#4970)
 - Commit verdicts are recorded anew after upgrading: run each install online once before relying on offline or locked replays. (#5173)
