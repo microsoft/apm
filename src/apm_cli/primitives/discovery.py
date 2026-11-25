@@ -110,10 +110,12 @@ def _discovery_cache_key(
 ) -> tuple[str, tuple[str, ...]]:
     """Build a stable cache key for ``discover_primitives``.
 
-    Uses ``os.path.realpath`` instead of ``Path.resolve()`` for symlink
-    canonicalization without the per-component pathlib overhead.
+    The base is canonicalized by ``resolve_path`` (one kernel resolve where
+    exact, else ``Path.resolve()``), not a per-component lstat walk (#4939).
     """
-    canonical_base = os.path.realpath(base_dir)
+    from ..utils.realpath import resolve_path
+
+    canonical_base = str(resolve_path(Path(os.path.abspath(base_dir))))
     canonical_excl = tuple(sorted(exclude_patterns)) if exclude_patterns else ()
     return (canonical_base, canonical_excl)
 
