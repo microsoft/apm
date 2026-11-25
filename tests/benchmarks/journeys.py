@@ -836,18 +836,18 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     return sample, output
 
 
-_USER_TARGETS = (".github", ".claude", ".cursor", ".windsurf", ".kiro", ".gemini", ".codex")
-_USER_TARGETS += (".opencode", ".copilot")
-
-
 def _deployed_output(ctx: Context, journey: Journey) -> dict:
     """What the journey left behind (untimed): see ``output_oracle``."""
     work = ctx.work.parents[1]
     if journey.name in _GLOBAL:
-        home = Path(ctx.world.env["HOME"])
-        return output_oracle.capture(
-            [home / name for name in _USER_TARGETS], work, lock_dirs=[ctx.world.apm_home]
-        )
+        env = ctx.world.env
+        roots = [Path(env[name]) for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME")]
+        apm_home = ctx.world.apm_home
+        return output_oracle.capture(roots, work, lock_dirs=[apm_home], skip=(apm_home,))
+    if journey.name == "pack":
+        return output_oracle.capture([ctx.work / "dist"], work, lock_dirs=[])
+    if journey.name == "install-bundle":
+        return output_oracle.capture([ctx.work / "bundle-consumer"], work)
     return output_oracle.capture(ctx.roots(), work)
 
 

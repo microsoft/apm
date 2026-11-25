@@ -7,7 +7,9 @@ oracle makes that row INVALID instead of a win.
 
 from __future__ import annotations
 
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -59,7 +61,7 @@ def test_same_deploy_under_different_work_roots_is_the_same_output(tmp_path):
     base = _capture(tmp_path / "base", generated_at="2026-11-25T07:00:00")
     new = _capture(tmp_path / "new")
 
-    assert output_oracle.compare([base], [new]) == {"verdict": "same", "files": 1}
+    assert output_oracle.compare([("p0", base)], [("p0", new)]) == {"verdict": "same", "files": 2}
 
 
 def test_a_missing_deployed_file_makes_the_cell_invalid_and_fails_the_report(tmp_path, capsys):
@@ -73,7 +75,7 @@ def test_a_missing_deployed_file_makes_the_cell_invalid_and_fails_the_report(tmp
 
     table = capsys.readouterr().out
     assert status == 1
-    assert "| INVALID (1->0 files) |" in table
+    assert "| INVALID (2->1 files) |" in table
     assert "[x] INVALID tree-50 install-cold rtt=30" in table
     assert "missing 1: .github/instructions/a.instructions.md" in table
 
@@ -86,8 +88,45 @@ def test_a_changed_lockfile_alone_makes_the_cell_invalid(tmp_path):
     (project / output_oracle.LOCKFILE).write_text("lockfile_version: '1'\ndependencies: []\n")
     new = output_oracle.capture([project], new_work)
 
-    verdict = output_oracle.compare([base], [new])
+    verdict = output_oracle.compare([("p0", base)], [("p0", new)])
 
     assert verdict["verdict"] == "INVALID"
     assert verdict["lock_differs"] is True
-    assert not verdict["missing"] and not verdict["changed"]
+    assert verdict["changed"] == [output_oracle.LOCKFILE]
+
+
+def test_every_pair_must_match_not_just_the_set_of_outputs(tmp_path):
+    full = _capture(tmp_path / "base")
+    partial = _capture(tmp_path / "new", deploy=False)
+
+    verdict = output_oracle.compare(
+        [("p0", full), ("p1", partial)], [("p0", partial), ("p1", full)]
+    )
+
+    assert verdict["verdict"] == "INVALID"
+    assert verdict["mismatched_pairs"] == 2
+
+
+def test_nested_lockfiles_ignore_volatile_keys(tmp_path):
+    outputs = []
+    for side in ("base", "new"):
+        app = tmp_path / side / "apps" / "app-1"
+        app.mkdir(parents=True)
+        (app / output_oracle.LOCKFILE).write_text(f"apm_version: {side}\ndependencies: []\n")
+        outputs.append(output_oracle.capture([tmp_path / side], tmp_path / side))
+
+    assert output_oracle.key(outputs[0]) == output_oracle.key(outputs[1])
+
+
+def test_pack_archives_compare_members_not_timestamps(tmp_path):
+    outputs = []
+    for side, mtime in (("base", 1), ("new", 2)):
+        dist = tmp_path / side / "dist"
+        dist.mkdir(parents=True)
+        with tarfile.open(dist / "bundle.tar.gz", "w:gz") as archive:
+            info = tarfile.TarInfo("plugin/a.md")
+            info.size, info.mtime = 1, mtime
+            archive.addfile(info, io.BytesIO(b"x"))
+        outputs.append(output_oracle.capture([dist], tmp_path / side, lock_dirs=[]))
+
+    assert output_oracle.key(outputs[0]) == output_oracle.key(outputs[1])

@@ -183,7 +183,7 @@ def summarize(root: Path) -> list[dict]:
                 "modules": last.get("modules"),
             }
         row["output"] = output_oracle.compare(
-            *([r.get("output") for _, r in sides.get(side, [])] for side in SIDES)
+            *([(p, r.get("output")) for p, r in sides.get(side, [])] for side in SIDES)
         )
         row["paired_new_over_base"] = _paired(sides, _cpu)
         row["paired_wall_new_over_base"] = _paired(sides, _wall)
@@ -256,6 +256,7 @@ def _invalid_lines(rows: list[dict]) -> list[str]:
             if output.get(name)
         )
         lock = "; lockfile differs" if output.get("lock_differs") else ""
+        lock += f"; {output.get('mismatched_pairs')}/{output.get('pairs')} pairs differ"
         lines.append(
             f"\n[x] INVALID {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
             f"new deploys different output than base ({detail or 'see json'}{lock}). "
