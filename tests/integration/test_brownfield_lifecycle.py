@@ -437,6 +437,9 @@ def test_native_only_context_stays_in_place_through_init_discover_and_compile(
     assert "No APM content found to compile" in output
     assert "root context files (" in output
     assert "CLAUDE.md" in output
-    assert "are not APM content and are never modified" in output
+    assert (
+        "Hand-authored root context files (AGENTS.md, CLAUDE.md, GEMINI.md) are never overwritten."
+        in output
+    )
     assert_snapshot_set_unchanged(applied, onboarding.artifacts())
     assert {relative: (root / relative).read_bytes() for relative in native} == native

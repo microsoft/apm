@@ -114,7 +114,10 @@ def test_validate_without_apm_content_explains_native_context_scope(
     assert "No APM content found to compile" in output
     assert "root context files (" in output
     assert "CLAUDE.md" in output
-    assert "are not APM content and are never modified" in output
+    assert (
+        "Hand-authored root context files (AGENTS.md, CLAUDE.md, GEMINI.md) are never overwritten."
+        in output
+    )
     assert "apm init --discover" in output
     assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == _MANUAL_CLAUDE
     assert sorted(path.name for path in tmp_path.iterdir()) == ["CLAUDE.md", "apm.yml"]

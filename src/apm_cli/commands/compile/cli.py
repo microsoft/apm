@@ -700,8 +700,7 @@ def _validate_project(
             logger.progress("   3. Then create .instructions.md or .agent.md files")
             root_contexts = ", ".join(catalog_root_context_markers())
             logger.progress(
-                f" Existing root context files ({root_contexts}) are not APM content"
-                " and are never modified."
+                f" Hand-authored root context files ({root_contexts}) are never overwritten."
             )
             logger.progress(" To find local packages you can declare: apm init --discover")
 
