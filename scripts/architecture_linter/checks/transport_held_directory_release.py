@@ -160,8 +160,8 @@ _LINK_COPY_ALLOWLIST: dict[tuple[str, str], str] = {
         _PRIVATE_COPY_REASON
     ),
     ("src/apm_cli/utils/file_ops.py", "robust_copytree._do_copytree"): (
-        "its ignore hook (_release_before_first_link) releases the destination before the "
-        "walk creates the first link"
+        "its ignore hook (_LinkCopyRelease) releases the destination before each listing "
+        "that holds a link, and settle() releases it again after the copy"
     ),
 }
 
