@@ -41,6 +41,9 @@ def skill_dir_has_content(path: Path) -> bool:
     return bool(errors)
 
 
+PROJECT_SKILLS = ""  # owned_by value of a project's own skill (receipt owner ".")
+
+
 def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Read sub-skill names and native destinations into full-identity ownership maps."""
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
@@ -62,6 +65,12 @@ def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dic
             # Another target's same-named skill cannot establish destination ownership.
             if "/skills/" in normalized or normalized.startswith(prefixes):
                 native_owners[normalized] = unique_key
+    # The project's own skill directories, after every dependency (#5399). Their owner
+    # is PROJECT_SKILLS: falsy, so a dependency's overlap still reads "another package".
+    for deployed_path in lockfile.local_deployed_files or ():
+        parts = deployed_path.rstrip("/").replace("\\", "/").split("/")
+        if len(parts) >= 2 and parts[-2] == "skills":
+            owned_by.setdefault(parts[-1], PROJECT_SKILLS)
     return owned_by, native_owners
 
 

@@ -379,16 +379,21 @@ def reclaimed_members(
     return found
 
 
-def self_owned(prev_owner: str | None, parent_name: str, is_managed: bool, writer: Any) -> bool:
+def self_owned(prev_owner: str | None, parent_name: str, writer: Any) -> bool:
     """Whether the package writing a skill directory also wrote what is there (#5399).
 
-    A dependency's skills are named in the lock's owner map. The project's own
-    skills (receipt owner ``.``) have no dependency row, so a managed directory
-    that no dependency owns is theirs, never "another package".
+    The lock's owner map names a dependency by its key and the project's own
+    skills by ``PROJECT_SKILLS`` (``build_skill_ownership_maps``), the receipt
+    owner ``.``; either spelling of the current writer is a self-overwrite,
+    never "another package".
     """
-    if prev_owner is not None:
-        return prev_owner == parent_name
-    return is_managed and getattr(writer, "_skill_current_owner", None) == "."
+    from apm_cli.integration.skill_support import PROJECT_SKILLS
+
+    if prev_owner is None:
+        return False
+    if prev_owner == PROJECT_SKILLS:
+        return getattr(writer, "_skill_current_owner", None) == "."
+    return prev_owner == parent_name
 
 
 def skill_tree_baselines(
