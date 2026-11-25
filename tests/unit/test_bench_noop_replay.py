@@ -68,3 +68,15 @@ def test_a_failed_warm_up_install_fails_the_cell(failing: int) -> None:
 
     with pytest.raises(RuntimeError, match=r"failed \(1\)"):
         journeys._setup_replay(ctx)
+
+
+def test_the_frozen_noop_journey_reinstalls_an_installed_project_frozen() -> None:
+    """install-frozen-noop: install #2 with --frozen (#4770), on every fixture."""
+    journey = journeys.JOURNEYS["install-frozen-noop"]
+    ctx = SimpleNamespace(roots=lambda: [Path(".")], project=Path("."))
+
+    assert "install-frozen-noop" in journeys.ALL_JOURNEYS
+    assert journey.setup is journeys.Context.installed
+    assert journey.env == journeys._REPLAY_TRACE
+    assert [argv for argv, _cwd in journey.steps(ctx)] == [["install", "--frozen"]]
+    assert journeys._journeys_for(_fixture("a", "b"), 0, True, [journey.name], []) == [journey.name]

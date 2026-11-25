@@ -75,6 +75,7 @@ NETWORK_JOURNEYS = (
     "install-warm",
     "install-noop",
     "install-noop-replay",
+    "install-frozen-noop",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
@@ -782,6 +783,14 @@ JOURNEYS: dict[str, Journey] = {
         # install-noop-replay is every later one (#3+): it replays that record.
         Journey(
             "install-noop", Context.installed, lambda c: _per_root(c, ["install"]), _REPLAY_TRACE
+        ),
+        # install-frozen-noop is a CI's --frozen re-install of an installed,
+        # unchanged project (#4770): the lockfile is never rewritten.
+        Journey(
+            "install-frozen-noop",
+            Context.installed,
+            lambda c: _per_root(c, ["install", "--frozen"]),
+            _REPLAY_TRACE,
         ),
         Journey(
             "install-noop-replay",
