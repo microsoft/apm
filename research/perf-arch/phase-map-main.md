@@ -14,3 +14,5 @@
 | policy/audit/scan | 0.961 | 3.9% / 0.5 | 0.980 | 2.0% / 0.1 | 45520658679 / 45520729238 |
 | integrate on warm | 0.523 | | 0.512 | | same |
 Residual (boot+resolve+fetch+glue) ~25%. Per-shard +-2%.
+
+CORRECTION (E2, 02:46): the lockfile+ledger+journal row is CONFOUNDED (deleting lockfile build/write makes downstream MCP/LSP update_lockfile, post_deps_local, claude_plugins skip). lockfile.py ~3% L inclusive [45521813477]; real = ledger _trusted_hash lstat chain (~3.3k lstat, W 0.91 s, containment family) + journal (L ~7%).

@@ -240,3 +240,16 @@
 02:14 | VP: frozen+MCP car only if W3d-trivial predicate + >=5% + all signed by 05:00, else v0.40; correctness wins -> SoL | SoL families 03:00 | none
 02:16 | integrate split on main: skills 14.6% W, shared 18.8%, lock phase 21%; phase-map-main.md; frozen MCP sizing afe0c87a running | SoL frozen 30 min; Bets shapes 03:30 | none
 02:20 | Bets shapes interim: A plan-once W 0.970 (misses alone); A+B upper bound in flight | Bets 25 min; SoL frozen MCP | none
+02:23 | tick; notes fa38cac72b8ed9eec08cc6459bba4ddc41dc2ac4 (incl phase-map-main) | Bets A+B 25 min; SoL frozen MCP | none
+02:27 | frozen MCP KILLED (trace artifact; guard correct); SoL -> residual resolve/fetch deletion (04:00) + doc sec 1 floor (05:30) -> VP | Bets A+B 02:50 | none
+02:31 | FINDING A+B ceiling W 0.688 (clears) / L 0.901 (misses); W win = containment; re-measure on #5374 + L parse-once -> VP | Bets 04:30; SoL residual 04:00 | none
+02:31 | VP sec2 asks (W invariant first, W3d co-sign; L parse-once differential) -> Bets | Bets 04:30; SoL 04:00 | none
+02:34 | tick quiet | Bets 04:30 (W on #5374, L parse-once) + sec2 05:30; SoL residual 04:00 + sec1 05:30 | none
+02:39 | W clears on #5374 (0.718); L parse-once 0.914 misses; render diff clean; sec2 drafted -> VP; Bets: lockfile A/A delta + L skill-tree | Bets 20 min; SoL 04:00 | none
+02:39 | VP validated W lever (-4.45 s on #5374); PRIORITY monorepo lockfile A/A nondeterminism repro by 04:00 -> Bets | Bets 04:00; SoL 04:00 | possible lockfile nondeterminism
+02:41 | lock-phase 21-23% = CONFOUND (E2): outline + phase map corrected; SoL sec1 + Bets sec2 told (_trusted_hash = containment family) | E2 04:00; Bets/SoL 04:00 | none
+02:42 | sec1 drafted (SoL): integrate 41.5/50.9%, resolve+fetch 33% (new lane cand), total 8.7x/11x -> VP; SoL MCP deletion + materialization re-measure 04:30 | SoL; Bets lockfile repro 04:00 | none
+02:42 | VP approved materialization re-measure w/ immunity constraint; SoL told (M1/M2/M3, runner FS caveat); W3d asked M1-M3 view by 05:30 | SoL 04:30; W3d 05:30 | none
+02:44 | W3d ruled materialize-once: M1/M2 OK (MS1-MS7), M3 rejected -> VP + SoL | SoL 04:30; Bets lockfile 04:00 | none
+02:45 | PRODUCT FINDING: lockfile embeds absolute paths for monorepo siblings (local_identity.py portable_anchor_identity) -> issue #5418 filed, VP asked QL row | Bets L skill-tree; SoL 04:30 | none
+02:45 | VP: #5418 pre-existing (e37400fa), QL row + PM known-issue, v0.40 w/ rekey, L5 fix owner; Bets back to sec2/L skill-tree (already told) | Bets; SoL 04:30 | none
