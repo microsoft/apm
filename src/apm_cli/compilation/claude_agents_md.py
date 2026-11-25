@@ -678,7 +678,8 @@ def lock_ships_routable_instruction(project_root: Path, lock: object) -> bool:
     Routing reads carriers anywhere under the project, and a directory
     instruction routes once its directory and carrier exist, so this is the
     static form (:func:`routes_to_agents_md` without a root). A fast path that
-    replays the lock declines for any such instruction; an unreadable one counts.
+    replays the lock declines for any such instruction; an unreadable one, or a
+    missing package copy the engine would restore, counts.
     """
     from ..constants import APM_MODULES_DIR
     from ..integration.instruction_integrator import InstructionIntegrator
@@ -690,6 +691,8 @@ def lock_ships_routable_instruction(project_root: Path, lock: object) -> bool:
             continue
         try:
             package = dependency.to_dependency_ref().get_install_path(modules)
+            if package.is_symlink() or not package.is_dir():
+                return True  # a copy the engine would restore: unknown content counts
             for source in integrator.find_instruction_files(package):
                 metadata = integrator._parse_frontmatter(source.read_text(encoding="utf-8"))[0]
                 if routes_to_agents_md(metadata.get("applyTo")):

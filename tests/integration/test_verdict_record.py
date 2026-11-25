@@ -1654,6 +1654,7 @@ def _ship_instruction(project: Path, apply_to: str) -> None:
         ("**", False, True),
         ("**/*.py", True, False),
         (None, True, False),  # no instruction: a nested carrier decides nothing
+        ("missing-copy", False, True),  # a copy the engine would restore: unknown counts
     ],
 )
 def test_the_engine_fast_path_declines_for_a_routable_instruction(
@@ -1664,7 +1665,9 @@ def test_the_engine_fast_path_declines_for_a_routable_instruction(
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install import diff_apply
 
-    if apply_to is not None:
+    if apply_to == "missing-copy":
+        shutil.rmtree(project / "apm_modules" / "o" / "p")
+    elif apply_to is not None:
         _ship_instruction(project, apply_to)
     if carrier:
         _nested_carrier(project)
