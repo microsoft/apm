@@ -318,3 +318,27 @@ def test_frozen_proxy_archive_row_is_verifiable_only_on_its_route(
     else:
         with pytest.raises(ImmutableRequirementError, match="no verifiable commit"):
             requirements.add(node)
+
+
+@pytest.mark.parametrize("parallel", [1, 4])
+def test_an_incompatible_pin_past_max_depth_is_a_conflict_not_a_silent_win(
+    tmp_path: Path, parallel: int
+) -> None:
+    """#5413: an edge past max_depth to a package resolved no deeper still meets conflict selection.
+
+    The direct org/shared pin exempts the depth-2 edge from the depth refusal, but
+    that edge's incompatible pin must fail as a conflict, naming both chains.
+    """
+    _project(tmp_path, OLD, NEW)
+    before = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()}
+
+    graph = APMDependencyResolver(max_depth=1, max_parallel=parallel).resolve_dependencies(tmp_path)
+
+    assert not graph.is_valid()
+    diagnostic = "\n".join(graph.resolution_errors)
+    assert "incompatible immutable requirements" in diagnostic
+    assert f"consumer -> org/shared@{OLD}" in diagnostic
+    assert f"consumer -> org/parent@HEAD -> org/shared@{NEW}" in diagnostic
+    assert "Dependency depth limit" not in diagnostic
+    # Resolution refuses before anything is written.
+    assert {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()} == before

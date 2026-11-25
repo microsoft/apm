@@ -6,6 +6,7 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
+import os
 import shutil  # noqa: F401
 from urllib.parse import urlparse
 
@@ -330,3 +331,157 @@ class TestDependencyParseTraversalRejection:
 # ---------------------------------------------------------------------------
 # DependencyReference.get_install_path containment
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# filesystem_containment(): the filesystem-aware containment calculation
+# ---------------------------------------------------------------------------
+
+
+class TestFilesystemContainment:
+    """Case and Unicode spellings of a root are judged by directory identity."""
+
+    def test_child_of_the_root_is_contained(self, tmp_path):
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project"
+        (root / "bin").mkdir(parents=True)
+        assert filesystem_containment(root / "bin", root) is True
+
+    def test_sibling_of_the_root_is_outside(self, tmp_path):
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project"
+        root.mkdir()
+        (tmp_path / "tools").mkdir()
+        assert filesystem_containment(tmp_path / "tools", root) is False
+
+    def test_unicode_case_variant_of_the_root_is_contained(self, tmp_path, monkeypatch):
+        import os
+
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project-\u0390"
+        root.mkdir()
+        variant = tmp_path / "PROJECT-\u03aa\u0301"
+        variant.mkdir(exist_ok=True)
+        # Stand in for a case-insensitive volume, where both spellings are one directory.
+        monkeypatch.setattr(os.path, "samefile", lambda *_args: True)
+        assert filesystem_containment(variant / "bin", root) is True
+
+    def test_unverifiable_case_variant_is_unknown(self, tmp_path, monkeypatch):
+        import os
+
+        from apm_cli.utils.path_security import filesystem_containment
+
+        # Spellings no lexical or normcase fast path folds together, on any platform.
+        root = tmp_path / "project-\u0390"
+        root.mkdir()
+        variant = tmp_path / "PROJECT-\u03aa\u0301"
+
+        def _unverifiable(*_args):
+            raise PermissionError("cannot stat")
+
+        monkeypatch.setattr(os.path, "samefile", _unverifiable)
+        assert filesystem_containment(variant / "bin", root) is None
+
+
+def test_the_refusal_names_a_link_as_printable_ascii() -> None:
+    """A link name with control characters is rendered printable before display (#5215)."""
+    from apm_cli.utils.path_security import symlinked_deploy_refusal
+
+    message = symlinked_deploy_refusal("skills\x1b[31m\u202e")
+
+    assert message.isascii() and message.isprintable()
+    assert "\x1b" not in message and "\u202e" not in message
+
+
+# ---------------------------------------------------------------------------
+# has_symlink_component(): a Windows junction below the base is a link (#5229)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junction_below_the_base_counts_as_a_link(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _winapi.CreateJunction(str(outside), str(base / "agents"))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is True
+    assert has_symlink_component(base, base / "agents" / ".." / "a.md") is True
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_a_junctioned_base_itself_is_not_flagged(tmp_path) -> None:
+    import _winapi
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    real = tmp_path / "real"
+    (real / "agents").mkdir(parents=True)
+    base = tmp_path / "junction-base"
+    _winapi.CreateJunction(str(real), str(base))
+
+    assert has_symlink_component(base, base / "agents" / "a.md") is False
+
+
+def _reparse_stat(tag: int):
+    """A directory lstat result carrying a reparse point with *tag* (Windows fields)."""
+    import stat
+    from types import SimpleNamespace
+
+    return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400, st_reparse_tag=tag)
+
+
+@pytest.mark.parametrize(
+    ("tag", "linked"),
+    [(0xA000001D, True), (0xA0000003, True), (0x9000001A, False)],
+    ids=["lx-symlink", "junction", "data-only-cloud-file"],
+)
+def test_a_name_surrogate_reparse_point_below_the_base_counts_as_a_link(
+    tmp_path, monkeypatch, tag: int, linked: bool
+) -> None:
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(tag) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / "a.md") is linked
+
+
+def test_stepping_back_over_a_name_surrogate_reparse_point_counts_as_a_link(
+    tmp_path, monkeypatch
+) -> None:
+    """``..`` after a junction is judged like ``..`` after a symbolic link."""
+    from pathlib import Path
+
+    from apm_cli.utils.path_security import has_symlink_component
+
+    base = tmp_path / "project"
+    (base / "agents").mkdir(parents=True)
+    reparse = base / "agents"
+    real_lstat = Path.lstat
+
+    def _lstat(self: Path, *args, **kwargs):
+        return _reparse_stat(0xA0000003) if self == reparse else real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", _lstat)
+
+    assert has_symlink_component(base, reparse / ".." / "a.md") is True

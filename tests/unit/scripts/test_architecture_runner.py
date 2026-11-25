@@ -648,6 +648,7 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-spelling-aliases
 install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
@@ -676,18 +677,22 @@ install-deployment-install-lockfile-preflight
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-local-reparent-rule
 install-deployment-lock-parent-placement
 install-deployment-locked-content-verdict
 install-deployment-locked-copy-validity
 install-deployment-lockfile-required
 install-deployment-locked-source-cache
 install-deployment-package-content-hash
+install-deployment-reanchor-receipt-history
+install-deployment-reanchor-writer-prediction
 install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
 install-deployment-skill-adoption-trusted-receipt
 install-deployment-selection-merge
+install-deployment-server-name-rule
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
@@ -721,6 +726,7 @@ install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
+install-deployment-remote-read-reuse
 install-deployment-registry-url-scheme
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
@@ -734,6 +740,7 @@ install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
+install-deployment-uninstall-absence-proof
 install-deployment-uninstall-preflight
 install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability
@@ -850,13 +857,17 @@ transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
 transport-platform-credential-value-rendering
+transport-platform-deploy-store-verified-reads
 transport-platform-egress-route-policy
+transport-platform-external-executable-owner
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-credential-class
 transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
+transport-platform-held-directory-release
+transport-platform-held-root-registration
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-http-session-construction
@@ -870,6 +881,7 @@ transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
+transport-platform-rmtree-callback-no-follow-chmod
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
@@ -1952,3 +1964,65 @@ def test_public_run_has_no_partial_selection_surface() -> None:
     executed = [result.rule_id for group in partial.group_results for result in group.rules]
     assert executed == [picked]
     assert partial.exit_code == 2
+
+
+def test_the_definition_index_matches_the_direct_scan_and_fails_closed(tmp_path: Path) -> None:
+    """Indexed definers and fail-closed violations equal the per-call scan (#5196)."""
+    from scripts.architecture_linter.checks.registry_definition_index import (
+        _defining_files,
+        _scan_defining_files,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    sources = {
+        "src/apm_cli/a.py": "def target():\n    pass\n\n\nclass Target:\n    pass\n",
+        "src/apm_cli/b.py": "class Holder:\n    def target(self):\n        pass\n",
+        "src/apm_cli/broken.py": "def (:\n",
+    }
+    provider = FactsProvider(tmp_path, tuple(sources), registry=None, source_overrides=sources)
+    for name, kinds in (
+        ("target", ("function",)),
+        ("Target", ("class",)),
+        ("absent", ("function",)),
+    ):
+        indexed = _defining_files(provider, "rule-x", name, kinds=kinds)
+        assert indexed == _scan_defining_files(provider, "rule-x", name, kinds=kinds)
+        assert [failure.path for failure in indexed[1]] == ["src/apm_cli/broken.py"]
+    definers, _ = _defining_files(provider, "rule-x", "target", kinds=("function",))
+    assert "src/apm_cli/a.py" in definers
+
+
+def test_every_binary_selection_detector_is_gated_or_always_runs() -> None:
+    """A detector added without a pre-filter gate can never be skipped silently (#5196)."""
+    from dataclasses import fields
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _BINARY_DETECTORS,
+        _BinaryNeeds,
+    )
+
+    gates = [detector.gate for detector in _BINARY_DETECTORS if detector.gate is not None]
+    assert len(gates) == len(set(gates)), gates
+    assert set(gates) == {field.name for field in fields(_BinaryNeeds)}
+
+
+def test_a_token_free_file_skips_every_binary_selection_detector(tmp_path: Path) -> None:
+    """A synthetic token-free file needs no detector; a file with the tokens needs its own."""
+    from dataclasses import asdict
+
+    from scripts.architecture_linter.checks.contracts_structural_authorities import (
+        _binary_needs,
+    )
+    from scripts.architecture_linter.facts import FactsProvider
+
+    plain = "def helper(value):\n    if value:\n        return value\n    return None\n"
+    tokened = 'import subprocess\n\n\ndef helper():\n    subprocess.run(["apm"], check=False)\n'
+    provider = FactsProvider(
+        tmp_path,
+        ("plain.py", "tokened.py"),
+        registry=None,
+        source_overrides={"plain.py": plain, "tokened.py": tokened},
+    )
+    assert not any(asdict(_binary_needs(provider.tree_index("plain.py"))).values())
+    needs = asdict(_binary_needs(provider.tree_index("tokened.py")))
+    assert {flag for flag, on in needs.items() if on} == {"subprocess"}

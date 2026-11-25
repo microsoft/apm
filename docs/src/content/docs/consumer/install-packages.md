@@ -29,6 +29,18 @@ You can also edit the manifest and run a bare `apm install`:
 +    - contoso/review-skills#v1.1.0
 ```
 
+### Working from subdirectories
+
+Running `apm install` from a subdirectory of a project automatically discovers
+the nearest ancestor `apm.yml`. Sources, lockfiles, and deployed harness files
+anchor to that project root, leaving the subdirectory clean:
+
+```bash frame="terminal"
+cd src/components
+apm install contoso/review-skills#v1.1.0
+# [i] Using apm.yml at /path/to/project/apm.yml (project root: /path/to/project)
+```
+
 ## Reference formats
 
 `apm install` and `dependencies.apm` accept these forms:
@@ -70,7 +82,8 @@ apm install contoso/review-skills --skill security-review
 APM saves the selection as a `skills:` list on the entry, so a bare
 `apm install` deploys the same subset. A later `--skill` adds to the list;
 `--skill '*'` resets it to every skill. To drop one, edit the `skills:` list
-and run `apm install`.
+and run `apm install`. `apm install contoso/review-skills#v2` on that entry
+changes only its `ref`; `skills:`, `targets:` and `alias:` stay.
 
 ## Install local paths and bundles
 
@@ -98,7 +111,8 @@ when the lockfile also records its deployment, and org MCP policy still applies 
 it. Org policy resolves as for a package install; when it cannot be resolved,
 `policy.fetch_failure_default` decides. Approved bundle hooks are re-checked on
 every install, update and prune, and retired once their approval is removed or
-org policy denies them. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
+org policy denies them. `apm uninstall <bundle>` (or the bundle name, once the
+bundle file is gone) removes the bundle's deployed hooks; its other files stay. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
 current directory's `apm.yml`. To build one, see
 [Build a plugin](../../producer/build-a-plugin/).
 

@@ -101,6 +101,20 @@ Where the folder already is the harness's own (`.claude/skills/` for Claude Code
 your file in place and reports it as `(files unchanged)`. Loose rules, hooks and MCP config are listed in the
 report but not adopted.
 
+Discovery checks root files and known target directories (for example `.claude/`, including
+their subdirectories); it does not search the rest of the project tree, so a file such as
+`demo-repo/CLAUDE.md` is not listed. A root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` is reported
+as `unsupported`: it is not adopted as an APM package, but it is not invalid for its tool and
+stays in place untouched.
+
+Keep your native instructions, declare and install supported packages next to them, and let
+`apm compile` handle only APM content (`.apm/` primitives and installed dependencies). If a
+project has only native files, `apm compile` reports `No APM content found to compile` and
+exits `1` without modifying them.
+
+Authoring APM copies of native files is optional. If you author them manually, you have two
+sources of truth to keep in sync.
+
 To share these skills with other repositories, move them into a package of their own:
 [Create a package](../../producer/create-a-package/).
 

@@ -221,6 +221,27 @@ def _reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_verdict_stage():
+    """Discard a commit-reachability verdict stage a test left open.
+
+    An install transaction opens a process-global stage whose ref listings
+    are memoized per remote. A test that builds one without committing or
+    discarding it would serve those listings to later tests on the worker
+    (#5199: a no-ref dependency now lists refs too).
+    """
+    from apm_cli.cache import commit_reachability
+
+    def _discard() -> None:
+        stage = commit_reachability._stage()
+        if stage is not None:
+            stage.discard()
+
+    _discard()
+    yield
+    _discard()
+
+
+@pytest.fixture(autouse=True)
 def _reset_marketplace_registry_cache():
     """Drop the process-wide marketplace registry cache around each test.
 
@@ -270,8 +291,17 @@ def _restore_executable_caches():
         with contextlib.suppress(FileNotFoundError):
             git_env.get_git_executable()
     saved = (git_env._git_executable, git_env._gh_executable)
+    # An in-process CLI start disables the Windows working-directory program
+    # search for the process; undo it so later tests see the original env.
+    cwd_search = os.environ.get(git_env._NO_CWD_SEARCH)
+    user_cwd_search = git_env._user_no_cwd_search
     yield
     git_env._git_executable, git_env._gh_executable = saved
+    git_env._user_no_cwd_search = user_cwd_search
+    if cwd_search is None:
+        os.environ.pop(git_env._NO_CWD_SEARCH, None)
+    else:
+        os.environ[git_env._NO_CWD_SEARCH] = cwd_search
 
 
 @pytest.fixture(autouse=True)

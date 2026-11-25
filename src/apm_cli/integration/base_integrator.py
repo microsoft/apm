@@ -2,9 +2,10 @@
 
 import errno
 import os
+import posixpath
 import re
 import stat
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -21,7 +22,8 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
-from apm_cli.utils.paths import stored_alias
+from apm_cli.utils.paths import is_within, relative_to, stored_alias
+from apm_cli.utils.realpath import resolve_path
 
 if TYPE_CHECKING:
     from apm_cli.core.deployment_ledger import OverwriteGate
@@ -289,6 +291,10 @@ class BaseIntegrator:
     # it out of a hardcoded literal buried inside the predicate.
     _LF_NORMALIZED_DEPLOY = False
 
+    # How a path two packages deploy is settled, as this integrator applies it.
+    # ``None`` = not declared: a caller predicting the final writer refuses.
+    SHARED_PATH_RULE: str | None = None
+
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
 
@@ -309,12 +315,13 @@ class BaseIntegrator:
         """Keep only files admitted by the canonical deployment source plan."""
         if source_plan is None:
             return files
-        from apm_cli.utils.paths import portable_relpath
+        from apm_cli.utils.paths import portable_relpaths
 
+        relatives = portable_relpaths(files, source_plan.source_root)
         return [
             path
-            for path in files
-            if source_plan.includes(portable_relpath(path, source_plan.source_root))
+            for path, relative in zip(files, relatives, strict=True)
+            if source_plan.includes(relative)
         ]
 
     # ------------------------------------------------------------------
@@ -505,6 +512,32 @@ class BaseIntegrator:
             return None
         return edit_kind(expected, incoming)
 
+    @staticmethod
+    def unique_destinations(pairs: Iterable[tuple[Path, Path]]) -> dict[Path, Path] | None:
+        """``{destination: source}``, or ``None`` when two sources share a destination."""
+        planned: dict[Path, Path] = {}
+        for destination, source in pairs:
+            if planned.setdefault(destination, source) != source:
+                return None
+        return planned
+
+    def admitted_source_listing(
+        self, source: Path, ignore: Callable[[str, list[str]], list[str]]
+    ) -> Iterator[tuple[str, list[str]]]:
+        """Each directory of *source* a directory copy walks, with its admitted file names."""
+        for directory, directories, filenames in self.walk_source_tree(source):
+            ignored = set(ignore(directory, [*directories, *filenames]))
+            directories[:] = sorted(name for name in directories if name not in ignored)
+            yield directory, sorted(name for name in filenames if name not in ignored)
+
+    def admitted_source_members(
+        self, source: Path, ignore: Callable[[str, list[str]], list[str]]
+    ) -> Iterator[Path]:
+        """Every member of *source* a directory copy admits, in copy order."""
+        for directory, filenames in self.admitted_source_listing(source, ignore):
+            for name in filenames:
+                yield Path(directory) / name
+
     def copy_directory_files(
         self,
         source: Path,
@@ -533,14 +566,10 @@ class BaseIntegrator:
 
         copied: list[Path] = []
         destination_existed = destination.exists()
-        for directory, directories, filenames in self.walk_source_tree(source):
-            ignored = set(ignore(directory, [*directories, *filenames]))
-            directories[:] = sorted(name for name in directories if name not in ignored)
-            for name in sorted(filenames):
-                if name in ignored:
-                    continue
+        for directory, filenames in self.admitted_source_listing(source, ignore):
+            for name in filenames:
                 source_file = Path(directory) / name
-                target_file = destination / source_file.relative_to(source)
+                target_file = destination / relative_to(source_file, source)
                 if has_symlink_component(destination.parent, target_file, raise_on_error=True):
                     raise PathTraversalError(
                         f"Skill destination {target_file} contains a symlink -- refusing to deploy"
@@ -812,9 +841,13 @@ class BaseIntegrator:
         """
         if cls.is_content_identical_to_text(path, text, lf_normalized_deploy=True):
             return False
+        from apm_cli.utils.content_hash import text_write_hash
+
         write_seam.mkdir(path.parent, parents=True, exist_ok=True)
-        write_seam.record_before_write(path)
+        expected = text_write_hash(text, lf=True)
+        write_seam.record_before_write(path, expected=expected)
         writer(path, text)
+        write_seam.record_after_write(path)
         return True
 
     def _check_adopt_or_skip(
@@ -1044,14 +1077,15 @@ class BaseIntegrator:
         Set *allow_final_symlink* only when unlinking the final path itself.
 
         Checks:
-        1. No path-traversal components (``..``)
+        1. No path-traversal components (``..``) and no ``.`` segment:
+           only canonical paths are admitted
         2. Starts with an allowed integration prefix
         3. Resolves within *project_root*, a configured absolute target root,
            or the cowork root for ``cowork://`` paths
         """
         from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
-        if ".." in rel_path:
+        if ".." in rel_path or "." in rel_path.replace("\\", "/").split("/"):
             return False
 
         candidate = Path(rel_path)
@@ -1078,6 +1112,7 @@ class BaseIntegrator:
             # Resolve to absolute and validate containment against cowork root.
             try:
                 from apm_cli.integration.copilot_cowork_paths import (
+                    cowork_locator,
                     from_lockfile_path,
                     resolve_copilot_cowork_skills_dir,
                 )
@@ -1085,8 +1120,13 @@ class BaseIntegrator:
                 cowork_root = resolve_copilot_cowork_skills_dir()
                 if cowork_root is None:
                     return False
-                # from_lockfile_path internally calls ensure_path_within.
-                from_lockfile_path(rel_path, cowork_root)
+                if allow_final_symlink:
+                    # Contain the parent, refuse linked ancestors, never follow
+                    # the final link: the project gate's rule for cowork:// (#5022).
+                    cowork_locator(rel_path, cowork_root, reject_linked_ancestors=True)
+                else:
+                    # from_lockfile_path internally calls ensure_path_within.
+                    from_lockfile_path(rel_path, cowork_root)
                 return True
             except Exception:
                 return False
@@ -1097,9 +1137,9 @@ class BaseIntegrator:
         try:
             if has_symlink_component(project_root, target.parent):
                 return False
-            root = resolved_project_root or project_root.resolve()
+            root = resolved_project_root or resolve_path(project_root)
             containment_target = target.parent if allow_final_symlink else target
-            if not containment_target.resolve().is_relative_to(root):
+            if not is_within(resolve_path(containment_target), root):
                 return False
         except (ValueError, OSError):
             return False
@@ -1206,11 +1246,13 @@ class BaseIntegrator:
                         prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
-                prefix = (
-                    f"{effective_root}/{mapping.subdir}/"
-                    if mapping.subdir
-                    else f"{effective_root}/"
+                # Canonical spelling, so a root of "." routes "skills/..." claims (#5096).
+                prefix = posixpath.normpath(
+                    f"{effective_root}/{mapping.subdir}" if mapping.subdir else effective_root
                 )
+                prefix = "" if prefix == "." else f"{prefix}/"
+                if not prefix:
+                    continue  # a primitive at the root itself owns no prefix
                 if prim_name == "skills":
                     skill_prefixes.append(prefix)
                 elif prim_name == "hooks":
@@ -1356,8 +1398,8 @@ class BaseIntegrator:
         as ``HookIntegrator._is_root_local_package``).
         """
         try:
-            resolved_install = Path(package_info.install_path).resolve()
-            if resolved_install == Path(project_root).resolve():
+            resolved_install = resolve_path(Path(package_info.install_path))
+            if resolved_install == resolve_path(Path(project_root)):
                 return True
             root_local = getattr(package_info, "root_local_project_root", None)
             if root_local is not None:
@@ -1368,6 +1410,8 @@ class BaseIntegrator:
 
     def init_link_resolver(self, package_info, project_root: Path) -> None:
         """Initialise and register the link resolver for a package."""
+        from apm_cli.utils.realpath import resolve_path
+
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
             install_path = Path(package_info.install_path)
@@ -1386,7 +1430,7 @@ class BaseIntegrator:
             #   Generic patterns like ``**/*.instructions.md`` would
             #   otherwise traverse every file in the repo even when
             #   the user only has a handful of primitives under .apm/.
-            if install_path.resolve() == home_root.resolve():
+            if resolve_path(install_path) == resolve_path(home_root):
                 home_apm_root = install_path / ".apm"
                 scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
                 narrowed_local = False
@@ -1415,7 +1459,7 @@ class BaseIntegrator:
             # .apm/ and .github/. Skip only when scan_root was narrowed
             # to ~/.apm/ (user-scope $HOME) so we do not let asset links
             # escape the .apm/ boundary on $HOME packages.
-            if install_path.resolve() != home_root.resolve() and install_path.is_dir():
+            if resolve_path(install_path) != resolve_path(home_root) and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
                     self.link_resolver.deployment_package_root = Path(
@@ -1564,6 +1608,8 @@ class BaseIntegrator:
         Returns:
             De-duplicated list of matching ``Path`` objects.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         results: list[Path] = []
         seen: set = set()
 
@@ -1592,7 +1638,7 @@ class BaseIntegrator:
                         continue
                 except OSError:
                     continue
-                resolved = f.resolve()
+                resolved = resolve_path(f)
                 # Defense-in-depth containment guard: skip files whose
                 # resolved path escapes the package root.  Belt-and-
                 # suspenders against any future regression in the
@@ -1600,8 +1646,8 @@ class BaseIntegrator:
                 # for the canonical predicate; we inline the check here to stay
                 # loop-fast and avoid raising on every malicious entry.
                 try:
-                    pkg_resolved = package_path.resolve()
-                    if not resolved.is_relative_to(pkg_resolved):
+                    pkg_resolved = resolve_path(package_path)
+                    if not is_within(resolved, pkg_resolved):
                         continue
                 except (ValueError, OSError):
                     continue

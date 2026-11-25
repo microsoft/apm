@@ -9,7 +9,94 @@ from __future__ import annotations
 import os
 import unicodedata
 from collections.abc import Callable, Container, Iterable, Iterator
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, WindowsPath
+
+from .realpath import resolve_path
+
+# Marks an input the string comparison does not decide; pathlib decides it.
+_UNDECIDED = object()
+# Only pathlib's own classes: a subclass may override relative_to/is_relative_to.
+_STANDARD_CLASSES = frozenset({PurePosixPath, PureWindowsPath, PosixPath, WindowsPath})
+
+
+def _comparable(text: str, base_text: str, windows: bool) -> tuple[str, str, str] | None:
+    """Both texts in comparison form with their separator, or ``None`` when undecided."""
+    if not windows:
+        if text[:1] != "/" or base_text[:1] != "/" or text[:2] == "//" or base_text[:2] == "//":
+            return None
+        return text, base_text, "/"
+    for value in (text, base_text):
+        if len(value) < 3 or value[1:3] != ":\\" or not value[0].isascii():
+            return None
+        if not value[0].isalpha():
+            return None
+    folded, base_folded = text.lower(), base_text.lower()
+    if len(folded) != len(text) or len(base_folded) != len(base_text):
+        return None
+    return folded, base_folded, "\\"
+
+
+def _remainder(path: PurePath, base: PurePath) -> object:
+    """Text of *path* below *base*, ``None`` when it is not below, or ``_UNDECIDED``.
+
+    Decides only the common shape: both paths the same standard pathlib class
+    and absolute, rooted at ``/`` (POSIX) or at ``X:\\`` (Windows). Their
+    ``str`` forms are already normalized, so containment is a prefix test on
+    whole components, case-insensitive on Windows as pathlib compares. Every
+    other shape (UNC, ``\\\\?\\``, ``//``, drive-relative, relative, mixed or
+    subclassed classes) and any input whose lowercase changes length is
+    ``_UNDECIDED``.
+    """
+    if type(path) is not type(base) or type(path) not in _STANDARD_CLASSES:
+        return _UNDECIDED
+    windows = isinstance(path, PureWindowsPath)
+    text = str(path)
+    compared = _comparable(text, str(base), windows)
+    if compared is None:
+        return _UNDECIDED
+    folded, base_folded, sep = compared
+    if folded == base_folded:
+        return ""
+    prefix = base_folded if base_folded.endswith(sep) else base_folded + sep
+    if not folded.startswith(prefix):
+        return None
+    rest = text[len(prefix) :]
+    return _UNDECIDED if windows and ":" in rest else rest
+
+
+def relative_to(path: PurePath, base: PurePath) -> PurePath:
+    """``path.relative_to(base)`` without pathlib's per-parent object walk.
+
+    Same result type and value; when *path* is not below *base*, pathlib
+    itself raises, so the exception is pathlib's on every Python version.
+    """
+    rest = _remainder(path, base)
+    if rest is _UNDECIDED or rest is None:
+        return path.relative_to(base)
+    return type(path)(rest)
+
+
+def relative_posix(path: PurePath, base: PurePath) -> str | None:
+    """``path.relative_to(base).as_posix()``, or ``None`` when it is not below *base*."""
+    rest = _remainder(path, base)
+    if rest is None:
+        return None
+    if rest is _UNDECIDED:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            return None
+    if not rest:
+        return "."
+    return rest.replace("\\", "/") if isinstance(path, PureWindowsPath) else rest
+
+
+def is_within(path: PurePath, base: PurePath) -> bool:
+    """``path.is_relative_to(base)``: a pure comparison, no filesystem access."""
+    rest = _remainder(path, base)
+    if rest is _UNDECIDED:
+        return path.is_relative_to(base)
+    return rest is not None
 
 
 def portable_relpath(path: Path, base: Path) -> str:
@@ -22,12 +109,43 @@ def portable_relpath(path: Path, base: Path) -> str:
     a resolved absolute POSIX path.
     """
     try:
-        return path.resolve().relative_to(base.resolve()).as_posix()
+        relative = relative_posix(resolve_path(path), resolve_path(base))
     except (ValueError, OSError, RuntimeError):
-        try:
-            return path.resolve().as_posix()
-        except (OSError, RuntimeError):
-            return path.as_posix()
+        relative = None
+    if relative is not None:
+        return relative
+    try:
+        return resolve_path(path).as_posix()
+    except (OSError, RuntimeError):
+        return path.as_posix()
+
+
+def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
+    """:func:`portable_relpath` of each path against one *base*, resolving it once.
+
+    Each path is still resolved at use, through :func:`resolve_path` as
+    :func:`portable_relpath` does; only the shared base is not resolved again
+    per path within this call.
+    """
+    try:
+        resolved_base: Path | None = resolve_path(base)
+    except (OSError, RuntimeError):
+        resolved_base = None
+    results: list[str] = []
+    for path in paths:
+        relative = None
+        if resolved_base is not None:
+            try:
+                relative = relative_posix(resolve_path(path), resolved_base)
+            except (ValueError, OSError, RuntimeError):
+                relative = None
+        if relative is None:
+            try:
+                relative = resolve_path(path).as_posix()
+            except (OSError, RuntimeError):
+                relative = path.as_posix()
+        results.append(relative)
+    return results
 
 
 def portable_link_relpath(
@@ -67,8 +185,27 @@ def resolve_base_and_source_dirs(
     return resolved_base, resolved_source
 
 
-def _spelling_key(rel_path: str) -> str:
-    return unicodedata.normalize("NFC", rel_path.replace("\\", "/")).casefold()
+def caseless(text: str) -> str:
+    """Unicode canonical caseless key of *text*: NFD, case folding, then NFC.
+
+    Decomposing first and recomposing after matches canonical caseless
+    matching: folding can undo a composition the input had (U+0390 and the
+    NFD capital iota with U+0308 U+0301 share one key). The one key for path
+    spellings and containment (#5158, #5167).
+    """
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", text).casefold())
+
+
+def spelling_key(path: str) -> str:
+    """Caseless, ``/``-separated key of *path*.
+
+    Spellings that differ only in letter case or Unicode normalization share
+    one key; whether they are one entry is a property of the volume.
+    """
+    return caseless(path.replace("\\", "/"))
+
+
+_spelling_key = spelling_key
 
 
 def _same_entry(left: Path, right: Path) -> bool:

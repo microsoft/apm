@@ -1,0 +1,19 @@
+{
+  "issue": 5134,
+  "fixed_in": "Unreleased",
+  "summary": "Replay applied a journal unit's recorded mode when it was valid permission bits, although the mode is journal data with no owner-backed evidence; replay now never applies a mode with a permission bit the path lacks now (absent paths capped at 0o644 for files and 0o755 for directories; a path that is now a link is refused), and a unit that would widen is kept and reported.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_deploy_snapshot.py::test_a_recorded_mode_wider_than_the_path_has_now_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_store_others_can_write_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_store_another_user_owns_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_journal_that_is_a_link_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_file_recreated_from_absence_honors_the_umask",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_directory_recreated_from_absence_honors_the_umask"
+  ]
+}

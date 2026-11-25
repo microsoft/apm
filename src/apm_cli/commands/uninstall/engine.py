@@ -39,7 +39,12 @@ from ...models.dependency.selection import (
 from ...native_plugins.scopes import native_harnesses, native_source_current
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
-from .local_survivors import _reintegration_error_detail, _surviving_local_refs_at_install_path
+from ...utils.realpath_win import release_held
+from .local_survivors import (
+    _reintegration_error_detail,
+    _surviving_local_refs_at_install_path,
+    read_survivor_direct_refs,
+)
 
 if TYPE_CHECKING:
     from ...core.deployment_ledger import DeploymentMaterializationSession
@@ -288,6 +293,7 @@ def _recover_local_refresh_backups(
         if install_path.exists():
             safe_rmtree(backup_path, apm_modules_dir)
             continue
+        release_held(backup_path)
         backup_path.rename(install_path)
         logger.progress(f"Recovered interrupted local materialization for _local/{target_name}")
 
@@ -393,6 +399,7 @@ def _activate_staged_local_refresh(
         raise LocalSurvivorRefreshError(
             "A stale local refresh backup must be recovered before activation."
         )
+    release_held(install_path)
     if install_path.exists():
         install_path.rename(backup_path)
     try:
@@ -405,54 +412,6 @@ def _activate_staged_local_refresh(
         ) from exc
     if backup_path.exists():
         safe_rmtree(backup_path, apm_modules_dir)
-
-
-def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
-    """Parse apm.yml's direct APM dependencies, excluding *packages_to_remove*.
-
-    Seeds the forward reachability walk (see
-    :func:`apm_cli.deps.reachability.compute_forward_reachable_keys`) with
-    the project's SURVIVING direct dependencies. For the real uninstall
-    path and ``--dry-run`` preview, *apm_yml_path* is still pre-edit.
-    Identity subtraction turns the pre-edit dependency list into the
-    correct post-removal survivor set, mirroring the identity
-    matching ``_validate_uninstall_packages`` already uses.
-
-    Returns ``(production_refs, dev_refs)`` so the walk can apply install's
-    ``is_dev`` rule. Returns empty lists -- never raises -- if *apm_yml_path* is ``None``,
-    missing, or malformed; the project's own manifest is a Step-1/3
-    concern here, not part of this walk's fail-closed contract, which
-    covers the manifests visited DURING the walk, not this seed step.
-    """
-    if apm_yml_path is None:
-        return [], []
-
-    removed_identities = builtins.set()
-    for pkg in packages_to_remove:
-        try:
-            removed_identities.add(_parse_dependency_entry(pkg).get_identity())
-        except (ValueError, TypeError, AttributeError, KeyError):
-            continue
-
-    import yaml
-
-    from ...utils.yaml_io import load_yaml
-
-    try:
-        data = load_yaml(apm_yml_path) or {}
-    except (FileNotFoundError, yaml.YAMLError):
-        return [], []
-
-    refs: dict[str, list] = {"dependencies": [], "devDependencies": []}
-    for section_name, section_refs in refs.items():
-        for dep_entry in data.get(section_name, {}).get("apm", []) or []:
-            try:
-                ref = _parse_dependency_entry(dep_entry)
-            except (ValueError, TypeError, AttributeError, KeyError):
-                continue
-            if ref.get_identity() not in removed_identities:
-                section_refs.append(ref)
-    return refs["dependencies"], refs["devDependencies"]
 
 
 def _warn_reachability_incomplete(reachability, logger):
@@ -496,7 +455,7 @@ def _uninstall_orphan_decision(
     candidate when that walk is incomplete. Only the real removal path may
     persist ``decision.repairs``; ``--dry-run`` stays read-only.
     """
-    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    direct_refs, dev_refs = read_survivor_direct_refs(apm_yml_path, packages_to_remove)
     decision = decide_orphan_removal(
         operation=OrphanOperation.UNINSTALL,
         roots=_removal_targets(packages_to_remove, lockfile) if lockfile else (),
@@ -860,9 +819,8 @@ def _validate_uninstall_packages(
             elif is_local and looks_like_local_bundle(Path(package)):
                 logger.error(
                     f"'{Path(package).name}' is a local bundle. Bundles "
-                    "installed with 'apm install <bundle>' are not recorded in apm.yml, "
-                    "and 'apm uninstall' cannot remove local-bundle content yet "
-                    "(tracked in #3887)."
+                    "installed with 'apm install <bundle>' are not recorded in apm.yml; "
+                    "uninstall them apart from other packages to remove their hooks."
                 )
             elif is_local:
                 logger.error(
@@ -1212,7 +1170,7 @@ def project_shrunk_selections(
         return {}
     from ...deps.reachability import declared_node_selections
 
-    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    direct_refs, dev_refs = read_survivor_direct_refs(apm_yml_path, packages_to_remove)
     declared = declared_node_selections(
         lockfile, apm_yml_path.parent, apm_modules_dir, direct_refs, dev_refs=dev_refs
     )
@@ -1774,7 +1732,11 @@ def _restage_changed_local_survivors(
     hook whose local definition changed since approval is never re-judged.
     Returns the restaged lock keys; their lock rows record the new content hash.
     """
-    from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
+    from ...install.phases.local_content import (
+        _copy_local_package,
+        compute_local_package_hash,
+        local_source_matches_copy,
+    )
 
     restaged: set[str] = set()
     for key, dep in sorted(lockfile.dependencies.items()):
@@ -1790,8 +1752,8 @@ def _restage_changed_local_survivors(
         except (OSError, ValueError, TypeError, PathTraversalError):
             continue
         # Judge the source against the materialized copy, not the lock row.
-        if not install_path.is_dir() or current == compute_local_package_hash(
-            install_path, framed=dep.content_hash_framed
+        if not install_path.is_dir() or local_source_matches_copy(
+            dep, source, install_path, source_hash=current
         ):
             continue
         staged_path = modules_dir / "_local" / f".apm-uninstall-refresh-{uuid4().hex}"

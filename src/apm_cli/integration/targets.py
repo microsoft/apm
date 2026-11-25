@@ -18,6 +18,7 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,7 @@ from apm_cli.integration import write_seam
 from apm_cli.utils.file_ops import obstructed_path_message
 from apm_cli.utils.path_security import (
     PathTraversalError,
+    SymlinkedDeployError,
     ensure_path_within,
     has_symlink_component,
 )
@@ -574,7 +576,8 @@ class TargetProfile:
         honoured without any per-target branching.
         """
         mapping = self.primitives["skills"]
-        return f"{mapping.deploy_root or self.root_dir}/{self.skills_subdir}"
+        # Canonical spelling: a root of "." (CLAUDE_CONFIG_DIR=$HOME) is "skills".
+        return posixpath.normpath(f"{mapping.deploy_root or self.root_dir}/{self.skills_subdir}")
 
     def skills_deploy_path(self, project_root: Path) -> Path:
         """Return the actual skills root for static and resolved dynamic targets."""
@@ -1442,6 +1445,24 @@ def _flag_gated(profile: TargetProfile, *, create_config: bool = True) -> bool:
     return _is_flag_enabled(profile.requires_flag, create_config=create_config)
 
 
+def _root_prefixes(profile: TargetProfile) -> tuple[str, ...]:
+    """Return the allow-list prefixes a target's own root contributes.
+
+    A Claude user root equal to the deploy root (``CLAUDE_CONFIG_DIR=$HOME``)
+    scopes to ``.``, and its paths record without a ``./`` segment (#5096).
+    The root itself would then admit every path under it, so only the
+    directories its primitives deploy into are allowed; anything else stays
+    refused. Other home overrides at ``$HOME`` keep their ``./`` prefix.
+    """
+    if profile.name != "claude" or posixpath.normpath(profile.root_dir.replace("\\", "/")) != ".":
+        return (profile.prefix,)
+    return tuple(
+        f"{posixpath.normpath(mapping.subdir)}/"
+        for mapping in profile.primitives.values()
+        if mapping.deploy_root is None and posixpath.normpath(mapping.subdir or ".") != "."
+    )
+
+
 def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple:
     """Return all known target root prefixes as a tuple.
 
@@ -1463,9 +1484,10 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
     seen: set[str] = set()
     if targets is None and user_scope:
         for profile in selected_user_profiles().values():
-            if profile.prefix not in seen:
-                seen.add(profile.prefix)
-                prefixes.append(profile.prefix)
+            for prefix in _root_prefixes(profile):
+                if prefix not in seen:
+                    seen.add(prefix)
+                    prefixes.append(prefix)
     for t in source:
         # Dynamic-root targets (cowork) use cowork:// prefix in lockfile.
         # Check the *capability* (user_root_resolver is not None) rather
@@ -1482,9 +1504,10 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
                 seen.add(COWORK_LOCKFILE_PREFIX)
                 prefixes.append(COWORK_LOCKFILE_PREFIX)
             continue
-        if t.prefix not in seen:
-            seen.add(t.prefix)
-            prefixes.append(t.prefix)
+        for prefix in _root_prefixes(t):
+            if prefix not in seen:
+                seen.add(prefix)
+                prefixes.append(prefix)
         if targets is None and user_scope and t.user_root_dir is not None:
             user_prefix = f"{t.user_root_dir}/"
             if user_prefix not in seen:
@@ -1747,9 +1770,7 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
     if profile.resolved_deploy_root is not None:
         return deploy_path
     if has_symlink_component(project_root, deploy_path):
-        raise PathTraversalError(
-            f"Refusing deployment through symlinked target root: {profile.root_dir}"
-        )
+        raise SymlinkedDeployError(Path(profile.root_dir).as_posix())
     for mapping in profile.primitives.values():
         primitive_rel = Path(mapping.deploy_root or profile.root_dir, mapping.subdir)
         try:
@@ -1761,10 +1782,7 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
             # root) is reported by the obstructed-path diagnostics instead.
             continue
         if linked:
-            raise PathTraversalError(
-                "Refusing deployment through symlinked target directory: "
-                f"{primitive_rel.as_posix()}"
-            )
+            raise SymlinkedDeployError(primitive_rel.as_posix())
     return ensure_path_within(deploy_path, project_root)
 
 
@@ -1846,11 +1864,14 @@ def resolve_audit_targets(
     user_scope: bool = False,
     lockfile: LockFile | None = None,
     include_recorded: bool = False,
+    recorded_layout: bool = True,
 ) -> list[TargetProfile]:
     """Resolve read-only audit profiles through target and deployment owners.
 
     *include_recorded* adds the targets the lock recorded to a declared
     manifest target set, so a render covers targets the manifest just dropped.
+    *recorded_layout* recovers the skill layout from every lock claim; a
+    caller that resolves the layout per dependency passes ``False``.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import get_workspace_deploy_root
@@ -1895,6 +1916,8 @@ def resolve_audit_targets(
         resolve_reintegration_targets,
     )
 
+    if not recorded_layout:
+        lock = None  # the caller resolves the skill layout per dependency
     return resolve_reintegration_targets(
         get_workspace_deploy_root(project_root),
         user_scope=user_scope,

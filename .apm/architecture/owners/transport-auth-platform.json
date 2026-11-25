@@ -31,6 +31,28 @@
       "guards": ["transport-platform-unix-install-ownership"]
     },
     {
+      "id": "rmtree-link-safety",
+      "decision": "Removing a tree never changes a mode through a link: a link root or failing link is removed itself",
+      "owner": "utils/file_ops.py (robust_rmtree, _on_readonly_retry)",
+      "selectors": ["src/apm_cli/utils/file_ops.py"],
+      "guards": [
+        "transport-platform-rmtree-callback-fallback-attempt",
+        "transport-platform-rmtree-callback-fallback-follow",
+        "transport-platform-rmtree-callback-fallback-nested",
+        "transport-platform-rmtree-callback-no-follow-chmod"
+      ]
+    },
+    {
+      "id": "windows-held-directory-release",
+      "decision": "Held directory release before APM directory mutations on Windows: only package activation registers a held root, and APM releases the holds under a path before it renames or deletes a directory there",
+      "owner": "utils/realpath_win.py (register_held_root, release_held); deps/apm_resolver.py (APMDependencyResolver._activate_validated_package is the only registrar); consumers release through utils/file_ops.py (robust_rmtree, robust_replace, _retry_on_lock) or call release_held directly in a frozen, reviewed module inventory",
+      "selectors": ["src/apm_cli/utils/realpath_win.py"],
+      "guards": [
+        "transport-platform-held-directory-release",
+        "transport-platform-held-root-registration"
+      ]
+    },
+    {
       "id": "cache-cleanup-outcome",
       "decision": "Explicit cache-clean removal and residual outcome",
       "owner": "cache/cleanup.py (clean_cache_buckets)",
@@ -72,9 +94,9 @@
     },
     {
       "id": "url-path-containment-decoding",
-      "decision": "Symlink-component containment and strict percent-encoded URL-path decoding",
-      "owner": "utils/path_security.py (has_symlink_component, decode_url_path_segments)",
-      "selectors": ["src/apm_cli/utils/path_security.py"],
+      "decision": "Symlink-component containment, filesystem-aware (case-insensitive) path containment and strict percent-encoded URL-path decoding",
+      "owner": "utils/path_security.py (has_symlink_component, filesystem_containment, decode_url_path_segments); the uninstall in-use hook cwd check (install/local_bundle_hook_cwd.py, consumed by install/local_bundle_hook_trust.py) decides containment through ensure_path_within (#5310)",
+      "selectors": ["src/apm_cli/utils/path_security.py", "src/apm_cli/utils/realpath.py"],
       "guards": ["transport-platform-url-path-security"]
     },
     {
@@ -83,6 +105,13 @@
       "owner": "install.ps1 ($currentDir / $currentExe)",
       "selectors": ["install.ps1"],
       "guards": ["transport-platform-windows-stable-path"]
+    },
+    {
+      "id": "deploy-store",
+      "decision": "Content-addressed store of deployed file bytes: hex-digest keys, verify on every read, no symlink following, atomic owner-only writes",
+      "owner": "cache/deploy_store.py (DeployStore); install/phases/lockfile_deploy_records.py stages the lockfile phase's deployed bytes and package records through it",
+      "selectors": ["src/apm_cli/cache/deploy_store.py", "src/apm_cli/install/phases/lockfile_deploy_records.py"],
+      "guards": ["transport-platform-deploy-store-verified-reads"]
     },
     {
       "id": "cached-repository-git",
@@ -94,8 +123,8 @@
     {
       "id": "checkout-commit-verification",
       "decision": "Package checkouts are verified against their commit: objects re-hashed, working-tree bytes matched, nothing untracked",
-      "owner": "cache/checkout_verify.py (verify_checkout / require_verified_checkout)",
-      "selectors": ["src/apm_cli/cache/checkout_verify.py"],
+      "owner": "cache/checkout_verify.py (verify_checkout / require_verified_checkout); utils/git_object_id.py (object_format / git_object_id: git's object ids, not a security hash)",
+      "selectors": ["src/apm_cli/cache/checkout_verify.py", "src/apm_cli/utils/git_object_id.py", "src/apm_cli/cache/inprocess_fetch.py", "src/apm_cli/cache/pack_objects.py"],
       "guards": ["transport-platform-checkout-verified"]
     },
     {
@@ -108,9 +137,10 @@
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks and line-ending pins)",
-      "selectors": ["src/apm_cli/utils/git_env.py"],
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation and its per-invocation effective-config probe memo in utils/git_config_memo.py, the strict GIT_CONFIG_PARAMETERS parser in utils/git_config_parameters.py, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
+      "selectors": ["src/apm_cli/utils/git_env.py", "src/apm_cli/utils/git_config_memo.py", "src/apm_cli/utils/git_config_parameters.py", "src/apm_cli/utils/git_config_once.py"],
       "guards": [
+        "transport-platform-external-executable-owner",
         "transport-platform-git-child-environment",
         "transport-platform-git-clone-hooks-disabled",
         "transport-platform-git-clone-templates-disabled",
@@ -186,9 +216,9 @@
     },
     {
       "id": "ls-remote-tag-commits",
-      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike",
-      "owner": "deps/git_remote_ops.py (tag_commit_shas); consumers: parse_ls_remote_output and marketplace/ref_resolver.py",
-      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py"],
+      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike; a dependency ref resolves only to an exact origin branch or tag, and a pinned commit only when an origin branch or tag reaches it",
+      "owner": "deps/git_remote_ops.py (tag_commit_shas, exact_branch_or_tag_sha, refuse_non_branch_ref); cache/commit_reachability.py (require_reachable_commit, once per origin and commit); consumers: parse_ls_remote_output, cache/git_cache.py (_ls_remote_resolve, get_checkout) and marketplace/ref_resolver.py",
+      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py", "src/apm_cli/cache/commit_reachability.py"],
       "guards": ["transport-platform-ls-remote-tag-commits"]
     },
     {

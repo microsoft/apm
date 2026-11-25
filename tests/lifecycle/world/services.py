@@ -31,7 +31,7 @@ import json
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
@@ -109,6 +109,7 @@ POLICY_VARIANTS = (
     "scripts-deny",
     "unmanaged-deny",
     "unmanaged-deny-dirs",
+    "fields-warn",
     "max-depth-1",
     "max-depth-2",
 )
@@ -180,7 +181,15 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
             "dependencies": {
                 "deny": [
                     f"**/{name}"
-                    for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed", "p-bmix")
+                    for name in (
+                        "p-skill",
+                        "p-exec",
+                        "p-lsp",
+                        "p-canvas",
+                        "p-mixed",
+                        "p-bmix",
+                        "p-mixgit",
+                    )
                 ]
             },
             "mcp": {"deny": ["**"]},
@@ -195,6 +204,14 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
             "name": "unmanaged-deny-dirs",
             **base,
             "unmanaged_files": {"action": "deny", "directories": ["governed"]},
+        },
+        # scripts-deny and unmanaged-deny under enforcement: warn (#4957).
+        "fields-warn": {
+            "name": "fields-warn",
+            **base,
+            "enforcement": "warn",
+            "manifest": {"scripts": "deny"},
+            "unmanaged_files": {"action": "deny"},
         },
         "max-depth-1": {"name": "max-depth-1", **base, "dependencies": {"max_depth": 1}},
         "max-depth-2": {"name": "max-depth-2", **base, "dependencies": {"max_depth": 2}},
@@ -334,6 +351,10 @@ class WorldServices:
         _check_slug(slug)
         self._repositories[slug] = origin
 
+    def served_repository(self, slug: str) -> Path:
+        """The bare repository served as ``owner/repo`` *slug* (``KeyError`` when none)."""
+        return self._repositories[slug]
+
     def script(
         self,
         host: str,
@@ -341,10 +362,14 @@ class WorldServices:
         status: int,
         headers: Mapping[str, str] | None = None,
         body: bytes = b"",
+        when: Callable[[ScriptedRequest], bool] | None = None,
     ) -> None:
-        """Answer requests to *host* under *path_prefix* with a fixed response until ``reset``."""
+        """Answer requests to *host* under *path_prefix* with a fixed response until ``reset``.
+
+        With *when*, only the requests it accepts are scripted.
+        """
         response = ScriptedResponse(status, dict(headers or {}), body)
-        self.routes.scripted.append(routes.ScriptedRoute(host, path_prefix, response))
+        self.routes.scripted.append(routes.ScriptedRoute(host, path_prefix, response, when))
 
     def redirect(self, host: str, path_prefix: str, location: str, status: int = 307) -> None:
         """Answer *host* + *path_prefix* with a 3xx to *location* (another host or path)."""
@@ -423,10 +448,15 @@ class WorldServices:
             raise KeyError(f"{slug!r} is not unserved")
         self._repositories[slug] = self._unserved.pop(slug)
 
-    def start(self, directory: Path) -> WorldServices:
-        """Start the proxy; ``directory`` receives its private CA material."""
+    def start(self, directory: Path, *, crl_url: str | None = None) -> WorldServices:
+        """Start the proxy; ``directory`` receives its private CA material.
+
+        *crl_url* puts a CRL distribution point on the proxy's leaf certificate.
+        """
         stack = contextlib.ExitStack()
-        self._proxy = stack.enter_context(local_scripted_https_proxy(directory, self.handlers()))
+        self._proxy = stack.enter_context(
+            local_scripted_https_proxy(directory, self.handlers(), crl_url=crl_url)
+        )
         self._directory = directory
         self._stack = stack
         return self

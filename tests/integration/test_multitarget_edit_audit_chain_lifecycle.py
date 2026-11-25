@@ -101,7 +101,12 @@ def test_multi_target_edit_compile_audit_narrow_uninstall_chain(
     for relative, path in edited.items():
         assert kept_edit_message(relative, user_scope=False, proven_edit=True) in text, text
         assert path.read_bytes() == edited_bytes[relative]
-    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
+    # Step 4's compile made AGENTS.md (imported by CLAUDE.md) carry the always-on
+    # instruction, so this install retires its Claude rule and names it (#5343).
+    assert "Retired .claude/rules/global.md: AGENTS.md now carries it" in " ".join(text.split())
+    assert not (project / ".claude/rules/global.md").exists()
+    assert ".claude/rules/global.md" not in deployed_files(project)
+    lock_bytes = (project / "apm.lock.yaml").read_bytes()
     aside = scenario.isolated.work_root / "aside"
     aside.mkdir()
     for index, path in enumerate(edited.values()):

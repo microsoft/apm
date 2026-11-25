@@ -59,6 +59,24 @@ apm install -g --target claude review-kit@contoso
 
 APM downloads into `apm_modules/`; harnesses load from `.agents/`.
 
+:::caution[Where native plugins do not load]
+Native plugins are reported not to load in git worktrees, in non-interactive
+`claude -p` runs (including claude-code-action), and in Copilot CLI 1.0.106.
+After upgrading to 0.37 or later, a dependency's skills can disappear there.
+For a Claude-format plugin with skills, installed at project scope, deploy its
+skills loose instead: add `skills: ["*"]` to the dependency in `apm.yml`; every
+skill the package ships is installed, including ones added in later releases.
+This does not apply with `-g` (a `skills:` selection parks the plugin), to Agent
+Plugins (they stay native), or to a plugin without skills:
+
+```yaml
+dependencies:
+  apm:
+    - git: contoso/review-kit
+      skills: ["*"]
+```
+:::
+
 | | Project | User (`-g`) |
 |---|---|---|
 | Plugin folder | `.agents/plugins/<plugin>/` | `~/.agents/plugins/<plugin>/` |
@@ -143,6 +161,33 @@ Commit `.agents/plugins/`, `.claude/settings.json`,
 the plugins in Claude Code and GitHub Copilot without APM, after the harness's
 folder-trust prompt.
 
+On each machine, a project-scope `apm install` also lists the project's
+marketplace in Claude Code's user registry,
+`~/.claude/plugins/known_marketplaces.json` (under `CLAUDE_CONFIG_DIR` when
+set), with the checkout's absolute path. Without that entry, Claude Code's
+first session on a machine (CI, `claude -p`, claude-code-action, a fresh clone)
+starts a plugin's MCP server but not its skills or hooks. The write adds one
+entry and changes no other; `apm uninstall` removes only the entry APM wrote.
+
+APM lists only the marketplace name derived from this checkout's project
+identity (its `origin` remote, else the `apm.yml` name); for any other name a
+committed lock or catalog records, it leaves the listing to Claude Code's own
+first session. APM lists the marketplace only for a folder Claude Code already trusts: its
+user config (`~/.claude.json`, or `.claude.json` under `CLAUDE_CONFIG_DIR`)
+must record `hasTrustDialogAccepted: true` for the checkout's exact absolute
+path. Otherwise APM writes nothing and asks you to open the folder in Claude,
+accept the trust prompt, then re-run `apm install`, so no `claude` command (a
+session, or `claude mcp list`, which starts MCP servers to check them) runs a
+plugin's code in a folder Claude Code does not trust. In CI or
+claude-code-action, an untrusted checkout does not auto-load project plugins.
+This is by design; use user scope or Claude's own trust setting.
+
+If the registry already lists the project's marketplace for another checkout
+(a second clone or worktree), cannot be parsed, or is reached through a
+symbolic link, APM leaves it unchanged and warns, naming the issue to resolve
+before you re-run the command. An entry for another checkout can keep Claude
+Code loading that checkout's copy of the plugins.
+
 ### Claude Code and Copilot read each other's file
 
 Copilot CLI also reads `.claude/settings.json`. When several files name the
@@ -182,8 +227,7 @@ ledger is never deleted.
 | Hooks or commands that expect the plugin root, on targets other than `claude` and `copilot`, where APM splits the plugin ([#2824](https://github.com/microsoft/apm/issues/2824), [#3191](https://github.com/microsoft/apm/issues/3191), [#3181](https://github.com/microsoft/apm/issues/3181)) | Hook or command fails or points at a missing path | Use the plugin through Claude Code or Copilot |
 | Two plugins split for non-native targets ship a skill or agent with the same name ([#1120](https://github.com/microsoft/apm/issues/1120)) | Names collide | Install one of them, or select skills with `--skill` |
 | A plugin that declares other plugins in `plugin.json` `dependencies` | Parked until APM can resolve plugin dependencies | Declare the dependencies in your `apm.yml` and exclude the plugin from `claude` and `copilot` |
-| A git worktree | Claude Code resolves `./.agents/plugins` against the main checkout | Run `apm install` in the main checkout too |
-| A newly declared plugin | Claude Code may load it only from the second session | Start another session |
+| A git worktree whose main checkout also has the plugin ([anthropics/claude-code#111812](https://github.com/anthropics/claude-code/issues/111812)) | Claude Code loads the main checkout's copy; `apm install` in a worktree warns about this | Keep plugin changes in the main checkout, or start Claude Code there |
 | Codex bundles | User scope, qualified on macOS arm64; the route is planned to change ([#3920](https://github.com/microsoft/apm/issues/3920)) | Use Codex's own `codex plugin add` |
 
 :::note[Planned]
@@ -218,6 +262,15 @@ Work down this list:
    accept the folder-trust prompt and start a new session (or run
    `/reload-plugins`). Copilot CLI 1.0.81 or later loads the same plugins.
 5. **Does a hook fail at runtime?** Check [Known gaps](#known-gaps).
+6. **Is this an environment that does not load native plugins?** Native plugins
+   are reported not to load in git worktrees, in non-interactive `claude -p`
+   runs (including claude-code-action) and in Copilot CLI 1.0.106. `apm install`
+   prints `[!] <package> installed as a native plugin ...` for each dependency
+   it installs this way. For a Claude-format plugin with skills at project
+   scope, the notice also says how to deploy its skills loose instead: set
+   `skills: ["*"]` on that dependency in `apm.yml`. That does not apply with
+   `-g` (a `skills:` selection parks the plugin), to Agent Plugins (they stay
+   native) or to a plugin without skills, so their notice omits it.
 
 :::tip[Other options]
 Packaging your own plugin: [Build a plugin](../../producer/build-a-plugin/).

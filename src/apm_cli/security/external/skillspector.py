@@ -2,8 +2,8 @@
 
 Invokes the SkillSpector CLI -- when it is resolvable on ``PATH`` -- over the
 requested paths, asks it for SARIF output, and folds the findings into the
-audit pipeline.  The vendor CLI is located lazily via ``shutil.which`` and
-never imported as a Python package, so this adapter works identically whether
+audit pipeline.  The vendor CLI is located lazily through
+``trusted_executable`` (PATH outside the project) and never imported as a Python package, so this adapter works identically whether
 APM runs from source or as the self-contained PyInstaller binary.
 
 Users who cannot install the SkillSpector CLI can instead emit a SARIF file
@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from apm_cli.utils import git_env
 
 from ..content_scanner import ScanFinding
 from .base import ExternalScanError
@@ -80,7 +81,7 @@ class SkillSpectorAdapter:
 
     def is_available(self, *, options: ScannerOptions | None = None) -> tuple[bool, str | None]:
         """Available iff the binary is on PATH (and, under LLM, a key is set)."""
-        if shutil.which(_BINARY) is None:
+        if git_env.trusted_executable(_BINARY) is None:
             return (
                 False,
                 "SkillSpector CLI not found on PATH.\n\n"
@@ -113,7 +114,7 @@ class SkillSpectorAdapter:
         if options is None:
             options = ScannerOptions()
 
-        binary = shutil.which(_BINARY)
+        binary = git_env.trusted_executable(_BINARY)
         if binary is None:
             raise ExternalScanError(
                 "SkillSpector CLI not found on PATH.\n\n"

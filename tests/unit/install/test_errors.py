@@ -1,5 +1,6 @@
 """Unit tests for install/errors.py exception types."""
 
+from types import SimpleNamespace
 from unittest.mock import Mock, call
 
 import pytest
@@ -14,7 +15,9 @@ from apm_cli.install.errors import (
     PolicyViolationError,  # noqa: F401
     install_failure_message,
     log_frozen_install_error,
+    render_apm_dependency_failure,
 )
+from apm_cli.install.phases.resolve import _fail_on_resolution_errors
 
 pytestmark = pytest.mark.unit
 
@@ -98,3 +101,40 @@ def test_lockfile_generator_refusal_message_stays_canonical():
 
     error = LockfileGeneratorError("Refusing to run 'apm install' on apm.lock.yaml: x")
     assert install_failure_message(error) == str(error)
+
+
+def test_symlinked_deploy_cause_follows_causes_but_not_a_suppressed_context():
+    """A wrapped refusal is found; ``raise ... from None`` hides it (#5287)."""
+    from apm_cli.install.errors import symlinked_deploy_cause
+    from apm_cli.utils.path_security import SymlinkedDeployError
+
+    refusal = SymlinkedDeployError("skills")
+    try:
+        raise RuntimeError("wrapped") from refusal
+    except RuntimeError as wrapped:
+        assert symlinked_deploy_cause(wrapped) is refusal
+    try:
+        try:
+            raise refusal
+        except SymlinkedDeployError:
+            raise RuntimeError("unrelated") from None
+    except RuntimeError as unrelated:
+        assert symlinked_deploy_cause(unrelated) is None
+
+
+def test_a_resolution_error_is_printed_once_with_its_remedy():
+    """I9: the resolve phase and the install renderer must not both print the error."""
+    cause = (
+        "Failed to resolve marketplace dependency 'widget': Drop --frozen, then run 'apm install'."
+    )
+    logger = Mock(spec=InstallLogger)
+    ctx = SimpleNamespace(dry_run=False, logger=logger)
+    graph = SimpleNamespace(resolution_errors=[cause])
+
+    with pytest.raises(RuntimeError) as raised:
+        _fail_on_resolution_errors(ctx, graph)
+    render_apm_dependency_failure(raised.value, logger, verbose=True)
+
+    printed = [c.args[0] for c in logger.mock_calls if c[0] in {"error", "refusal"}]
+    count = sum(cause in line for line in printed)
+    assert count == 1, f"resolution error printed {count} times: {printed}"

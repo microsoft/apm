@@ -1,6 +1,7 @@
 """Deterministic SHA-256 content hashing for package integrity verification."""
 
 import hashlib
+import os
 import stat
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from pathlib import Path
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.paths import relative_to
 
 # Directories excluded from hashing (not relevant to package content)
 _EXCLUDED_DIRS = {".git", "__pycache__"}
@@ -123,7 +125,7 @@ def _package_files(
     regular_files: list[Path] = []
     excluded = {".git"} if native else _EXCLUDED_DIRS
     for item in package_path.rglob("*"):
-        rel = item.relative_to(package_path)
+        rel = relative_to(item, package_path)
         if any(part in excluded for part in rel.parts) or rel.parts[0] in skip_roots:
             continue
         if item.is_symlink():
@@ -303,9 +305,43 @@ def compute_file_hash(file_path: Path) -> str:
     """
     if not file_path.is_file() or file_path.is_symlink():
         return _EMPTY_HASH
-    hasher = hashlib.sha256()
-    hasher.update(_canonical_hash_bytes(file_path.read_bytes()))
-    return f"sha256:{hasher.hexdigest()}"
+    return f"sha256:{canonical_digest(file_path.read_bytes())}"
+
+
+def exact_hash_of_bytes(raw: bytes) -> str:
+    """Hash *raw* as is, without line-ending normalization (#4863).
+
+    For evidence that must notice a line-ending-only change, such as what the
+    deploy journal saw at a path; :func:`compute_file_hash` would not.
+    """
+    return f"sha256:{hashlib.sha256(raw).hexdigest()}"
+
+
+def compute_exact_file_hash(file_path: Path) -> str:
+    """:func:`exact_hash_of_bytes` of the regular file at *file_path*."""
+    return exact_hash_of_bytes(file_path.read_bytes())
+
+
+def text_write_hash(
+    data: str, *, encoding: str = "utf-8", newline: str | None = "", lf: bool = False
+) -> str:
+    """The exact bytes hash a text write of *data* leaves, line endings included (#4863).
+
+    *newline* is ``open``'s: ``None`` writes ``\\n`` as ``os.linesep``, ``""``
+    and ``"\\n"`` write *data* as is. *lf* first turns CRLF into LF, as
+    ``write_text_lf`` and a normalizing ``atomic_write_text`` do.
+    """
+    if lf:
+        data = normalize_crlf_to_lf(data)
+    newline = os.linesep if newline is None else newline
+    if newline not in ("", "\n"):
+        data = data.replace("\n", newline)
+    return exact_hash_of_bytes(data.encode(encoding))
+
+
+def canonical_digest(raw: bytes) -> str:
+    """Return the hex digest :func:`compute_file_hash` records for *raw* bytes."""
+    return hashlib.sha256(_canonical_hash_bytes(raw)).hexdigest()
 
 
 def verify_package_hash(

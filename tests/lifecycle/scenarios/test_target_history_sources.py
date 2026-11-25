@@ -88,10 +88,17 @@ _PLUGIN_SETTINGS = {"claude": ".claude/settings.json", "copilot": ".github/copil
 
 
 def _assert_whole_plugin(scenario: Scenario, targets: tuple[str, ...], output: str) -> None:
-    """The native plugin sits whole under .agents/plugins and every current harness
-    that loads plugins enables it."""
-    skill = scenario.deploy_root / f".agents/plugins/{_NATIVE}/skills/{_NATIVE}/SKILL.md"
+    """The native plugin sits whole under .agents/plugins, the lock's native_plugin
+    record names that root, and every current harness that loads plugins enables it."""
+    root = f".agents/plugins/{_NATIVE}"
+    skill = scenario.deploy_root / f"{root}/skills/{_NATIVE}/SKILL.md"
     assert skill.is_file(), f"{_NATIVE} is not deployed whole\n{output}"
+    rows = [
+        (dep.native_plugin.name, dep.native_plugin.root)
+        for dep in scenario.lock().get_package_dependencies()
+        if dep.native_plugin
+    ]
+    assert rows == [(_NATIVE, root)], f"native_plugin rows {rows}\n{output}"
     for target in sorted(set(targets) & set(_PLUGIN_SETTINGS)):
         settings = scenario.deploy_root / _PLUGIN_SETTINGS[target]
         enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins") or {}
@@ -163,6 +170,7 @@ _MARKET_UNITS = {
 }
 _CATALOG_CACHE = (
     ".apm/cache/marketplace/version-pins.json",
+    ".apm/cache/marketplace/version-pins.lock",
     *(
         f".apm/cache/marketplace/{name}{suffix}"
         for name, _package in _MARKETPLACES.values()

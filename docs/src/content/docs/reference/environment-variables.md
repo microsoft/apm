@@ -57,7 +57,7 @@ APM verifies package-management HTTPS against the operating-system trust store b
 
 Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
 
-The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated `github.com` Git attempts, APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated Git attempts to GitHub hosts (`github.com`, GHE Cloud `*.ghe.com` and GitHub Enterprise Server), APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 ## Registry (MCP and proxy)
 
@@ -87,6 +87,8 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
 | `APM_HOME` | Override the root for APM-owned user metadata and configuration. | `~/.apm` | Must be writable. Does not redirect files deployed to agent targets. |
+| `APM_INSTALL_FAST_PATH` | `0`/`false`/`no`/`off` turns off the locked-install fast path, so a bare `apm install` or `apm install --frozen` always runs the full pipeline. `trace` prints one stderr line saying whether the fast path applied or why it ran the full pipeline. | unset (fast path on) | The fast path applies only when the lockfile, the caches and the live policy prove the full pipeline would produce the same files; any doubt runs the full pipeline. |
+| `APM_AUDIT_RECORDS` | `0` makes the `apm audit` drift replay re-integrate every package instead of serving byte-copy packages from the records the verifying install wrote. | unset (records on) | A record serves a package only when the lockfile, the current policy and the package's own source bytes prove the same output; `apm audit --ci` prints how many packages it served. |
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |

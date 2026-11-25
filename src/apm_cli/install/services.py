@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
+from .deployed_paths import bundle_entry_within
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -25,6 +26,8 @@ from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
 from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
+from .local_bundle_markdown_hooks import record_bundle_markdown_hooks as _record_md_hooks
+from .local_bundle_markdown_hooks import retire_before_bundle_install as _retire_md_hooks
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
@@ -401,6 +404,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    from apm_cli.install.deployment_plan import keep_loose_for_parked_native
+
+    keep_loose_for_parked_native(
+        deployment_plan, ctx, package_name, diagnostics=diagnostics, logger=logger
+    )
+    # Drift replay asks the same plan which locked loose values it keeps (#5036).
+    result["deployment_plan"] = deployment_plan
     if native_claude_plugin is not None:
         result["native_plugin"] = True
         result["native_claude_plugin"] = True
@@ -619,6 +629,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
+    getattr(integrators.skill, "serve_natively", lambda _harnesses: None)(
+        frozenset(native_target_names)
+    )
     with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
         skill_result = integrators.skill.integrate_package_skill(
             package_info,
@@ -848,9 +861,8 @@ def integrate_local_bundle(
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
     import hashlib
-    import shutil
 
-    from apm_cli.utils.atomic_io import write_text_lf
+    from apm_cli.integration import write_seam
     from apm_cli.utils.content_hash import compute_file_hash
 
     from ..core.scope import InstallScope
@@ -862,6 +874,9 @@ def integrate_local_bundle(
 
     bundle_dir: Path = bundle_info.source_dir
     pack_files = _deployable_pack_files(bundle_info)
+    _retire_md_hooks(
+        scope, project_root, targets, allow_executables, logger=logger, dry_run=dry_run
+    )
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
@@ -974,6 +989,7 @@ def integrate_local_bundle(
                 hooks_approved=_hooks_approved_bundle,
                 canvas_approved=_canvas_ok,
                 rendering_extension=_renderings.get(_rel_norm),
+                source=src,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -983,6 +999,7 @@ def integrate_local_bundle(
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
                     canvas_approved=_canvas_ok,
+                    source=src,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))
@@ -1031,11 +1048,7 @@ def integrate_local_bundle(
                 # target's default root.
                 deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
                 dest = deploy_root / _deploy_rel
-            try:
-                ensure_path_within(dest, deploy_root)
-            except PathTraversalError as exc:
-                if logger is not None:
-                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+            if not bundle_entry_within(dest, deploy_root, project_root, rel, logger):
                 skipped += 1
                 continue
             try:
@@ -1113,11 +1126,12 @@ def integrate_local_bundle(
                         logger.warning(msg)
                     continue
             if not dry_run:
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                # Through the write seam: the install journals each write (#5046).
+                write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
                 if normalized_text is None:
-                    shutil.copy2(src, dest, follow_symlinks=False)
+                    write_seam.copy2(src, dest)
                 else:
-                    write_text_lf(dest, normalized_text)
+                    write_seam.write_text_lf(dest, normalized_text)
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
@@ -1135,8 +1149,13 @@ def integrate_local_bundle(
     if _canvas_ok and not dry_run:
         from .local_bundle_canvas import record_bundle_canvas
 
-        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
+        user_scope = scope is InstallScope.USER
+        record_bundle_canvas(
+            project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope
+        )
 
+    _record_md_hooks(scope, project_root, targets, str(slug), approval_key, deployed_files, dry_run)
+    from .local_bundle_hooks import hooks_denied_bundle as _hooks_denied_bundle
     from .local_bundle_hooks import integrate_local_bundle_hooks
 
     hook_result = integrate_local_bundle_hooks(
@@ -1178,13 +1197,3 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
-
-
-def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
-    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
-    if approval_key is None:
-        return False
-    from ..security.executables import EXEC_TYPE_HOOKS
-    from .local_bundle_handler import bundle_type_denied
-
-    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

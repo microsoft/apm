@@ -60,11 +60,13 @@ def integrate_local_bundle_hooks(
     retire = not dry_run and bundle_slug_validation_error(slug) is None
     if not hook_paths:
         if retire:
-            _retire_bundle_hooks(project_root, targets, slug, scope=scope)
+            _retire_bundle_hooks(project_root, targets, slug, scope=scope, diagnostics=diagnostics)
         return result
     if not hooks_approved:
         result.skipped = len(hook_paths)
-        retired = retire and _retire_bundle_hooks(project_root, targets, slug, scope=scope)
+        retired = retire and _retire_bundle_hooks(
+            project_root, targets, slug, scope=scope, diagnostics=diagnostics
+        )
         from ..core.scope import InstallScope
         from ..security.executables import local_bundle_approval_hint
 
@@ -93,7 +95,7 @@ def integrate_local_bundle_hooks(
     if not verified_files:
         result.skipped = len(hook_paths)
         if retire:
-            _retire_bundle_hooks(project_root, targets, slug, scope=scope)
+            _retire_bundle_hooks(project_root, targets, slug, scope=scope, diagnostics=diagnostics)
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: the bundle has "
             "no integrity manifest. Repack it with 'apm pack' to register its hooks.",
@@ -206,19 +208,32 @@ def _retire_bundle_hooks(
     slug: str,
     *,
     scope: Any,
+    diagnostics: Any = None,
 ) -> bool:
-    """Retire what this bundle deployed earlier through the hook trust owner (#4216)."""
+    """Retire what this bundle deployed earlier through the hook trust owner (#4216).
+
+    True when the bundle had deployed hooks and all of them were retired. Hooks
+    that could not be retired stay for a retry and fail the install: recorded
+    as an error diagnostic, or raised when there is no collector.
+    """
     from ..core.scope import InstallScope, get_apm_dir
-    from .local_bundle_hook_trust import retire_bundle_hooks
+    from .local_bundle_hook_trust import BundleHookRetirementIncomplete, retire_bundle_hooks
 
     user_scope = scope == InstallScope.USER
-    return retire_bundle_hooks(
+    retired = retire_bundle_hooks(
         project_root,
         targets,
         slug,
         lock_dir=get_apm_dir(InstallScope.USER) if user_scope else project_root,
         reason=None,
     )
+    if not retired.failed_paths:
+        return bool(retired)
+    error = BundleHookRetirementIncomplete({slug: retired.failed_paths})
+    if diagnostics is None:
+        raise error
+    diagnostics.error(str(error), package=slug)
+    return False
 
 
 def _prior_bundle_claims(project_root: Path, *, user_scope: bool = False) -> set[str]:
@@ -270,7 +285,9 @@ def _record_per_file_approval(
         if Path(path).suffix == ".json" and Path(path).parent == hooks_dir
     ]
     sidecar = project_root / target.root_dir / _APM_HOOKS_SIDECAR
-    write_per_file_bundle_record(sidecar, slug, approval_key, hook_files)
+    write_per_file_bundle_record(
+        sidecar, slug, approval_key, hook_files, project_root=project_root, user_scope=user_scope
+    )
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:
@@ -285,3 +302,13 @@ def _warn(message: str, slug: str, diagnostics: Any, logger: Any) -> None:
         diagnostics.warn(message=message, package=slug)
     elif logger is not None:
         logger.warning(message)
+
+
+def hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
+    if approval_key is None:
+        return False
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from .local_bundle_handler import bundle_type_denied
+
+    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

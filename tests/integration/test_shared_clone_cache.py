@@ -280,14 +280,12 @@ class TestDownloaderSharedCloneIntegration:
             {
                 "git": "gitlab.com/spiritt/tenants/spiritt/repo-a",
                 "path": "skills/tool",
-                "ref": "main",
             }
         )
         dep_b = DependencyReference.parse_from_dict(
             {
                 "git": "gitlab.com/spiritt/tenants/spiritt/repo-b",
                 "path": "skills/tool",
-                "ref": "main",
             }
         )
 
@@ -355,8 +353,8 @@ class TestDownloaderSharedCloneIntegration:
         from apm_cli.models.apm_package import DependencyReference
 
         # Build two subdir dep refs from same repo
-        dep_a = DependencyReference.parse("owner/repo/skills/X#main")
-        dep_b = DependencyReference.parse("owner/repo/agents/Y#main")
+        dep_a = DependencyReference.parse("owner/repo/skills/X")
+        dep_b = DependencyReference.parse("owner/repo/agents/Y")
 
         target_a = tmp_path / "modules" / "X"
         target_b = tmp_path / "modules" / "Y"
@@ -709,8 +707,9 @@ class TestBareCloneFallback:
     def test_short_sha_skips_tier1_and_resolves_via_tier2(self, tmp_path: Path) -> None:
         """Copilot review #1135: short SHA must skip tier 1 (which requires
         full SHA for `git fetch <sha>`) and resolve to a 40-char SHA via
-        tier-2 `rev-parse --verify <short>^{commit}`. The resolved 40-char
-        SHA is what gets passed to `update-ref HEAD`, not the abbreviation.
+        tier 2, which expands the abbreviation to its unique commit when no
+        branch or tag holds that name. The resolved 40-char SHA is what gets
+        passed to `update-ref HEAD`, not the abbreviation.
         """
         from apm_cli.models.dependency.reference import DependencyReference
 
@@ -724,8 +723,10 @@ class TestBareCloneFallback:
         def fake_run(args, **kwargs):
             captured.append(list(args))
             cmd_str = " ".join(args)
-            if "rev-parse --verify" in cmd_str:
+            if "rev-parse --verify" in cmd_str or "rev-parse --disambiguate" in cmd_str:
                 return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
+            if "cat-file -t" in cmd_str:
+                return MagicMock(returncode=0, stdout="commit\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run):
@@ -1077,7 +1078,8 @@ class TestBareCloneRetryRmtree:
             strict=False,
         )
         d._transport_selector.select = MagicMock(return_value=plan)
-        dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
+        sha = "abc1234567890abcdef1234567890abcdef12345"
+        dep = DependencyReference.parse(f"o/r/skills/X#{sha}")
 
         # Pre-create the target with stale content; verify it gets wiped.
         bare = tmp_path / "bare"
@@ -1091,6 +1093,8 @@ class TestBareCloneRetryRmtree:
             # init must see clean target
             if args[1] == "init" and args[2] == "--bare":
                 assert not (bare / "stale_file").exists(), "rmtree did not run before init"
+            if "rev-parse" in args:
+                return MagicMock(returncode=0, stdout=sha + "\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run):
@@ -1098,7 +1102,7 @@ class TestBareCloneRetryRmtree:
                 "https://example/o/r",
                 bare,
                 dep_ref=dep,
-                ref="abc1234567890abcdef1234567890abcdef12345678",
+                ref=sha,
                 is_commit_sha=True,
             )
 
@@ -1137,10 +1141,16 @@ class TestInvalidSubdirErrorWording:
             (tmp_path / "cache").mkdir()
             downloader.shared_clone_cache = cache
 
-            dep = DependencyReference.parse(
-                "github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO#main"
-            )
-            with patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone):
+            dep = DependencyReference.parse("github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO")
+            with (
+                # The default branch is admitted at the tip a real bare clone holds.
+                patch.object(
+                    downloader,
+                    "resolve_git_reference",
+                    return_value=_default_branch(_rev_parse(tmp_path / "bare_src_work", "HEAD")),
+                ),
+                patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone),
+            ):
                 target_out = tmp_path / "out"
                 target_out.parent.mkdir(parents=True, exist_ok=True)
                 with pytest.raises(
@@ -1148,6 +1158,81 @@ class TestInvalidSubdirErrorWording:
                     match=r"Subdirectory ['\"]?skills/DOES_NOT_EXIST_TYPO['\"]? not found",
                 ):
                     downloader.download_subdirectory_package(dep, target_out)
+
+    @pytest.mark.parametrize("served", [True, False], ids=["fetched-by-sha", "fetch-refused"])
+    def test_a_cached_bare_without_the_admitted_commit_fetches_it_by_sha(
+        self, tmp_path: Path, served: bool
+    ) -> None:
+        """#5199: the admitted commit is fetched into the bare by SHA, or the download fails."""
+        import shutil
+        import subprocess as sp
+
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        bare_src = tmp_path / "bare_src"
+        _make_bare_repo(bare_src)
+        work = tmp_path / "bare_src_work"
+        (work / "README.md").write_text("moved\n", encoding="utf-8")
+        sp.run(["git", "-C", str(work), "add", "-A"], check=True, capture_output=True)
+        sp.run(["git", "-C", str(work), "commit", "-m", "tip"], check=True, capture_output=True)
+        admitted = _rev_parse(work, "HEAD")
+        fetched: list[str] = []
+
+        def fake_bare_clone(url, target, *, dep_ref, ref, is_commit_sha):
+            shutil.copytree(bare_src, target)  # an older bare: no admitted commit
+
+        def fake_fetch(bare: Path, sha: str, *, dep_ref) -> bool:
+            fetched.append(sha)
+            if served:
+                sp.run(["git", f"--git-dir={bare}", "fetch", "-q", str(work), sha], check=True)
+            return served
+
+        downloader = GitHubPackageDownloader()
+        with SharedCloneCache(base_dir=tmp_path / "cache") as cache:
+            (tmp_path / "cache").mkdir()
+            downloader.shared_clone_cache = cache
+            dep = DependencyReference.parse("github/awesome-copilot/skills/DOES_NOT_EXIST_TYPO")
+            with (
+                patch.object(
+                    downloader, "resolve_git_reference", return_value=_default_branch(admitted)
+                ),
+                patch.object(downloader, "_bare_clone_with_fallback", side_effect=fake_bare_clone),
+                patch.object(downloader, "_fetch_sha_into_bare", side_effect=fake_fetch),
+                pytest.raises(RuntimeError) as failed,
+            ):
+                downloader.download_subdirectory_package(dep, tmp_path / "out")
+            # Checked under the cache lock before publishing: a bare that lacks
+            # the admitted commit is never shared with another download.
+            published = [path for bares in cache._repo_bares.values() for _ref, path in bares]
+
+        assert fetched == [admitted]
+        assert bool(published) is served, published
+        message = str(failed.value)
+        if served:
+            assert "Subdirectory 'skills/DOES_NOT_EXIST_TYPO' not found" in message, message
+        else:
+            assert f"does not hold the admitted commit {admitted[:12]}" in message, message
+        assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())
+
+
+def _rev_parse(repo: Path, rev: str) -> str:
+    import subprocess as sp
+
+    return sp.run(
+        ["git", "-C", str(repo), "rev-parse", rev], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _default_branch(commit: str):
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    return ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=commit,
+        ref_name="main",
+    )
 
 
 class TestBareScrubFetchHead:

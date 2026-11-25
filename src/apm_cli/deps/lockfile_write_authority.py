@@ -83,13 +83,37 @@ class _Removed:
 _REMOVED = _Removed()
 
 
+class StagedDocument:
+    """A lockfile document staged as data and serialized only when its text is needed.
+
+    A command can stage several documents for one path before it commits; only
+    the text a reader or the commit asks for is ever emitted (#4939). *document*
+    is a private plain copy the safe dumper round-trips, so ``render`` returns
+    the exact text an eager write would have staged.
+    """
+
+    __slots__ = ("_render", "_text", "document")
+
+    def __init__(self, document: object, render: Callable[[object], str]) -> None:
+        self.document = document
+        self._render = render
+        self._text: str | None = None
+
+    def text(self) -> str:
+        if self._text is None:
+            self._text = self._render(self.document)
+        return self._text
+
+
 @dataclass
 class _WriteScope:
     """What one writer has staged since its first lockfile write."""
 
     writer: LockfileWriter
-    pending: dict[Path, str | _Removed] = field(default_factory=dict)
+    pending: dict[Path, str | StagedDocument | _Removed] = field(default_factory=dict)
     after_commit: list[Callable[[], None]] = field(default_factory=list)
+    # Run just before the staged documents are written (#4863).
+    before_commit: list[Callable[[], None]] = field(default_factory=list)
     # Run when the staged documents never reach disk: a failed commit or an
     # abandoned command (#4664).
     if_uncommitted: list[Callable[[], None]] = field(default_factory=list)
@@ -276,7 +300,7 @@ def lockfile_writer(writer: LockfileWriter) -> Callable[[Callable[_P, _R]], Call
     return decorate
 
 
-def stage_lockfile(path: Path, serialized: str) -> bool:
+def stage_lockfile(path: Path, serialized: str | StagedDocument) -> bool:
     """Stage *serialized* for *path* inside a writer; ``False`` outside one.
 
     ``LockFile.write`` already raised any refusal (symlinked or
@@ -309,9 +333,40 @@ def staged_lockfile_text(path: Path) -> str | None:
         staged = scope.pending.get(_key(path))
         if isinstance(staged, _Removed):
             return None
+        if isinstance(staged, StagedDocument):
+            return staged.text()
         if staged is not None:
             return staged
     return _disk_text(path)
+
+
+def staged_lockfile_document(path: Path) -> StagedDocument | None:
+    """The document this command staged for *path* as data, if it was staged that way."""
+    scope = _scope()
+    if scope is None:
+        return None
+    staged = scope.pending.get(_key(path))
+    return staged if isinstance(staged, StagedDocument) else None
+
+
+def staged_document_copy(path: Path) -> dict | None:
+    """A private copy of the document staged as data for *path*: its text's parse."""
+    from ..utils.yaml_io import copy_plain_tree
+
+    staged = staged_lockfile_document(path)
+    if staged is None or not isinstance(staged.document, dict):
+        return None
+    return copy_plain_tree(staged.document)
+
+
+def stage_document(path: Path, document: dict) -> bool:
+    """Stage plain *document* for *path*, emitted only when its text is needed (#4939).
+
+    ``False`` outside a writer: the caller then writes the text now.
+    """
+    from .lockfile_container import render_staged_document
+
+    return stage_lockfile(path, StagedDocument(document, render_staged_document))
 
 
 def has_staged_lockfile(path: Path) -> bool | None:
@@ -404,6 +459,18 @@ def after_lockfile_commit(action: Callable[[], None], *, first: bool = False) ->
         scope.after_commit.append(action)
 
 
+def before_lockfile_commit(action: Callable[[], None]) -> None:
+    """Run *action* just before what this command staged is written (#4863).
+
+    The deploy journal records there which lockfile it is about to commit,
+    so a process killed after the write is not mistaken for an uncommitted
+    install. With nothing staged, nothing is about to be written.
+    """
+    scope = _scope()
+    if scope is not None and scope.pending:
+        scope.before_commit.append(action)
+
+
 def unless_lockfile_commits(action: Callable[[], None]) -> bool:
     """Run *action* if what this command staged never reaches disk (#4664).
 
@@ -448,6 +515,7 @@ def discard_staged_lockfile_writes() -> None:
         return
     scope.pending.clear()
     scope.after_commit.clear()
+    scope.before_commit.clear()
     scope.if_uncommitted.clear()
     scope.changed_state = False
 
@@ -466,12 +534,21 @@ def flush_lockfile_writes() -> None:
 def _commit(scope: _WriteScope) -> None:
     from ..utils.atomic_io import atomic_write_text, umask_file_mode
     from .lockfile import ensure_lockfile_writable
-    from .lockfile_document import same_document
+    from .lockfile_document import holds_document, same_document
 
+    marks, scope.before_commit = scope.before_commit, []
+    if scope.pending:
+        for mark in marks:
+            mark()
     while scope.pending:
         key = next(iter(scope.pending))
         document = scope.pending[key]
-        if not isinstance(document, _Removed) and not same_document(_disk_text(key), document):
+        if isinstance(document, StagedDocument):
+            on_disk = holds_document(_disk_text(key), document.document)
+            document = document.text()
+        elif not isinstance(document, _Removed):
+            on_disk = same_document(_disk_text(key), document)
+        if not isinstance(document, _Removed) and not on_disk:
             ensure_lockfile_writable(key)
             try:
                 atomic_write_text(key, document, new_file_mode=umask_file_mode(key))

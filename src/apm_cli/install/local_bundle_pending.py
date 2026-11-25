@@ -3,9 +3,10 @@
 A local bundle is not a dependency under ``apm_modules/``, so the approval
 commands cannot scan it. ``apm install <bundle>`` records, in the scope's
 ``apm_modules/``, the slug, the exact-content approval key the install printed,
-and the executable types (hooks, MCP, LSP) the bundle ships. ``--pending``
-re-checks every entry against current trust, so an approved key never shows as
-pending; ``apm approve <key>`` grants only a key the last install recorded.
+the executable types (hooks, MCP, LSP) the bundle ships, and the dependency
+policy identities from its metadata. ``--pending`` re-checks every entry
+against current trust, so an approved key never shows as pending;
+``apm approve <key>`` grants only a key the last install recorded.
 """
 
 from __future__ import annotations
@@ -14,9 +15,43 @@ import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 _RECORD = Path("apm_modules") / ".local-bundle-pending.json"
+
+if TYPE_CHECKING:
+    from ..policy.models import LocalBundleSubjects
+
+
+@dataclass(frozen=True)
+class BundlePolicySubject:
+    """The policy identity captured from a bundle's authoritative metadata."""
+
+    canonical_ref: str
+    host: str | None
+    case_insensitive_identity_prefix_segments: int
+    unique_key: str
+
+    def get_canonical_dependency_string(self) -> str:
+        """Return the canonical identity used by dependency-policy matching."""
+        return self.canonical_ref
+
+    @property
+    def policy_host(self) -> str | None:
+        """Return the effective host used by host-qualified policy patterns."""
+        return self.host
+
+    def get_unique_key(self) -> str:
+        """Return the identity captured with this policy subject."""
+        return self.unique_key
+
+
+@dataclass(frozen=True)
+class StoredBundlePolicySubjects:
+    """Bundle-name and embedded-package identities captured at install time."""
+
+    names: tuple[BundlePolicySubject, ...]
+    packages: tuple[BundlePolicySubject, ...]
 
 
 @dataclass(frozen=True)
@@ -26,10 +61,21 @@ class PendingBundle:
     slug: str
     approval_key: str
     exec_types: tuple[str, ...]
+    policy_subjects: StoredBundlePolicySubjects | None = None
 
 
 def _record_path(scope_dir: Path) -> Path:
     return Path(scope_dir) / _RECORD
+
+
+def pending_record_blocker(scope_dir: Path) -> str | None:
+    """Return why the scope's pending record cannot be safely written, else ``None``."""
+    from ..utils.path_security import has_symlink_component
+
+    path = _record_path(scope_dir)
+    if has_symlink_component(Path(scope_dir), path):
+        return f"{_RECORD.as_posix()} (linked path)"
+    return None
 
 
 def _read(scope_dir: Path) -> dict[str, dict]:
@@ -43,23 +89,99 @@ def _read(scope_dir: Path) -> dict[str, dict]:
 
 
 def record_bundle_executables(
-    scope_dir: Path, slug: str, approval_key: str | None, exec_types: Iterable[str]
+    scope_dir: Path,
+    slug: str,
+    approval_key: str | None,
+    exec_types: Iterable[str],
+    *,
+    policy_subjects: LocalBundleSubjects | None = None,
 ) -> None:
     """Record (or, with no *exec_types*, clear) one installed bundle's key and types."""
     bundles = _read(scope_dir)
     types = sorted(set(exec_types))
     if types and approval_key:
-        bundles[slug] = {"approval_key": approval_key, "exec_types": types}
+        entry: dict[str, Any] = {"approval_key": approval_key, "exec_types": types}
+        if policy_subjects is not None:
+            entry["policy_subjects"] = _serialize_policy_subjects(policy_subjects)
+        bundles[slug] = entry
     elif slug in bundles:
         del bundles[slug]
     else:
         return
+    _write(scope_dir, bundles)
+
+
+def _serialize_policy_subjects(subjects: LocalBundleSubjects) -> dict[str, list[dict[str, Any]]]:
+    """Persist the exact identity semantics emitted by bundle_policy_subjects."""
+
+    def serialize(reference: Any) -> dict[str, Any]:
+        return {
+            "canonical_ref": reference.get_canonical_dependency_string(),
+            "host": reference.policy_host,
+            "case_insensitive_identity_prefix_segments": (
+                reference.case_insensitive_identity_prefix_segments
+            ),
+            "unique_key": reference.get_unique_key(),
+        }
+
+    return {
+        "names": [serialize(reference) for reference in subjects.names],
+        "packages": [serialize(reference) for reference in subjects.packages],
+    }
+
+
+def _deserialize_policy_subjects(value: Any) -> StoredBundlePolicySubjects | None:
+    if not isinstance(value, dict):
+        return None
+
+    def deserialize(items: Any) -> tuple[BundlePolicySubject, ...] | None:
+        if not isinstance(items, list):
+            return None
+        references = []
+        for item in items:
+            if not isinstance(item, dict):
+                return None
+            canonical_ref = item.get("canonical_ref")
+            host = item.get("host")
+            prefix_segments = item.get("case_insensitive_identity_prefix_segments")
+            unique_key = item.get("unique_key")
+            if (
+                not isinstance(canonical_ref, str)
+                or not canonical_ref
+                or (host is not None and not isinstance(host, str))
+                or not isinstance(prefix_segments, int)
+                or isinstance(prefix_segments, bool)
+                or prefix_segments < 0
+                or not isinstance(unique_key, str)
+                or not unique_key
+            ):
+                return None
+            references.append(BundlePolicySubject(canonical_ref, host, prefix_segments, unique_key))
+        return tuple(references)
+
+    names = deserialize(value.get("names"))
+    packages = deserialize(value.get("packages"))
+    if not names or packages is None:
+        return None
+    return StoredBundlePolicySubjects(names, packages)
+
+
+def _write(scope_dir: Path, bundles: dict[str, dict]) -> None:
     path = _record_path(scope_dir)
+    if blocker := pending_record_blocker(scope_dir):
+        from ..utils.path_security import PathTraversalError
+
+        raise PathTraversalError(f"Refusing to write the local bundle record through {blocker}")
+    from ..integration import write_seam
+
     if not bundles:
-        path.unlink(missing_ok=True)
+        write_seam.unlink(path, missing_ok=True)  # journaled like its write (#5130)
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n", "utf-8")
+    write_seam.mkdir(path.parent, parents=True, exist_ok=True)
+    # Atomic: a failed update leaves the previous record (and its notes) intact.
+    write_seam.atomic_write_text(
+        path, json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n"
+    )
 
 
 @dataclass
@@ -73,6 +195,7 @@ class BundleRecordStage:
     slug: str
     approval_key: str | None
     exec_types: tuple[str, ...]
+    policy_subjects: LocalBundleSubjects | None = None
     committed: bool = False
 
     def commit(self) -> None:
@@ -80,7 +203,13 @@ class BundleRecordStage:
         if self.committed:
             return
         self.committed = True
-        record_bundle_executables(self.scope_dir, self.slug, self.approval_key, self.exec_types)
+        record_bundle_executables(
+            self.scope_dir,
+            self.slug,
+            self.approval_key,
+            self.exec_types,
+            policy_subjects=self.policy_subjects,
+        )
 
 
 def _recorded(scope_dir: Path) -> list[PendingBundle]:
@@ -92,8 +221,94 @@ def _recorded(scope_dir: Path) -> list[PendingBundle]:
         types = entry.get("exec_types")
         if not isinstance(key, str) or not isinstance(types, list):
             continue
-        found.append(PendingBundle(str(slug), key, tuple(str(t) for t in types)))
+        found.append(
+            PendingBundle(
+                str(slug),
+                key,
+                tuple(str(t) for t in types),
+                _deserialize_policy_subjects(entry.get("policy_subjects")),
+            )
+        )
     return found
+
+
+def recorded_bundle_slugs(scope_dir: Path) -> list[str]:
+    """Return the slugs of the installed bundles that ship executables."""
+    return [bundle.slug for bundle in _recorded(scope_dir)]
+
+
+def _read_strict(scope_dir: Path) -> dict[str, dict]:
+    """The record's bundles for an uninstall update; raise when it exists but cannot be read."""
+    path = _record_path(scope_dir)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{_RECORD.as_posix()} cannot be read: {exc}") from exc
+    bundles = data.get("bundles") if isinstance(data, dict) else None
+    if not isinstance(bundles, dict):
+        raise ValueError(f"{_RECORD.as_posix()} cannot be read: no 'bundles' mapping")
+    return bundles
+
+
+def _retiring(entry: Any) -> list[str]:
+    types = entry.get("retiring") if isinstance(entry, dict) else None
+    return [str(t) for t in types] if isinstance(types, list) else []
+
+
+def mark_bundle_retiring(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Note, before uninstall removes anything, that it is retiring *exec_type* (#4987).
+
+    A retry after a failed :func:`drop_bundle_exec_type` finds the note and
+    finishes; a bundle whose *exec_type* is only parked carries none. Raises
+    ``ValueError`` when the record exists but cannot be read.
+    """
+    bundles = _read_strict(scope_dir)
+    entry = bundles.get(slug)
+    types = entry.get("exec_types") if isinstance(entry, dict) else None
+    if not isinstance(types, list) or exec_type not in types:
+        return
+    if exec_type in _retiring(entry):
+        return
+    bundles[slug] = {**entry, "retiring": sorted({*_retiring(entry), exec_type})}
+    _write(scope_dir, bundles)
+
+
+def retiring_bundle_slugs(scope_dir: Path, exec_type: str) -> set[str]:
+    """Slugs whose uninstall began retiring *exec_type* and did not finish its record update."""
+    return set(retiring_bundle_keys(scope_dir, exec_type))
+
+
+def retiring_bundle_keys(scope_dir: Path, exec_type: str) -> dict[str, str | None]:
+    """Each retiring slug with the approval key its install recorded (#5003)."""
+    return {
+        slug: entry.get("approval_key") if isinstance(entry.get("approval_key"), str) else None
+        for slug, entry in _read(scope_dir).items()
+        if exec_type in _retiring(entry)
+    }
+
+
+def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Forget *exec_type* for one installed bundle once its uninstall removed it (#3700).
+
+    Raises ``ValueError`` when the record exists but cannot be read.
+    """
+    bundles = _read_strict(scope_dir)
+    entry = bundles.get(slug)
+    types = entry.get("exec_types") if isinstance(entry, dict) else None
+    if not isinstance(types, list) or exec_type not in types:
+        return
+    remaining = [t for t in types if t != exec_type]
+    retiring = [t for t in _retiring(entry) if t != exec_type]
+    if not remaining:
+        del bundles[slug]
+    else:
+        bundles[slug] = {k: v for k, v in entry.items() if k != "retiring"}
+        bundles[slug]["exec_types"] = remaining
+        if retiring:
+            bundles[slug]["retiring"] = retiring
+    _write(scope_dir, bundles)
 
 
 def pending_bundles(
@@ -104,7 +319,9 @@ def pending_bundles(
     for bundle in _recorded(scope_dir):
         still = tuple(t for t in bundle.exec_types if not is_approved(bundle.approval_key, t))
         if still:
-            found.append(PendingBundle(bundle.slug, bundle.approval_key, still))
+            found.append(
+                PendingBundle(bundle.slug, bundle.approval_key, still, bundle.policy_subjects)
+            )
     return found
 
 

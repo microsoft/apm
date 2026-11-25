@@ -26,7 +26,33 @@ import contextlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+
+from apm_cli.utils.realpath_win import release_held
+
+
+@dataclass(frozen=True)
+class CreatedRoot:
+    """The directories a ``--root`` redirect created, deepest first (#4957)."""
+
+    dirs: tuple[Path, ...] = ()
+
+    def discard(self) -> None:
+        """Remove each created directory the failed command left empty."""
+        release_held()  # a held root (the cwd) would survive its own discard
+        for directory in self.dirs:
+            with contextlib.suppress(OSError):
+                directory.rmdir()
+
+
+def _missing_dirs(target: Path) -> tuple[Path, ...]:
+    """*target* and each missing parent ``mkdir(parents=True)`` would create, deepest first."""
+    missing = []
+    while not target.exists() and target != target.parent:
+        missing.append(target)
+        target = target.parent
+    return tuple(missing)
 
 
 @contextmanager
@@ -34,7 +60,7 @@ def install_root_redirect(
     root: str | os.PathLike | None,
     *,
     dry_run: bool = False,
-) -> Iterator[None]:
+) -> Iterator[CreatedRoot]:
     """Redirect deploy-side writes into *root* for the wrapped block.
 
     When *root* is ``None`` or empty, this is a no-op so callers can
@@ -50,14 +76,18 @@ def install_root_redirect(
     context manager refuses to mutate the filesystem -- if *root*
     does not exist a ``click.UsageError`` is raised so the preview
     cannot silently create directories on disk.
+
+    Yields the :class:`CreatedRoot` a failed command discards, so a
+    refused install leaves no directory it created (#4957).
     """
     if not root:
-        yield
+        yield CreatedRoot()
         return
 
     from ..core.scope import set_source_root_override
 
     target = Path(root)
+    created = CreatedRoot()
     if dry_run:
         if not target.exists():
             import click
@@ -73,12 +103,13 @@ def install_root_redirect(
         # ``mkdir(parents=True)``, giving us a stable absolute path that
         # matches what ``os.chdir`` will record as the new cwd.
         target = target.resolve()
+        created = CreatedRoot(_missing_dirs(target))
         target.mkdir(parents=True, exist_ok=True)
     original = Path.cwd()
     set_source_root_override(original)
     os.chdir(target)
     try:
-        yield
+        yield created
     finally:
         # Restore both halves of the redirect unconditionally.  If the
         # original directory was removed while inside the block, leave

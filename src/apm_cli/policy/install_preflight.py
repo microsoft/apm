@@ -67,6 +67,18 @@ def emit_check_violations(logger, check, *, severity: str, source: str | None) -
         )
 
 
+def emit_passed_check_warnings(logger, checks, *, source: str | None) -> None:
+    """Report the subjects of passing checks that carry warnings (#5070).
+
+    ``mcp.self_defined: warn`` and project-wins version pins pass with
+    subjects; every install entry reports them as warnings, as the pipeline
+    gate does, so warn mode never reads like ``allow``.
+    """
+    for check in checks:
+        if check.passed and check.details:
+            emit_check_violations(logger, check, severity="warn", source=source)
+
+
 def render_dry_run_verdicts(logger, audit_result, enforcement: str) -> None:
     """Render failed checks as a capped ``--dry-run`` preview per severity."""
     block_lines: list[tuple[str, str]] = []
@@ -218,6 +230,8 @@ def run_policy_preflight(
             bundled_deps=bundled_deps,
         )
 
+    if not dry_run:
+        emit_passed_check_warnings(logger, audit_result.checks, source=fetch_result.source)
     if not audit_result.passed:
         if dry_run:
             render_dry_run_verdicts(logger, audit_result, enforcement)
@@ -264,13 +278,25 @@ def prefetch_identity_policy(policy_root: Path, *, no_policy: bool = False):
     Returns ``None`` when policy is disabled, unusable or not blocking;
     the install gate then reports the outcome as before.
     """
+    policy = enforced_entry_policy(policy_root, no_policy=no_policy)
+    if policy is None or policy.enforcement != "block":
+        return None
+    return policy
+
+
+def enforced_entry_policy(policy_root: Path, *, no_policy: bool = False):
+    """The org policy an install entry reports on: ``block`` or ``warn``, else ``None`` (#4957).
+
+    An entry outside the dependency pipeline (``--mcp``, a local bundle)
+    reports the verdicts the pipeline reports with this policy.
+    """
     from .discovery import policy_disabled_by_env
     from .outcome_routing import resolve_trust_policy
 
     if no_policy or policy_disabled_by_env():
         return None
     policy = resolve_trust_policy(policy_root, announce=False, raise_blocking_errors=False)
-    if policy is None or policy.enforcement != "block":
+    if policy is None or policy.enforcement not in ("block", "warn"):
         return None
     return policy
 

@@ -32,7 +32,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from itertools import combinations
 
-from tests.lifecycle.generator.factors import ON, ORDER, TRIPLES, cell_id
+from tests.lifecycle.generator.factors import ON, ORDER, TRIPLES, cell_id, parse_cell
 
 SOURCE_SPINE = (
     "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
@@ -98,12 +98,122 @@ GATE_PLUGIN_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::"
     "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
 )
+SOURCE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::test_source_bin_spine_credits_op_src_bin_cells"
+)
+SOURCE_KIT_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::"
+    "test_source_kit_spine_credits_registry_executable_cells"
+)
+SOURCE_BUNDLE_SPINE = (
+    "tests/lifecycle/machines/test_m_source_bin.py::"
+    "test_source_bundle_spine_credits_bundle_executable_cells"
+)
+_OWNERSHIP = "tests/lifecycle/scenarios/test_ownership_siblings.py::"
+# Witnesses whose package can deploy a bin/ artifact, with the scope it lands at
+# (#4981). Loose bin/ deploys only for a user-scope marketplace plugin with a
+# Claude target, and a whole trusted Claude plugin carries bin/ to either scope
+# (U-BIN). A row or spine acting on p-exec or a bundle at project scope never
+# deploys bin/, so it cannot credit a bin cell: the gate decided nothing there.
+BIN_WITNESSES: Mapping[str, str] = {
+    GATE_BIN_SPINE: "user",
+    GATE_PLUGIN_BIN_SPINE: "project",
+    SOURCE_BIN_SPINE: "project",
+    **{
+        _OWNERSHIP + name: "user"
+        for name in (
+            "test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin",
+            "test_a_plugin_bin_without_a_lock_is_kept",
+            "test_an_edited_plugin_bin_is_restored_and_said",
+        )
+    },
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_plugin_bin_deploys_under_home_once_trusted": "user",
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_trusted_plugin_bin_holds_across_lock_policy_and_network_states": "user",
+    "tests/lifecycle/scenarios/test_policy_pairs.py::"
+    "test_a_denied_plugin_with_bin_is_refused_at_user_scope": "user",
+    **{
+        "tests/lifecycle/scenarios/test_lock_states.py::"
+        f"test_user_bin_plugin_under_a_drifted_lock[{lock}]": "user"
+        for lock in ("stale", "newer-generator")
+    },
+    **{
+        "tests/lifecycle/scenarios/test_user_scope.py::"
+        f"test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[{change}]": "user"
+        for change in ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
+    },
+}
+
+
+def credits_bin(node: str, cell: Mapping[str, str]) -> bool:
+    """Whether *node* may credit *cell*: a non-bin cell, or bin/ deployed at its scope."""
+    if cell.get("PRIM") != "bin":
+        return True
+    scope = BIN_WITNESSES.get(node)
+    return scope is not None and cell.get("SCOPE", scope) == scope
+
+
+# (OP, SRC, PRIM) source-spine steps whose primitive the spine never observed on a
+# surface (dimension audit, lifecycle-journeys run 45258714621): a registry or local
+# bundle package's executable at a non-install step. The spine records no gate level
+# there, so neither a deploy nor a parked decision is proven (#4981 generalized).
+SOURCE_SPINE_UNOBSERVED: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        *(
+            (op, "pkg-registry", prim)
+            for op in ("audit", "lock", "prune", "uninstall", "update")
+            for prim in ("hook", "lsp", "canvas")
+        ),
+        ("compile", "pkg-registry", "canvas"),
+        *((op, "local-bundle", "canvas") for op in ("approve-deny", "audit", "compile", "lock")),
+        *((op, "local-bundle", "hook") for op in ("audit", "lock")),
+        *((op, "local-bundle", "lsp") for op in ("approve-deny", "audit", "lock")),
+    }
+)
+
+
+def deployable_prims(scope: str) -> frozenset[str]:
+    """Primitives a lifecycle world can deploy at *scope*: the kinds of that scope's
+    surface table (``rows._SURFACE_GLOBS``, ``machines._kit.USER_SURFACE_GLOBS``),
+    plus skills and project instructions. bin/ is decided by ``BIN_WITNESSES``."""
+    from tests.lifecycle.machines._kit import USER_SURFACE_GLOBS
+    from tests.lifecycle.rows import _SURFACE_GLOBS
+
+    table = _SURFACE_GLOBS if scope == "project" else USER_SURFACE_GLOBS
+    extra = {"skill", "other-file"} if scope == "project" else {"skill"}
+    return frozenset({kind for kind, _ in table} | extra) - {"bin"}
+
+
+def credits_dimension(node: str, cell: Mapping[str, str]) -> bool:
+    """Whether *node* exercises *cell*'s primitive: it deploys (or the gate decides) that
+    primitive at the cell's scope. A witness that never does proves nothing about it."""
+    prim = cell.get("PRIM")
+    if prim is None:
+        return True
+    if prim == "bin":
+        return credits_bin(node, cell)
+    if "SCOPE" in cell and prim not in deployable_prims(cell["SCOPE"]):
+        return False
+    step = (cell.get("OP"), cell.get("SRC"), prim)
+    return not (node == SOURCE_SPINE and step in SOURCE_SPINE_UNOBSERVED)
+
+
+# User bin spine gate levels at which bin/ is deployed when install --mcp runs
+# (tests/lifecycle/machines/_gate_bin.py replay_bin).
+_BIN_DEPLOYED_LEVELS = frozenset({"none", "allowed", "revoked-after-deploy"})
+
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
     "pack": ("pack", ()),
     "install": ("install", ()),
     "install-frozen": ("install", ("FROZEN",)),
+    "install-update": ("install", ("UPDATE",)),
+    "install-force": ("install", ("FORCE",)),
+    "install-dry-run": ("install", ("DRYRUN",)),
+    "install-select": ("install", ("SELECT",)),
+    "install-multi": ("install", ()),
     "update": ("update", ()),
     "lock": ("lock", ()),
     "audit": ("audit", ()),
@@ -181,7 +291,15 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
     from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
-    from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
+    from tests.lifecycle.machines._gate_plugin_bin import (
+        KNOWN_PLUGIN,
+        bin_context,
+        deploys_bin,
+        plugin_bin_cells,
+    )
+    from tests.lifecycle.machines._source_bin import source_bin_cells
+    from tests.lifecycle.machines._source_bundle import source_bundle_cells
+    from tests.lifecycle.machines._source_kit import KNOWN_IDS, source_kit_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -221,13 +339,25 @@ def machine_cells() -> list[MachineCell]:
             assignment = _gate_assignment(key)
             if witness == GATE_BUNDLE_SPINE:
                 assignment = {**assignment, "SRC": "local-bundle"}
-            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key) or KNOWN_PLUGIN.get(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
             if assignment["GATE"] == "denied-dependency":
                 # A refusal proves its GATE level only, never a success cell.
                 continue
-            if witness == GATE_PACK_SPINE:
-                # A real pack over the primitive also proves the OP x PRIM pair.
+            if (
+                witness == GATE_BIN_SPINE
+                and key.split("|")[1] == "mcp-install"
+                and assignment["GATE"] in _BIN_DEPLOYED_LEVELS
+            ):
+                # install --mcp over a deployed bin/ keeps it byte-identical (U7): the
+                # step's evidence names bin/ present, so it proves the OP x PRIM pair.
+                context = {"OP": "mcp-install", "PRIM": "bin"}
+                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
+            if witness == GATE_PACK_SPINE or (
+                witness == GATE_PLUGIN_BIN_SPINE and assignment["OP"] == "pack"
+            ):
+                # A real pack over the primitive also proves the OP x PRIM pair; the
+                # plugin bin spine's pack runs over a deployed plugin bin/ (#5253).
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
             if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):
@@ -237,8 +367,24 @@ def machine_cells() -> list[MachineCell]:
                 cells.append(MachineCell(key, witness, "T-1", source, tracking))
     for key in sorted(filter(deploys_bin, plugin_bin_cells())):
         # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
-        assignment = {"PRIM": "bin", "SCOPE": "project"}
+        # A context re-install also proves its modifier and context (#4095 lane T-1c).
+        assignment = {"PRIM": "bin", "SCOPE": "project", **(bin_context(key) or {})}
         cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
+    for key in sorted(source_bin_cells()):
+        # A whole plugin's bin/ declared by one form through one command (#4096).
+        _, op, form = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": "bin"}
+        cells.append(MachineCell(key, SOURCE_BIN_SPINE, "T-2", assignment))
+    for key in sorted(source_kit_cells()):
+        # A registry package's executable observed through one command (#4096).
+        _, op, form, prim = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": prim}
+        cells.append(MachineCell(key, SOURCE_KIT_SPINE, "T-2", assignment, KNOWN_IDS.get(key)))
+    for key in sorted(source_bundle_cells()):
+        # A local bundle's executable observed through one command (#4096).
+        _, op, form, prim = key.split("|")
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": prim}
+        cells.append(MachineCell(key, SOURCE_BUNDLE_SPINE, "T-2", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
@@ -294,8 +440,11 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
+        # The whole step, not only the projected id: an unexercised step credits no pair.
+        if not credits_dimension(cell.witness, cell.assignment):
+            continue
         for key in credits(cell):
-            if key in obligations:
+            if key in obligations and credits_dimension(cell.witness, parse_cell(key)[1]):
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
     for key, nodes in sorted(by_node.items()):
@@ -319,12 +468,14 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
 
 SCENARIO_MODULES = (
     "test_cache_presence",
+    "test_compile_source_files",
     "test_concurrency",
     "test_deployed_absent",
     "test_failure_phase",
     "test_file_routing",
     "test_graph_version",
     "test_history_upgrade",
+    "test_host_identity_pairs",
     "test_lock_states",
     "test_mcp_ownership_history",
     "test_mcp_write_receipts",
@@ -365,7 +516,11 @@ def scenario_witnesses(
     by_key: dict[str, list] = {}
     for credit in scenario_credits():
         for key in implied(credit.assignment):
-            if key in obligations and lanes.get(key) in SCENARIO_LANES:
+            if (
+                key in obligations
+                and lanes.get(key) in SCENARIO_LANES
+                and credits_dimension(credit.node, parse_cell(key)[1])
+            ):
                 by_key.setdefault(key, []).append(credit)
     witnesses: dict[str, Witness] = {}
     for key, found in sorted(by_key.items()):

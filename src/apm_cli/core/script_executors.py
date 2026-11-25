@@ -1568,17 +1568,20 @@ def _execute_command(
         # spawns) in its OWN process group, so a timeout can reap the
         # whole tree via killpg instead of orphaning backgrounded
         # grandchildren (subprocess.run's timeout kills only the shell).
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            start_new_session=True,
-        )
+        from ..cli import interrupts_deferred
+
+        with interrupts_deferred():
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=cwd,
+                start_new_session=True,
+            )
         stdout, stderr, capped = _capture_bounded(proc, event.to_json(), timeout)
         returncode = proc.returncode
         if capped:
@@ -1846,8 +1849,14 @@ def _build_script_env(script: ScriptEntry) -> dict[str, str]:
     convenience, NOT a security boundary: a command script can read any
     file it has permission to.
     """
+    from apm_cli.utils.git_env import user_script_environment
+
     allowed = frozenset(script.allowed_env_vars or ())
-    env = {k: v for k, v in os.environ.items() if not _is_denylisted(k, allowed)}
+    env = {
+        k: v
+        for k, v in user_script_environment(dict(os.environ)).items()
+        if not _is_denylisted(k, allowed)
+    }
     if script.env:
         # script.env values are merged last and may reintroduce credential-named
         # variables deliberately set by the script author. This is intentional

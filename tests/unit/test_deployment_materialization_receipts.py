@@ -1386,3 +1386,54 @@ def test_locator_resolves_a_retargeted_skills_root_live(
 
     assert session._locator(path, [TARGET]) is None
     assert path.read_text(encoding="utf-8") == "old\n"
+
+
+def test_recording_many_writes_resolves_each_root_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One record() call observes each root once; every written file is still resolved."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    paths = [path]
+    for name in ("a", "b", "c"):
+        extra = path.parent.parent / name / "SKILL.md"
+        extra.parent.mkdir(parents=True)
+        extra.write_text(f"rendered {name}\n", encoding="utf-8")
+        paths.append(extra)
+    session = _session(root, lock)
+    # Every resolution reaches one of these: pathlib's realpath, the Linux
+    # /proc form's open(O_PATH), the openat2 form's fsencode, or the Windows
+    # fast form's final-path call.
+    resolved: list[str] = []
+    realpath, open_, fsencode = os.path.realpath, os.open, os.fsencode
+
+    def counted(value, *args, **kwargs):
+        resolved.append(os.fspath(value))
+        return realpath(value, *args, **kwargs)
+
+    def counted_open(value, *args, **kwargs):
+        resolved.append(os.fspath(value))
+        return open_(value, *args, **kwargs)
+
+    def counted_fsencode(value):
+        resolved.append(os.fspath(value))
+        return fsencode(value)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os.path, "realpath", counted)
+        patch.setattr(os, "open", counted_open)
+        patch.setattr(os, "fsencode", counted_fsencode)
+        if sys.platform == "win32":
+            import nt  # type: ignore[import-not-found]
+
+            final_path = nt._getfinalpathname
+
+            def counted_final(value, *args, **kwargs):
+                resolved.append(os.fspath(value))
+                return final_path(value, *args, **kwargs)
+
+            patch.setattr(nt, "_getfinalpathname", counted_final)
+        session.record({p: compute_file_hash(p) for p in paths}, [TARGET], "pkg")
+    session.flush()
+    assert resolved.count(os.fspath(TARGET.skills_deploy_path(root))) == 1
+    assert {os.fspath(p) for p in paths} <= set(resolved)
+    assert lock.deployment_ledger.records

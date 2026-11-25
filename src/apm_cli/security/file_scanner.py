@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import tomllib
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -29,6 +29,7 @@ from ..integration.hook_integrator import native_hook_config
 from ..integration.hook_native_formats import HookContentEntry, inspect_native_hooks
 from ..integration.targets import TargetProfile
 from ..security.content_scanner import ContentScanner, ScanFinding, pointer_location
+from ..utils.path_security import open_regular_file
 from .primitive_discovery import (
     PrimitiveSurface,
     iter_surface_files,
@@ -168,6 +169,16 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
+def _regular_bytes(path: Path) -> bytes:
+    """The bytes of *path*; ``OSError`` unless it is a regular file that is not a link.
+
+    A FIFO or device at a deployed path reads as not a primitive and never
+    blocks (#5280).
+    """
+    with open_regular_file(path) as handle:
+        return handle.read()
+
+
 def _content_entries(
     path: Path, surface: PrimitiveSurface, recorded_hash: str | None = None
 ) -> tuple[HookContentEntry, ...]:
@@ -181,7 +192,7 @@ def _content_entries(
     if surface.kind == "hooks":
         config = native_hook_config(surface.target)
         # Untranslated newlines: the canonical deployed-file hash alone normalizes them.
-        text = path.read_bytes().decode("utf-8")
+        text = _regular_bytes(path).decode("utf-8")
         document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
         if is_deployed_hook_module_metadata(
             path, text, target_name=surface.target, recorded_hash=recorded_hash
@@ -196,7 +207,8 @@ def _content_entries(
             shared=surface.shared,
             nested_handlers=config.nested_handlers if config else None,
         )
-    text = path.read_text(encoding="utf-8")
+    # Universal newlines, as read_text gave.
+    text = _regular_bytes(path).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if surface.prompt_fields:
         document = tomllib.loads(text)
         return tuple(
@@ -381,6 +393,30 @@ def scan_deployed_trees(project_root: Path) -> tuple[dict[str, list[ScanFinding]
     return result.findings_by_file, len(result.scanned_files)
 
 
+def surface_candidates(
+    surfaces: Sequence[PrimitiveSurface],
+) -> Callable[[Path], list[PrimitiveSurface]]:
+    """Return a lookup of the surfaces that may hold a path, in *surfaces* order.
+
+    Exactly ``[s for s in surfaces if s.contains(p) or (s.pattern is not None
+    and p.is_relative_to(s.path))]``: an exact surface holds only its own
+    path, and a pattern surface holds its path and every descendant. Indexing
+    by surface path turns one scan over every surface per claimed file into
+    lookups of the path and its ancestors.
+    """
+    by_path: dict[Path, list[tuple[int, PrimitiveSurface]]] = {}
+    for index, surface in enumerate(surfaces):
+        by_path.setdefault(surface.path, []).append((index, surface))
+
+    def candidates(path: Path) -> list[PrimitiveSurface]:
+        hits = list(by_path.get(path, ()))
+        for ancestor in path.parents:
+            hits.extend(hit for hit in by_path.get(ancestor, ()) if hit[1].pattern is not None)
+        return [surface for _index, surface in sorted(hits, key=lambda hit: hit[0])]
+
+    return candidates
+
+
 def _scan_claimed_files(
     project_root: Path,
     claims: dict[str, str],
@@ -403,6 +439,7 @@ def _scan_claimed_files(
         and not profile.user_root_resolver
     ] + list(reversed(targets))
     surfaces = primitive_surfaces(project_root, profiles, user_scope=user_scope)
+    candidates_for = surface_candidates(surfaces)
     results: list[FileScanResult] = []
     cache = {} if cache is None else cache
     for rel_path, owner in claims.items():
@@ -424,11 +461,7 @@ def _scan_claimed_files(
             if decoded is None:
                 continue
             abs_path = decoded
-        candidates = [
-            s
-            for s in surfaces
-            if s.contains(abs_path) or (s.pattern is not None and abs_path.is_relative_to(s.path))
-        ]
+        candidates = candidates_for(abs_path)
         try:
             if candidates and not safe_surface_path(candidates[0], abs_path):
                 continue

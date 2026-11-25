@@ -346,6 +346,8 @@ _FROZEN_PARAMETER_SITES = frozenset(
         ("src/apm_cli/deps/apm_resolver.py", "__init__"),
         ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
         ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/fast_entry.py", "_run"),
+        ("src/apm_cli/install/fast_entry.py", "run"),
         ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
         ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
     }
@@ -684,6 +686,38 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "_preserve_existing_mcp_state",
             "DeploymentLedgerCodec.mcp_native_hashes",
         ),
+        # A config file APM emptied is deleted only by the provenance owner (#4867).
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "_write_cleaned_json_config",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_ownership.py",
+            "remove_emptied_hook_file",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_source_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_entries_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/install/mcp/retired_destinations.py",
+            "heal_retired_project_mcp_destinations",
+            "delete_emptied_config",
+        ),
+        # Crash recovery restores a shared config only on the owner's baseline (#5009).
+        (
+            "src/apm_cli/install/deploy_snapshot.py",
+            "_shared_config_vouched",
+            "vouches_for_current_bytes",
+        ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
@@ -965,6 +999,42 @@ def _check_project_self_entry(
     return findings
 
 
+_RECORDS_OWNER = "src/apm_cli/install/drift_records.py"
+
+
+def _record_serving_findings(provider: FactsProvider, rule_id: str, drift: object) -> list:
+    """Only the record owner decides that a package is served (#4940).
+
+    ``served_outputs`` and ``ReplayRecords`` live only in the owner, the replay
+    asks it once per package, and the owner's serve path goes through
+    ``served_outputs``.
+    """
+    findings = _unique_definitions(
+        provider, rule_id, _RECORDS_OWNER, ("served_outputs", "ReplayRecords")
+    )
+    # Whether a link stays unrewritten has one owner, shared with the renderer.
+    findings.extend(
+        _unique_definitions(provider, rule_id, _LINK_RESOLVER_OWNER, ("is_external_url",))
+    )
+    records, records_fail = _facts_for(provider, _RECORDS_OWNER, rule_id)
+    findings.extend(records_fail)
+    if records_fail:
+        return findings
+    if not (
+        _present(drift, "if served.serve(lock_dep, install_path, package_info, selection):")
+        and "served_outputs" in _name_calls_in(records, "serve")
+        and "is_external_url" in _name_calls_in(records, "_may_rewrite_links")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _RECORDS_OWNER,
+                "Drift replay must decide served packages only through served_outputs",
+            )
+        )
+    return findings
+
+
 def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     """CI audit scratch materialization and replay intent must route through owners."""
     rule_id = _GUARD_AUDIT_REPLAY
@@ -980,6 +1050,7 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     findings.extend(
         _unique_definitions(provider, rule_id, _AUDIT_ROOTS_OWNER, ("replay_deployment_frame",))
     )
+    findings.extend(_record_serving_findings(provider, rule_id, drift))
     roots, roots_fail = _facts_for(provider, _AUDIT_ROOTS_OWNER, rule_id)
     resolver, resolver_fail = _facts_for(provider, _LINK_RESOLVER_OWNER, rule_id)
     findings.extend(roots_fail)

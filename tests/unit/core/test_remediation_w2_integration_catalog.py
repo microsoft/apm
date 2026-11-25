@@ -48,6 +48,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "cowork-skills-dir-undetected": _COWORK,
     "hook-config-unreadable": "same dropped-target cleanup as hook-sidecar-unreadable, which "
     "is executed",
+    "hook-event-malformed": "executed as printed by "
+    "test_install_malformed_deployed_hook_event_lifecycle (fix the event, rerun apm install)",
     "hook-path-escapes-package": _SOURCE,
     "hook-plugin-root-unresolved": _SOURCE,
     "instruction-frontmatter-rejected": _SOURCE,
@@ -66,6 +68,7 @@ COMPONENT_ONLY: dict[str, str] = {
     "declares the selection; updating it needs a new revision",
     "uninstall-evidence-reinstall": "executed as printed by test_cleanup_deployment_evidence_lifecycle (full sentence asserted)",
     "uninstall-evidence-remove": "full sentence asserted by test_cleanup_deployment_evidence_lifecycle and test_remediation_gate9_call_sites",
+    "uninstall-reanchor-stale-copy": "full sentence asserted by the stale-copy refusal in test_uninstall_local_reanchor_parity_lifecycle (a running reinstall needs a live local source)",
     "uninstall-evidence-trust-lockfile": "offered and executed by test_uninstall_trust_lockfile_lifecycle (needs an unreachable source and no receipts)",
 }
 

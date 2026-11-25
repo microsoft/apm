@@ -15,7 +15,7 @@ _RULE_ID = "transport-platform-checkout-verified"
 _OWNER = "src/apm_cli/cache/checkout_verify.py"
 _REQUIRED: dict[str, tuple[str, ...]] = {
     _OWNER: (
-        "if _object_id(self._algorithm, kind, data) != oid:",
+        "if git_object_id(self._algorithm, kind, data) != oid:",
         'raise CheckoutVerificationError(f"{rel} is not produced by the commit")',
         'raise CheckoutVerificationError(f"{missing[0]} is missing from the checkout")',
         "any(state.get(name) not in (None, False) for name in _TRANSFORMS)",

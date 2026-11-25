@@ -30,14 +30,21 @@ from scripts.architecture_linter.checks.transport_checkout_verify import (
 from scripts.architecture_linter.checks.transport_credential_value_rendering import (
     RULES as _CREDENTIAL_RENDERING_RULES,
 )
+from scripts.architecture_linter.checks.transport_deploy_store import RULES as _DEPLOY_STORE_RULES
 from scripts.architecture_linter.checks.transport_egress_route import (
     RULES as _EGRESS_ROUTE_RULES,
+)
+from scripts.architecture_linter.checks.transport_external_executables import (
+    RULES as _EXTERNAL_EXECUTABLE_RULES,
 )
 from scripts.architecture_linter.checks.transport_github_credential_class import (
     RULES as _GITHUB_CREDENTIAL_CLASS_RULES,
 )
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
+)
+from scripts.architecture_linter.checks.transport_held_directory_release import (
+    RULES as _HELD_DIRECTORY_RULES,
 )
 from scripts.architecture_linter.checks.transport_ls_remote_tags import (
     COLLECTORS as _LS_REMOTE_TAG_COLLECTORS,
@@ -66,6 +73,9 @@ from scripts.architecture_linter.checks.transport_revision_pins import (
 from scripts.architecture_linter.checks.transport_revision_pins import (
     RULES as _REVISION_PIN_RULES,
 )
+from scripts.architecture_linter.checks.transport_rmtree_link_safety import (
+    RULES as _RMTREE_LINK_RULES,
+)
 from scripts.architecture_linter.checks.transport_sparse_and_updates import (
     COLLECTORS as _SPARSE_COLLECTORS,
 )
@@ -80,6 +90,9 @@ RULES = (
     + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
+    + _RMTREE_LINK_RULES
+    + _HELD_DIRECTORY_RULES
+    + _DEPLOY_STORE_RULES
     + _CACHED_REPO_GIT_RULES
     + _CHECKOUT_VERIFY_RULES
     + _SPARSE_RULES
@@ -93,6 +106,7 @@ RULES = (
     + _GITHUB_CREDENTIAL_CLASS_RULES
     + _PROXY_HTTP_TOKEN_RULES
     + _CATALOG_CREDENTIAL_RULES
+    + _EXTERNAL_EXECUTABLE_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

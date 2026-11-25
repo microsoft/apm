@@ -23,7 +23,7 @@ from apm_cli.utils.path_security import (
     ensure_path_within_resolved,
     has_symlink_component,
 )
-from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.paths import portable_relpath, portable_relpaths, relative_to
 
 if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -36,7 +36,7 @@ def _is_safe_source_path(
 ) -> bool:
     """Check containment; notify on_symlink only for symlink-component rejection."""
     try:
-        path.relative_to(source_root)
+        relative_to(path, source_root)
     except ValueError:
         return False
     if has_symlink_component(source_root, path):
@@ -379,14 +379,20 @@ class DeployableSourcePlan:
     def copy_ignore(self, directory: str, contents: list[str]) -> list[str]:
         """Return source entries excluded from a skill copy by this plan."""
         current = Path(directory)
+        admitted = [n for n in contents if _is_safe_source_path(current / n, self.source_root)]
+        relatives = dict(
+            zip(
+                admitted,
+                portable_relpaths([current / n for n in admitted], self.source_root),
+                strict=True,
+            )
+        )
         ignored: list[str] = []
         for name in contents:
-            candidate = current / name
-            if not _is_safe_source_path(candidate, self.source_root):
-                ignored.append(name)
-                continue
-            relative = portable_relpath(candidate, self.source_root)
-            if self.includes(relative) or relative in self.authorized_parent_prefixes:
+            relative = relatives.get(name)
+            if relative is not None and (
+                self.includes(relative) or relative in self.authorized_parent_prefixes
+            ):
                 continue
             ignored.append(name)
         return ignored

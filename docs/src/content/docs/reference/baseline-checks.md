@@ -43,8 +43,9 @@ first failure to skip expensive I/O.
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `native-mcp-ownership` | block | `ci_checks.py` | yes |
 | `native-mcp-drift` | block | `ci_checks.py` | only when a recorded self-defined native MCP entry was edited |
-| `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it could not confirm |
+| `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it no longer deploys |
 | `content-integrity` | block | `ci_checks.py` | yes |
+| `local-bundle-hooks` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
 | `drift` | block | `_check_drift` in `ci_checks.py`, invoked from `commands/audit.py` | yes, unless `--no-drift` |
@@ -165,7 +166,7 @@ the [policy schema](../policy-schema/).
 - **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is unreadable. In `apm audit --ci`, when `apm_modules/` is absent but the lockfile is present, APM first self-hydrates a lock-pinned scratch install and derives the current MCP truth from that isolated modules tree; if the scratch replay itself fails, `config-consistency` fails closed with the replay error. A missing manifest also fails unless the lockfile records a skill bundle, or records a remote Claude skill at a repository root or subdirectory. Before remote materialization the locked type is authoritative; once materialized, the on-disk shape and lock metadata must both identify a Claude skill. Present local paths use the same shape-and-lock check, while a missing local path still fails. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
 - **Consent.** Audit re-evaluates [admission](../cli/approve/#pinned-approvals) from `apm.yml` and org policy, never from the lockfile or the personal `--user` store. A server the lockfile admitted that `apm.yml` does not approve, for example after a one-off `--trust-transitive-mcp` run or a hand edit, fails with `admitted in apm.lock.yaml but not approved in apm.yml (<reason>); run 'apm approve <pkg>' and re-run 'apm install'`. A denied server fails with `admitted in apm.lock.yaml but the executables gate now parks it (denied)`, pointing at `apm policy explain <pkg>`. A passing check names servers parked because their definition changed since approval (`Review: apm approve --pending`).
 - **Intentional omissions.** Install and update record dependency MCP omitted by `--only apm`, by the default refusal of unapproved transitive MCP (including retiring one a previous run trusted with `--trust-transitive-mcp`), or by the executables gate while the declaring package is not approved, is denied, or no longer matches its pin. Audit excludes only the exact dependency and authored declaration covered by that evidence; expanding `${CLAUDE_PLUGIN_ROOT}` at a different materialization path does not change it. This applies to project and global installs, including `agent-skills`. After direct MCP admission, obsolete omission evidence no longer affects that server: its admitted configuration participates in normal drift checks. Root declarations and previously admitted MCP configurations remain checked; a later skills-only install preserves their baseline. If removing a server fails, the previous baseline is kept and no omission is recorded.
-- **Frozen skills-only replay.** `apm install --only apm --frozen` preserves the admitted MCP baseline and exact lockfile and native-configuration bytes. Existing frozen source and consent checks still apply: a baseline that already admitted transitive MCP requires an approval in `apm.yml` or the same explicit `--trust-transitive-mcp`. `--only apm` still prevents native MCP integration; omission evidence never grants consent.
+- **Frozen skills-only replay.** `apm install --only apm --frozen` accepts matching `only-apm` omission evidence and preserves the admitted MCP baseline and exact lockfile and native-configuration bytes. Missing, damaged or stale omission evidence still fails. Existing frozen source and consent checks still apply: a baseline that already admitted transitive MCP requires an approval in `apm.yml` or the same explicit `--trust-transitive-mcp`. `--only apm` still prevents native MCP integration; omission evidence never grants consent.
 - **Remediation.** Repeat the intended install selection or restore an unreadable package source. For skills-only use `apm install --only apm`, or `apm install --global --target agent-skills --only apm` for the global skills-only case. Older lockfiles, empty MCP fields, and missing, damaged or stale omission evidence do not establish intent: audit reports unknown selection rather than assuming success. Do not enable MCP or add `--trust-transitive-mcp` merely to clear the finding; for a consent failure, approve the package. Audit itself does not reconcile or write configuration.
 
 ### `native-mcp-ownership`
@@ -182,9 +183,9 @@ the [policy schema](../policy-schema/).
 
 ### `kept-mcp-entries`
 
-- **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable). It appears only when such an entry exists.
-- **Fails when.** A kept entry is still in the selected config and the lockfile does not manage its server, or this machine's MCP write record cannot be used (without a lockfile, or once an install without a lockfile met it, also after the lockfile is rewritten). The detail names the server, the config file and the runtime, or the unusable record file.
-- **Remediation.** Remove each entry you no longer use, or declare the server again, and remove an unusable record file, then run `apm install`. Audit does not change the native configuration.
+- **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable), or kept for a runtime the manifest's `targets:` no longer select while its server stays declared. It appears only when such an entry exists.
+- **Fails when.** A kept entry is still in the selected config and the lockfile does not manage its server (or, for an entry kept for a runtime no longer targeted, no install has targeted that runtime again), or this machine's MCP write record cannot be used (without a lockfile, or once an install without a lockfile met it, also after the lockfile is rewritten). The detail names the server, the config file and the runtime, or the unusable record file.
+- **Remediation.** Remove each entry you no longer use, or declare the server or target its runtime again, and remove an unusable record file, then run `apm install`. Audit does not change the native configuration.
 
 ### `content-integrity`
 
@@ -193,6 +194,17 @@ the [policy schema](../policy-schema/).
   2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against. Local bundle instructions staged for `apm compile` are checked the same way against `local_staged_file_hashes`; staged paths without a recorded hash (older lockfiles) are skipped.
 - **Fails when.** An applicable prompt contains critical Unicode, recognized content is unreadable or unsupported (incomplete coverage), a recorded hash differs, or a legacy hash lacks canonical ownership metadata. Missing files are reported by `deployed-files-present`; unrecorded files have no hash baseline. Existing path and symlink protections still apply.
 - **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files; for drifted staged bundle files, reinstall the bundle with `apm install <bundle> --force`. Discovery does not grant ownership or permission to rewrite user configuration.
+
+### `local-bundle-hooks`
+
+Fails when a local bundle's deployed hooks (or canvas extensions) are no longer
+admitted by the current executables trust, and when a bundle hook entry in a
+merged hook config was changed outside APM (for example a new `matcher`), or
+its ownership record (`apm-hooks.json` beside the config) is unreadable or
+missing: APM can no longer match the entry to its recorded content, so the check
+names it instead of losing track of the bundle's hooks. Restore the recorded entry first: `apm
+uninstall` refuses while an edited entry still runs the bundle's script. Keep
+your own changes in a separate hook entry.
 
 ### `hook-approval-pins`
 

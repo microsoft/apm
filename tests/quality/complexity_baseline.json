@@ -208,7 +208,6 @@
     "src/apm_cli/commands/uninstall/cli.py": {
       "uninstall": [
         "C901",
-        "PLR0912",
         "PLR0915"
       ]
     },
@@ -431,7 +430,6 @@
     },
     "src/apm_cli/install/services.py": {
       "integrate_local_bundle": [
-        "C901",
         "PLR0915"
       ],
       "integrate_local_content": [

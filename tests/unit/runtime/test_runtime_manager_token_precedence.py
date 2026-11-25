@@ -6,11 +6,23 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.apm_cli.runtime.manager import RuntimeManager
+from apm_cli.runtime.manager import RuntimeManager
+
+# A PATH directory outside any project: APM-authored setup scripts refuse to
+# run without one.
+_SYSTEM_DIR = os.path.abspath(os.sep)
 
 pytestmark = pytest.mark.component
 
 
+@pytest.fixture
+def _helpers_on_path():
+    """Resolve every helper to its bare name; these cases mock the launch itself."""
+    with patch("apm_cli.utils.git_env.trusted_executable", side_effect=lambda name: name):
+        yield
+
+
+@pytest.mark.usefixtures("_helpers_on_path")
 class TestRuntimeManagerTokenPrecedence:
     """Test token precedence logic in RuntimeManager."""
 
@@ -85,7 +97,7 @@ class TestRuntimeManagerTokenPrecedence:
         ]
 
         for i, test_case in enumerate(test_cases):
-            with patch.dict(os.environ, test_case["env"], clear=True):
+            with patch.dict(os.environ, {**test_case["env"], "PATH": _SYSTEM_DIR}, clear=True):
                 with patch("subprocess.run") as mock_subprocess:
                     mock_subprocess.return_value = Mock(returncode=0)
 
@@ -113,7 +125,7 @@ class TestRuntimeManagerTokenPrecedence:
 
     def test_no_tokens_available(self):
         """Test behavior when no tokens are available."""
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"PATH": _SYSTEM_DIR}, clear=True):
             with patch("subprocess.run") as mock_subprocess:
                 mock_subprocess.return_value = Mock(returncode=0)
 
@@ -157,7 +169,10 @@ class TestRuntimeManagerErrorMessages:
     def test_runtime_availability_check(self):
         """Test runtime availability check methods."""
         # Test codex runtime availability
-        with patch("shutil.which") as mock_which, patch("pathlib.Path.exists") as mock_exists:
+        with (
+            patch("apm_cli.utils.git_env.trusted_executable") as mock_which,
+            patch("pathlib.Path.exists") as mock_exists,
+        ):
             # Mock that APM binary doesn't exist, use system PATH
             mock_exists.return_value = False
             mock_which.return_value = "/usr/local/bin/codex"

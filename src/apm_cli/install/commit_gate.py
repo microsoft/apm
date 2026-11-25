@@ -364,9 +364,9 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
     """Judge the files a direct ``--mcp`` install leaves, after its policy preflight (#4826).
 
     ``--mcp`` records no file claims, so the governed directories the
-    policy names are judged against the scope's current lockfile. A real
-    install refused a denied ``scripts:`` block at entry; ``--dry-run``
-    previews both verdicts.
+    policy names are judged against the scope's current lockfile. A
+    blocking real install refused a denied ``scripts:`` block at entry;
+    ``warn`` warns on both verdicts and ``--dry-run`` previews them (#4957).
     """
     from apm_cli.core.scope import (
         get_apm_dir,
@@ -376,8 +376,8 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
         manifest_root,
     )
     from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
-    from apm_cli.policy.install_preflight import prefetch_identity_policy
-    from apm_cli.policy.policy_checks import _check_unmanaged_files, _load_raw_apm_yml
+    from apm_cli.policy.install_preflight import enforced_entry_policy
+    from apm_cli.policy.policy_checks import _check_unmanaged_files
 
     # scripts: is judged with the source manifest's policy; unmanaged files with
     # the policy of the root the install writes to, as the MCP preflight reads it.
@@ -385,14 +385,14 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
     files_root = manifest_root(get_deploy_root(scope), user_scope=is_user_scope(scope))
     roots = {"scripts": manifest_path.parent, "files": files_root}
     policies = {
-        root: prefetch_identity_policy(root, no_policy=no_policy) for root in set(roots.values())
+        root: enforced_entry_policy(root, no_policy=no_policy) for root in set(roots.values())
     }
     checks: dict[Path, list[Any]] = {root: [] for root in policies}
     scripts_policy = policies[roots["scripts"]]
-    if dry_run and scripts_policy is not None and manifest_path.is_file():
-        if scripts_policy.manifest.scripts == "deny":
-            scripts = (_load_raw_apm_yml(manifest_path.parent) or {}).get("scripts")
-            checks[roots["scripts"]].append(_scripts_policy_check(scripts, scripts_policy))
+    if scripts_policy is not None:
+        checks[roots["scripts"]].extend(
+            _entry_scripts_checks(scripts_policy, manifest_path, dry_run=dry_run)
+        )
     files_policy = policies[roots["files"]]
     if files_policy is not None and files_policy.unmanaged_files.effective_action == "deny":
         path = resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True)
@@ -405,6 +405,32 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
             _report_install_policy_checks(
                 logger, policies[policy_root], found, dry_run=dry_run, source=None
             )
+
+
+def judge_bundle_manifest_scripts(
+    policy: Any, manifest_path: Path, *, dry_run: bool, logger: Any
+) -> None:
+    """Warn on, or preview, the scope manifest's ``scripts:`` block for a local bundle (#4957).
+
+    *policy* is the one the bundle's admission enforced. A blocking real
+    install refused the block at entry.
+    """
+    if policy is None or policy.enforcement not in ("block", "warn"):
+        return
+    checks = _entry_scripts_checks(policy, Path(manifest_path), dry_run=dry_run)
+    _report_install_policy_checks(logger, policy, checks, dry_run=dry_run, source=None)
+
+
+def _entry_scripts_checks(policy: Any, manifest_path: Path, *, dry_run: bool) -> list[Any]:
+    """The ``manifest.scripts`` check an entry still reports: none once refused at entry."""
+    if policy.manifest.scripts != "deny" or not manifest_path.is_file():
+        return []
+    if policy.enforcement == "block" and not dry_run:
+        return []
+    from apm_cli.policy.policy_checks import _load_raw_apm_yml
+
+    scripts = (_load_raw_apm_yml(manifest_path.parent) or {}).get("scripts")
+    return [_scripts_policy_check(scripts, policy)]
 
 
 def _scripts_policy_check(scripts: Any, policy: Any) -> Any:
@@ -587,6 +613,11 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
     skill = ctx.integrators.get("skill")
     if getattr(skill, "_materialization_session", None) is None or ctx.diagnostics is None:
         return
+    if _gated_dest_dirs_empty(ctx, write_plan):
+        # W3d S1: no gated dest dir holds a file, so no planned write can meet an
+        # existing file and the planning pass could only return nothing.
+        ctx.overwrite_preflight_refused = False
+        return
     kept = [
         (owner, path, edit)
         for package_info, plan, managed in write_plan
@@ -598,6 +629,64 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
         message = kept_edit_message(entry, user_scope=user_scope, proven_edit=edit is not None)
         ctx.diagnostics.error(message, package=owner)
     ctx.overwrite_preflight_refused = bool(kept)
+
+
+def _gated_dest_dirs_empty(ctx: InstallContext, write_plan: Sequence[PlannedPackage]) -> bool:
+    """Whether every directory a gated primitive deploys into is absent or empty.
+
+    One scandir per (target, gated primitive) dest dir. The targets phase creates
+    the target roots, so the proof is per dest dir. Any doubt (user scope, an
+    external or absolute root, an unreadable dir) answers ``False``: plan as today.
+    """
+    import os
+
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.scope is InstallScope.USER or ctx.project_root is None:
+        return False
+    # The targets the planning pass would visit: each plan's own selection.
+    targets = {
+        id(t): t
+        for _info, plan, _managed in write_plan
+        if plan is not None and getattr(plan, "target_selection", None) is not None
+        for t in plan.target_selection.targets
+    }
+    base = str(ctx.project_root)
+    dirs: set[str] = set()
+    for target in targets.values():
+        if getattr(target, "name", None) in _UNGATED_TARGETS:
+            continue
+        root_dir = getattr(target, "root_dir", None)
+        primitives = getattr(target, "primitives", None)
+        if (
+            not root_dir
+            or os.path.isabs(root_dir)
+            or primitives is None
+            or getattr(target, "managed_deploy_root", None) is not None
+        ):
+            return False
+        for primitive in _GATED_PRIMITIVES:
+            mapping = primitives.get(primitive)
+            if mapping is None:
+                continue
+            root = getattr(mapping, "deploy_root", None) or root_dir
+            if os.path.isabs(root):
+                return False
+            dirs.add(
+                os.path.join(base, root, mapping.subdir)
+                if mapping.subdir
+                else os.path.join(base, root)
+            )
+    for path in dirs:
+        try:
+            with os.scandir(path) as entries:
+                if next(entries, None) is not None:
+                    return False
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+    return True
 
 
 def _planned_keeps(

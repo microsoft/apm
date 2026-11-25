@@ -171,7 +171,9 @@ class ScriptRunner:
 
         try:
             # Set up GitHub token environment for all runtimes using centralized manager
-            env = setup_runtime_environment(os.environ.copy())
+            from apm_cli.utils.git_env import user_script_environment
+
+            env = setup_runtime_environment(user_script_environment(os.environ.copy()))
 
             # Show environment setup if relevant
             env_vars_set = []
@@ -578,12 +580,19 @@ class ScriptRunner:
         # Resolve the runtime binary to the APM-managed path (or fallback to PATH).
         # This must happen here, not in _generate_runtime_command, so the command
         # string stays parseable (bare names) by _detect_runtime / _transform_runtime_command.
-        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then shutil.which(),
-        # which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
+        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then PATH outside
+        # the project, which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
         if actual_command_args:
-            resolved = find_runtime_binary(actual_command_args[0])
-            if resolved:
-                actual_command_args[0] = resolved
+            name = actual_command_args[0]
+            resolved = find_runtime_binary(name)
+            if resolved is None:
+                # Never fall back to the bare name: the OS would search the
+                # working directory or a project path the resolver rejected.
+                raise RuntimeError(
+                    f"Runtime '{name}' was not found outside the project directory. "
+                    f"Install it with: apm runtime setup {name}"
+                )
+            actual_command_args[0] = resolved
         return subprocess.run(actual_command_args, check=True, env=env_vars)
 
     def _discover_prompt_file(self, name: str) -> Path | None:

@@ -7,6 +7,7 @@ for comparison and host classification.
 
 from __future__ import annotations
 
+import hashlib
 import os.path
 import re
 from dataclasses import dataclass
@@ -15,7 +16,12 @@ from urllib.parse import urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE, normalize_repo_url
 from apm_cli.core.remediation import MARKETPLACE_HOST_CONFLICT
-from apm_cli.utils.github_host import default_host, is_valid_fqdn, validate_ssh_user
+from apm_cli.utils.github_host import (
+    default_host,
+    is_github_hostname,
+    is_valid_fqdn,
+    validate_ssh_user,
+)
 from apm_cli.utils.path_security import decode_url_path_segments, validate_path_segments
 
 if TYPE_CHECKING:
@@ -132,6 +138,51 @@ def same_marketplace_catalog(left: MarketplaceSource, right: MarketplaceSource) 
     return left.path == right.path and same_marketplace_origin(
         marketplace_origin(left), marketplace_origin(right)
     )
+
+
+def catalog_pin_identity(source: MarketplaceSource) -> str:
+    """Return the identity a plugin ref pin is scoped to: the catalog, never its alias.
+
+    Equivalent spellings of one catalog (HTTPS or SSH, userinfo, default port,
+    a trailing ``.git``, host case) share an identity, as in
+    :func:`same_marketplace_catalog`. A local catalog is identified by its
+    resolved filesystem location and catalog path, and a hosted catalog file
+    by its URL, so neither can share pins with a Git-backed catalog.
+    """
+    if source.kind == "local":
+        return f"local:{os.path.realpath(source.local_path)}:{source.path}"
+    if source.kind == "url":
+        # A hosted file: only the authority is case-insensitive; path and query name it.
+        parts = urlsplit(marketplace_origin(source))
+        port = f":{parts.port}" if parts.port not in (None, 443) else ""
+        query = f"?{parts.query}" if parts.query else ""
+        return pin_identity_key(f"url:{(parts.hostname or '').lower()}{port}{parts.path}{query}")
+    return pin_identity_key(f"{_origin_comparison_key(marketplace_origin(source))}:{source.path}")
+
+
+_HASHED_QUERY = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def pin_identity_key(identity: str) -> str:
+    """Return the normal form a catalog pin identity is stored under (#5169).
+
+    A hosted catalog's query is replaced by its SHA-256, so it still selects
+    its own pins but never reaches the pins file; a GitHub owner/repo path is
+    case-folded, as GitHub resolves it. Idempotent, so stored keys of an older
+    APM migrate by the same rule.
+    """
+    if identity.startswith("url:"):
+        base, sep, query = identity.partition("?")
+        if not sep or _HASHED_QUERY.fullmatch(query):
+            return identity
+        return f"{base}?sha256:{hashlib.sha256(query.encode('utf-8')).hexdigest()}"
+    authority, slash, rest = identity.partition("/")
+    if identity.startswith("local:") or not slash:
+        return identity
+    if not is_github_hostname(authority.rpartition("@")[2].partition(":")[0]):
+        return identity
+    repo, colon, catalog_path = rest.partition(":")
+    return f"{authority.lower()}/{repo.lower()}{colon}{catalog_path}"
 
 
 def marketplace_policy_subject(origin_or_pattern: str) -> str:

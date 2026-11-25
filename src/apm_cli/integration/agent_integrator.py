@@ -26,6 +26,7 @@ from apm_cli.install.primitive_classification import (
 )
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.claude_frontmatter import check_claude_tools, claude_tools_messages
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
 from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.primitives.models import resolve_user_invocable
@@ -203,6 +204,31 @@ class AgentIntegrator(BaseIntegrator):
     # Target-driven API (data-driven dispatch)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _agents_dir(target: TargetProfile, mapping, project_root: Path) -> Path:
+        return project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, target: TargetProfile, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` this integrator may copy for *target*, else ``None``.
+
+        The same directory and ``get_target_filename_for_target`` the agent
+        path uses; Kiro agents are rendered, so they are ``None``. Whether a
+        given agent is a byte copy is proven by its bytes, not assumed here.
+        """
+        mapping = target.primitives.get("agents")
+        if not mapping:
+            return {}
+        if mapping.format_id == "kiro_agent":
+            return None
+        agents_dir = self._agents_dir(target, mapping, project_root)
+        name = getattr(getattr(package_info, "package", None), "name", "")
+        files = self.find_agent_files(package_info.install_path, source_plan, None, name)
+        return self.unique_destinations(
+            (agents_dir / self.get_target_filename_for_target(f, name, target), f) for f in files
+        )
+
     def get_target_filename_for_target(
         self,
         source_file: Path,
@@ -237,8 +263,6 @@ class AgentIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
 
-        effective_root = mapping.deploy_root or target.root_dir
-        target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
@@ -252,7 +276,7 @@ class AgentIntegrator(BaseIntegrator):
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 
-        agents_dir = target_root / mapping.subdir
+        agents_dir = self._agents_dir(target, mapping, project_root)
         # Lazy mkdir: only create the dir when we actually need to write.
         # This avoids creating .kiro/agents/ when every agent is invalid-tools.
         agents_dir_created = False
@@ -337,6 +361,8 @@ class AgentIntegrator(BaseIntegrator):
                 continue
             if mapping.format_id == "opencode_agent":
                 self._warn_opencode_frontmatter(source_file, diagnostics, package_info.package.name)
+            if mapping.format_id == "claude_agent":
+                self._warn_claude_frontmatter(source_file, diagnostics, package_info.package.name)
             total_links_resolved += links_resolved
             files_integrated += 1
 
@@ -504,6 +530,49 @@ class AgentIntegrator(BaseIntegrator):
             diagnostics.warn(
                 message=message,
                 package=printable_ascii_text(package_name),
+            )
+
+    @staticmethod
+    def _warn_claude_frontmatter(
+        source: Path,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Emit the req-tg-006 diagnostic for a Claude agent's ``tools`` allowlist.
+
+        The file is copied verbatim; Claude Code resolves ``tools`` against
+        its own names, so entries written for another harness match nothing
+        and the agent ends up with narrower (possibly zero) tool access
+        (issue #5356). Names-only: the message names the agent, the field and
+        the unresolvable entries (bounded), never other frontmatter values.
+        """
+        if diagnostics is None or source.is_symlink():
+            return
+        try:
+            content = source.read_text(encoding="utf-8")
+        except OSError:
+            return
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return
+        try:
+            fm = load_yaml_str(fm_match.group(1)) or {}
+        except yaml.YAMLError:
+            return
+        if not isinstance(fm, dict):
+            return
+        check = check_claude_tools(fm)
+        rendered = claude_tools_messages(check, printable_ascii_text(source.name))
+        if rendered is None:
+            return
+        message, detail = rendered
+        if check.malformed:
+            diagnostics.warn(
+                message=message, package=printable_ascii_text(package_name), detail=detail
+            )
+        else:
+            diagnostics.lossy_agent_compilation(
+                message=message, package=printable_ascii_text(package_name), detail=detail
             )
 
     # ------------------------------------------------------------------
@@ -1130,20 +1199,22 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 claude_rendered, _ = self._render_copy_agent(source_file, claude_path)
-                if (
-                    self._deploy_rendered_agent(
-                        claude_path,
-                        source_file,
-                        portable_relpath(claude_path, project_root),
-                        claude_rendered,
-                        managed_files=managed_files,
-                        force=force,
-                        diagnostics=diagnostics,
-                        target_paths=target_paths,
-                    )
-                    == _ADOPTED
-                ):
+                claude_outcome = self._deploy_rendered_agent(
+                    claude_path,
+                    source_file,
+                    portable_relpath(claude_path, project_root),
+                    claude_rendered,
+                    managed_files=managed_files,
+                    force=force,
+                    diagnostics=diagnostics,
+                    target_paths=target_paths,
+                )
+                if claude_outcome == _ADOPTED:
                     files_adopted += 1
+                elif claude_outcome != _SKIPPED:
+                    self._warn_claude_frontmatter(
+                        source_file, diagnostics, package_info.package.name
+                    )
 
             if cursor_agents_dir:
                 cursor_target = KNOWN_TARGETS["cursor"]

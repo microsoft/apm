@@ -13,8 +13,9 @@ from ...core.command_logger import library_logger
 from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
 from ...utils.atomic_io import umask_file_mode
-from ...utils.json_config import write_json_config
+from ...utils.json_config import json_config_text, write_json_config
 from ...utils.path_security import has_symlink_component, user_config_crosses_link
+from .config_journal import journal_config_write, journal_config_written
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -286,18 +287,6 @@ def warn_unreadable_config_once(logger, config_path: Path, exc: Exception) -> No
         return
     _UNREADABLE_CONFIGS_WARNED.add(key)
     logger.warning("Could not read %s: %s", config_path, exc)
-
-
-def journal_config_write(config_path: Path) -> None:
-    """Record an MCP config file before APM writes it (#4594).
-
-    The install transaction journals it at the deploy write seam, so a failed
-    install restores the file. Outside an install this records nothing.
-    """
-    from ...integration.write_seam import record_before_mkdir, record_before_write
-
-    record_before_mkdir(config_path.parent)
-    record_before_write(config_path, follow=True)
 
 
 def _warn_symlinked_mcp_config(config_path: Path) -> None:
@@ -711,24 +700,25 @@ class MCPClientAdapter(ABC):
         """
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
-        journal_config_write(config_path)
-        config_path.parent.mkdir(parents=True, exist_ok=True)
         trailing_newline = self.json_config_trailing_newline
-        if shared and self._is_project_config_path(config_path):
-            write_json_config(
-                config_path,
-                config,
-                default_trailing_newline=trailing_newline,
-                new_file_mode=umask_file_mode(config_path),
-            )
-            return
-        if config_path.is_file():
-            # Tighten first: the atomic write keeps an existing file's mode.
-            os.chmod(config_path, 0o600)
-        write_json_config(
-            config_path, config, default_trailing_newline=trailing_newline, new_file_mode=0o600
+        journal_config_write(
+            config_path,
+            json_config_text(config_path, config, default_trailing_newline=trailing_newline),
         )
-        os.chmod(config_path, 0o600)
+        from ...integration.config_file_provenance import recorded_install_write
+
+        project = shared and self._is_project_config_path(config_path)
+        if not project and config_path.is_file():
+            os.chmod(config_path, 0o600)  # tighten first: the atomic write keeps the mode
+        mode = umask_file_mode(config_path) if project else 0o600
+        # The config file record (#4867) lands before the journal seals the write (#5009).
+        with recorded_install_write(config_path, self.project_root, self.user_scope):
+            write_json_config(
+                config_path, config, default_trailing_newline=trailing_newline, new_file_mode=mode
+            )
+        if not project:
+            os.chmod(config_path, 0o600)
+        journal_config_written(config_path)
 
     @abstractmethod
     def configure_mcp_server(

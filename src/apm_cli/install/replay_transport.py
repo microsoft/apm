@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.scope import manifest_file
 
@@ -143,3 +143,32 @@ class DeclaredTransportIndex:
 
             self._resolver = APMDependencyResolver(read_only=True, apm_modules_dir=self.modules_dir)
         return self._resolver
+
+
+def replay_sources(
+    cache_only: bool, project_root: Path, apm_modules_dir: Path
+) -> tuple[Any, Any, dict[str, str] | None, DeclaredTransportIndex | None]:
+    """The downloader, registry resolver, registries and declared transports a replay fetches with.
+
+    A cache-only replay fetches nothing, so all four are ``None``.
+    """
+    if cache_only:
+        return None, None, None, None
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.registry.resolver import RegistryPackageResolver
+    from apm_cli.models.apm_package import APMPackage
+
+    registries: dict[str, str] | None = None
+    registry_resolver = None
+    downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+    declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
+    if (apm_yml := manifest_file(project_root)).exists():
+        manifest = APMPackage.from_apm_yml(apm_yml)
+        declared_transports.record(
+            [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]
+        )
+        registries = getattr(manifest, "registries", None) or {}
+        if registries:
+            registry_resolver = RegistryPackageResolver(registries)
+    return downloader, registry_resolver, registries, declared_transports

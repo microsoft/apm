@@ -870,6 +870,7 @@ def run(ctx: InstallContext) -> None:
                 ),
                 logger=ctx.logger,
                 active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+                include_dependency_mcp=ctx.install_mcp,
             )
             # Hook approval pins are re-checked through the trust owner before
             # any hook deploys or retires, as audit --ci checks them (#4188).
@@ -965,7 +966,9 @@ def run(ctx: InstallContext) -> None:
     ctx.total_commands_integrated = total_commands_integrated
     ctx.total_hooks_integrated = total_hooks_integrated
     ctx.total_links_resolved = total_links_resolved
-    ctx.kept_deployed_values = _kept_skill_values(ctx)
+    from apm_cli.install.deployment_plan import parked_kept_values_after_writes
+
+    ctx.kept_deployed_values = _kept_skill_values(ctx) | parked_kept_values_after_writes(ctx)
 
     # ------------------------------------------------------------------
     # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).

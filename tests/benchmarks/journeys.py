@@ -12,9 +12,13 @@ Fixtures: ``tree-10``, ``tree-50``, ``tree-200`` (scaling curve),
 ``monorepo-4`` (several ``apm.yml`` roots) and ``real`` (curated public
 packages on github.com, real network). Enterprise shapes: ``tree-N-multi``
 (packages spread over GitHub, GHE Cloud, GitLab and Azure DevOps),
-``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
+``tree-N-ghe`` / ``tree-N-gitlab`` (every package on one non-github.com host,
+so installs take the git path), ``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
 suffix on any offline fixture (the project's git remote points at an org
-whose blocking policy is served, so discovery and enforcement run). Offline fixtures are served by a local
+whose blocking policy is served, so discovery and enforcement run). On Windows,
+offline fixtures model the default Git for Windows TLS config (schannel, the
+mirror CA in the machine Root store, a served CRL); an ``-openssl`` suffix
+runs the secondary OpenSSL cell. Offline fixtures are served by a local
 mirror whose RTT is injected per round trip (``--rtt 0,30,100``).
 
 Examples::
@@ -31,7 +35,9 @@ A sample counts only when the 1-min load average is under ``--max-load``
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
+import hashlib
 import json
 import math
 import os
@@ -44,7 +50,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -63,6 +69,7 @@ from tests.fixtures.perf import (  # noqa: E402
     isolated_environment,
     serve_offline,
 )
+from tests.fixtures.perf.counters import read_spawn_log  # noqa: E402
 from tests.fixtures.perf.generator import consumer_manifest, remove_tree, write_lf  # noqa: E402
 from tests.fixtures.perf.offline import POLICY_ORG  # noqa: E402
 
@@ -71,11 +78,15 @@ NETWORK_JOURNEYS = (
     "install-cold",
     "install-warm",
     "install-noop",
+    "install-noop-replay",
+    "install-frozen-noop",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
     "install-global-cold",
     "install-global-warm",
+    "install-cold-auth",
+    "install-warm-auth",
     "update",
     "uninstall",
     "outdated",
@@ -123,13 +134,27 @@ class Fixture:
     real: bool = False
     stats: dict = field(default_factory=dict)
     policy: bool = False
+    # Windows git TLS for offline fixtures: "system" (default Git for Windows,
+    # schannel) or "openssl" (an ``-openssl`` suffix; a secondary cell).
+    tls_mode: str = "system"
 
 
 _POLICY_SUFFIX = "-policy"
+_OPENSSL_SUFFIX = "-openssl"
 
 
 def prepare_fixture(name: str, work: Path) -> Fixture:
-    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy."""
+    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy.
+
+    An ``-openssl`` suffix (last) runs Windows git over OpenSSL with the mirror CA
+    file instead of the default Git for Windows TLS config.
+    """
+    if name.endswith(_OPENSSL_SUFFIX) and name != _OPENSSL_SUFFIX:
+        fixture = prepare_fixture(name[: -len(_OPENSSL_SUFFIX)], work)
+        if fixture.real:
+            raise SystemExit(f"{name!r}: the openssl variant needs an offline fixture")
+        fixture.name, fixture.tls_mode = name, "openssl"
+        return fixture
     if name.endswith(_POLICY_SUFFIX) and name != _POLICY_SUFFIX:
         fixture = _prepare_fixture(name[: -len(_POLICY_SUFFIX)], work)
         if fixture.real:
@@ -229,7 +254,11 @@ def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
-    with serve_offline(fixture.trees, directory, policy=fixture.policy) as world:
+    with serve_offline(
+        fixture.trees, directory, policy=fixture.policy, tls_mode=fixture.tls_mode
+    ) as world:
+        if world.tls:
+            fixture.stats["git_tls"] = world.tls
         yield world
 
 
@@ -475,9 +504,12 @@ class Context:
         return [self.project / root for root in self.fixture.roots]
 
     spawn_log: Path | None = None
+    count_fs: bool = False
     # Setup reuse: the installed state survives a no-op sample, and the
     # committed lockfiles are captured once per fixture (generation is seeded).
     is_installed: bool = False
+    # The CLI emitted verified-state record diagnostics during replay setup.
+    replay_supported: bool = False
     locks: dict[str, bytes] | None = None
 
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -502,6 +534,8 @@ class Context:
         if self.spawn_log is not None:
             env["APM_PERF_SPAWN_LOG"] = str(self.spawn_log)
             env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
+            if self.count_fs:
+                env["APM_PERF_COUNT_FS"] = "1"
         with (
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
@@ -511,21 +545,40 @@ class Context:
             )
             out.seek(0)
             err.seek(0)
-            tail = out.read()[-3000:].decode(errors="replace") + "\n"
-            tail += err.read()[-3000:].decode(errors="replace")
+            # Redact before slicing: a token cut at the boundary leaves no fragment.
+            tail = _redact(out.read().decode(errors="replace"))[-3000:] + "\n"
+            tail += _redact(err.read().decode(errors="replace"))[-3000:]
         return returncode, tail, cpu
 
-    def checked(self, argv: list[str], cwd: Path) -> None:
+    def checked(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
+        """Run one untimed setup command; a nonzero exit fails the cell (redacted)."""
         result = self.run(argv, cwd)
         if result.returncode != 0:
             raise RuntimeError(
                 f"setup `apm {' '.join(argv)}` failed ({result.returncode}) in {cwd}:\n"
-                f"{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
+                f"{_redact(result.stdout)[-3000:]}\n{_redact(result.stderr)[-3000:]}"
             )
+        return result
 
     # state helpers (untimed)
 
+    def fresh_user_state(self) -> None:
+        """Empty the isolated user home (APM home included); keep its git config."""
+        home = self.world.isolated.home
+        for entry in home.iterdir():
+            if entry.name == ".gitconfig":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                remove_tree(entry)
+            else:
+                entry.unlink()
+        self.world.apm_home.mkdir(parents=True, exist_ok=True)
+
     def fresh_project(self) -> None:
+        # A fresh checkout gets a fresh user home too: deployment receipts and
+        # verified-state records of the previous checkout at this path would
+        # otherwise read as "another checkout" (the download cache stays).
+        self.fresh_user_state()
         remove_tree(self.project)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
@@ -672,10 +725,86 @@ class Journey:
     name: str
     setup: Callable[[Context], None]
     steps: Callable[[Context], list[Step]]
+    # Extra child environment for this journey only (setup, timed steps, profile).
+    env: tuple[tuple[str, str], ...] = ()
 
 
 def _noop(_ctx: Context) -> None:
     return None
+
+
+# The verified-state record's own diagnostics ("[i] verdict record: hit|miss (...)",
+# stderr); the variable is never part of the verdict key (ENV_NOT_VERDICT).
+_REPLAY_TRACE = (("APM_INSTALL_FAST_PATH", "verdict"),)
+_REPLAY_LINE = "[i] verdict record: "
+# Journeys whose setup keeps the installed project between their own samples.
+# install-noop does not: a kept project would replay from sample 2 on.
+_KEEP_INSTALLED = ("install-noop-replay",)
+
+
+def _setup_replay(ctx: Context) -> None:
+    """A converged repeat-user state: installed, one no-op that records, one that hits.
+
+    ``fresh_project`` starts it from a clean user home (earlier journeys' receipts
+    would read as another checkout and the no-op would never converge). On a
+    CLI with the record, the last untimed no-op must replay; otherwise the cell
+    fails instead of timing a full re-proof.
+    """
+    if ctx.is_installed:
+        # Converged by this journey's first sample: later samples (and a profile
+        # rerun) replay the record the setup already proved.
+        return
+    ctx.installed()
+    ctx.replay_supported = False
+    for root in ctx.roots():
+        first = _replay_outcome(ctx.checked(["install"], root).stderr)
+        # The first unchanged re-install must record (a CLI without the record prints nothing).
+        if first and "recorded" not in first:
+            raise RuntimeError(
+                f"first no-op after install did not record in {root}: replay {first}"
+            )
+        ctx.replay_supported = ctx.replay_supported or bool(first)
+        # Up to three more untimed no-ops until one replays: a CLI may need more
+        # than one no-op to write its record (the count is in the trace).
+        seen = []
+        for _ in range(3):
+            outcome = _replay_outcome(ctx.checked(["install"], root).stderr)
+            seen.append(outcome or "-")
+            if outcome == "hit":
+                break
+            # No trace at all: a CLI without the verified-state record (nothing to
+            # converge). Once a run printed record diagnostics, only a hit converges.
+            if not outcome and not ctx.replay_supported:
+                break
+            ctx.replay_supported = ctx.replay_supported or bool(outcome)
+        else:
+            raise RuntimeError(f"setup no-op did not converge in {root}: replay {seen}")
+
+
+def _replay_miss(ctx: Context, journey: Journey, sample: Sample) -> str:
+    """Why a timed replay sample re-proved instead of replaying; "" when every step hit."""
+    if journey.setup is not _setup_replay or not ctx.replay_supported:
+        return ""
+    outcomes = sample.replay.split("; ") if sample.replay else []
+    steps = len(journey.steps(ctx))
+    if len(outcomes) == steps and all(outcome == "hit" for outcome in outcomes):
+        return ""
+    return f"timed no-op did not replay on every step ({steps}): replay {sample.replay or '-'}"
+
+
+def _replay_outcome(tail: str) -> str:
+    """Every verdict-record outcome of a run, in order ("miss (expired), recorded")."""
+    return ", ".join(
+        line[len(_REPLAY_LINE) :].strip()
+        for line in tail.splitlines()
+        if line.startswith(_REPLAY_LINE)
+    )
+
+
+_AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
+# The CI job's read-only token for real-network authenticated cells. Taken out of
+# the environment at import, so no world (and no anonymous cell) inherits it.
+_BENCH_REAL_TOKEN = os.environ.pop("APM_BENCH_REAL_TOKEN", "")
 
 
 JOURNEYS: dict[str, Journey] = {
@@ -685,7 +814,31 @@ JOURNEYS: dict[str, Journey] = {
         Journey("boot-help", _noop, lambda c: [(["--help"], c.elsewhere)]),
         Journey("install-cold", _setup_cold, lambda c: _per_root(c, ["install"])),
         Journey("install-warm", _setup_warm, lambda c: _per_root(c, ["install"])),
-        Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
+        # Authenticated users (private repos, GHE, ADO, GitLab, or a token to
+        # avoid the anonymous rate limit) take the token-first git CLI path: a
+        # fixed placeholder token the offline mirror accepts, auth first.
+        Journey("install-cold-auth", _setup_cold, lambda c: _per_root(c, ["install"]), _AUTH),
+        Journey("install-warm-auth", _setup_warm, lambda c: _per_root(c, ["install"]), _AUTH),
+        # install-noop is a user's first unchanged re-install (install #2): the
+        # engine proves the no-op and writes the verified-state record.
+        # install-noop-replay is every later one (#3+): it replays that record.
+        Journey(
+            "install-noop", Context.installed, lambda c: _per_root(c, ["install"]), _REPLAY_TRACE
+        ),
+        # install-frozen-noop is a CI's --frozen re-install of an installed,
+        # unchanged project (#4770): the lockfile is never rewritten.
+        Journey(
+            "install-frozen-noop",
+            Context.installed,
+            lambda c: _per_root(c, ["install", "--frozen"]),
+            _REPLAY_TRACE,
+        ),
+        Journey(
+            "install-noop-replay",
+            _setup_replay,
+            lambda c: _per_root(c, ["install"]),
+            _REPLAY_TRACE,
+        ),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
         Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
         Journey(
@@ -753,21 +906,16 @@ class Sample:
     spawns: dict = field(default_factory=dict)
     modules: int = 0
     routes: dict = field(default_factory=dict)
+    git_verbs: dict = field(default_factory=dict)
+    fs: dict = field(default_factory=dict)
+    # Verified-state record outcome per step (noop journeys): "hit", "miss (...)".
+    replay: str = ""
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
     """Spawns by executable summed over every Python process, plus the max module count."""
-    if path is None or not path.is_file():
-        return {}, 0
-    spawns: dict[str, int] = {}
-    modules = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        record = json.loads(line)
-        modules = max(modules, record["modules"])
-        for name, count in record["spawns"].items():
-            spawns[name] = spawns.get(name, 0) + count
-    path.unlink()
-    return dict(sorted(spawns.items())), modules
+    counters = read_spawn_log(path)
+    return counters["spawns"], counters["modules"]
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
@@ -778,19 +926,24 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     output = ""
     returncode = 0
     cpu = 0.0
+    replays: list[str] = []
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
         code, tail, step_cpu = ctx.timed_run(argv, cwd)
         cpu += step_cpu
+        replays.append(_replay_outcome(tail))
         if code != 0:
             returncode = code
             output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
-    spawns, modules = _read_spawn_log(ctx.spawn_log)
+    counters = read_spawn_log(ctx.spawn_log)
+    spawns, modules = counters["spawns"], counters["modules"]
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
+    sample.replay = "; ".join(r for r in replays if r)
     return sample, output
 
 
@@ -815,7 +968,8 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             check=False,
         )
         if result.returncode != 0 or not target.is_file():
-            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
+            stderr = _redact(result.stderr.decode(errors="replace"))[-500:]
+            print(f"[!] cProfile run failed for {journey.name}: {stderr}")
             return None
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
@@ -825,24 +979,97 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     return str(prof)
 
 
+@contextlib.contextmanager
+def _journey_env(ctx: Context, journey: Journey):
+    """Overlay *journey*'s extra environment on the world's child env, then restore it."""
+    env = ctx.world.env
+    saved = {key: env.get(key) for key, _value in journey.env}
+    env.update(journey.env)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+
+
+def _refuse_real_auth(_ctx: Context) -> None:
+    raise RuntimeError(
+        "authenticated journeys on the real fixture need the caller's GITHUB_APM_PAT"
+    )
+
+
+def _for_world(ctx: Context, journey: Journey) -> Journey:
+    """*journey* as run against this world.
+
+    The placeholder token only works against the offline mirror. On real
+    github.com the authenticated journeys use ``APM_BENCH_REAL_TOKEN`` (the CI
+    job's read-only ``GITHUB_TOKEN``) or the caller's own ``GITHUB_APM_PAT``
+    (copied by ``_RealWorld``); without one the journey fails instead of
+    measuring a rejected token. The anonymous journeys never get the bench token.
+    """
+    if not ctx.fixture.real or all(key != "GITHUB_APM_PAT" for key, _ in journey.env):
+        return journey
+    token = _real_token(ctx)
+    if not token:
+        return replace(journey, setup=_refuse_real_auth)
+    env = tuple((key, token if key == "GITHUB_APM_PAT" else value) for key, value in journey.env)
+    return replace(journey, env=env)
+
+
+def _real_token(ctx: Context) -> str:
+    return _BENCH_REAL_TOKEN or ctx.world.env.get("GITHUB_APM_PAT", "")
+
+
+def _redact(text: str) -> str:
+    """*text* without the bench token (error tails land in uploaded artifacts).
+
+    Covers the raw token and the Basic credential git sends for it
+    (``x-access-token:<token>``, plain and base64).
+    """
+    if not _BENCH_REAL_TOKEN or not text:
+        return text
+    basic = f"x-access-token:{_BENCH_REAL_TOKEN}"
+    for secret in (base64.b64encode(basic.encode()).decode(), basic, _BENCH_REAL_TOKEN):
+        text = text.replace(secret, "***")
+    return text
+
+
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
+    journey = _for_world(ctx, journey)
+    try:
+        with _journey_env(ctx, journey):
+            return _measure(ctx, journey, args)
+    finally:
+        # Installed state kept between one journey's samples never leaks into the next.
+        ctx.is_installed = False
+        ctx.replay_supported = False
+
+
+def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     samples: list[Sample] = []
     error = ""
     for _ in range(args.runs):
         try:
             journey.setup(ctx)
         except RuntimeError as exc:
-            error = str(exc)
+            error = _redact(str(exc))
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
-        if journey.name != "install-noop":
+        if journey.name not in _KEEP_INSTALLED:
             ctx.is_installed = False
+        # A replay cell never times a full re-proof: the bench fails instead.
+        if sample.returncode == 0 and (miss := _replay_miss(ctx, journey, sample)):
+            error = miss
+            break
         sample.load1 = load
         sample.load_ok = load < args.max_load
         samples.append(sample)
         if sample.returncode != 0:
-            error = output
+            error = _redact(output)
             break
     valid = [s for s in samples if s.load_ok and s.returncode == 0]
     if not valid and not error:
@@ -867,6 +1094,9 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "spawns": ok[-1].spawns if ok else {},
         "modules": ok[-1].modules if ok else 0,
         "routes": ok[-1].routes if ok else {},
+        "git_verbs": ok[-1].git_verbs if ok else {},
+        "fs": ok[-1].fs if ok else {},
+        "replay": ok[-1].replay if ok else "",
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
@@ -909,8 +1139,9 @@ def _journeys_for(
             continue
         if rtt != 0 and name not in rtt_journeys:
             continue
-        # A monorepo has several roots and local-path deps, which pack refuses by design.
-        if name in (*_GLOBAL, *_PACKS) and len(fixture.roots) > 1:
+        # A monorepo has several roots and local-path deps, which pack refuses by design
+        # and the verified-state record never records, so it has nothing to replay.
+        if name in (*_GLOBAL, *_PACKS, *_KEEP_INSTALLED) and len(fixture.roots) > 1:
             continue
         # The served policy governs the project checkout only: global installs
         # and the bundle consumer have no governed remote, so they would not
@@ -938,6 +1169,9 @@ def run(args: argparse.Namespace) -> dict:
             ).stdout.strip(),
             "platform": platform.platform(),
             "cpus": os.cpu_count(),
+            # Runner CPU class sets absolute CPU seconds; report absolutes per class.
+            "cpu_model": cpu_model(),
+            "yardstick_cpu_s": yardstick_cpu_s(),
             "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "runs": args.runs,
             "rtt_ms": args.rtt,
@@ -958,6 +1192,7 @@ def run(args: argparse.Namespace) -> dict:
             ctx.work.mkdir(parents=True, exist_ok=True)
             if args.counts:
                 ctx.spawn_log = ctx.work / "spawns.jsonl"
+                ctx.count_fs = args.count_fs
             ctx.fresh_project()
             for rtt_index, rtt in enumerate(rtts):
                 world.rtt_ms = rtt
@@ -971,6 +1206,51 @@ def run(args: argparse.Namespace) -> dict:
     report["meta"]["uptime_end"] = _uptime()
     _write(report, out)
     return report
+
+
+def cpu_model() -> str:
+    """The runner's CPU model name ("" when unknown)."""
+    try:
+        if sys.platform.startswith("linux"):
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+                if line.startswith("model name"):
+                    return line.partition(":")[2].strip()
+        elif sys.platform == "darwin":
+            return subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+        elif sys.platform == "win32":
+            import winreg
+
+            key = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as handle:
+                return str(winreg.QueryValueEx(handle, "ProcessorNameString")[0]).strip()
+    except OSError:
+        pass
+    return platform.processor()
+
+
+def yardstick_cpu_s() -> float:
+    """CPU seconds of a fixed single-thread workload: the runner's speed, not the CLI's.
+
+    Pure-Python arithmetic plus SHA-256 over fixed bytes; same work on every
+    runner, so the value tells CPU classes apart. Best of three; each pass runs
+    about half a second, well above Windows' 15.6 ms process-time tick.
+    """
+    data = b"apm-perf-yardstick" * 65536
+    best = math.inf
+    for _ in range(3):
+        start = time.process_time()
+        total = 0
+        for i in range(6_000_000):
+            total += i * i % 7
+        for _ in range(48):
+            hashlib.sha256(data).digest()
+        best = min(best, time.process_time() - start)
+    return round(best, 4)
 
 
 def _uptime() -> str:
@@ -1245,6 +1525,12 @@ def main(argv: list[str] | None = None) -> int:
         "--counts",
         action="store_true",
         help="count subprocess spawns and imported modules of each apm child",
+    )
+    run_parser.add_argument(
+        "--count-fs",
+        action="store_true",
+        help="with --counts, also count files written, lockfile reads, realpath/stat "
+        "calls and hashing (adds CPU: counts only, never compare its timings)",
     )
     run_parser.add_argument(
         "--preset",

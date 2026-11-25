@@ -1,0 +1,542 @@
+"""Which git config and attributes keep the in-process fetch equal to git (W3d W1-W4).
+
+Git for Windows ships a system config with a credential helper, git-lfs
+filters, autocrlf and an sslBackend/sslCAInfo pair, plus a system
+gitattributes file of diff drivers. None of them changes git's anonymous
+fetch or (under APM's -c pins) its checkout bytes, so the gate must stay
+open for them; every key that would change git's request must close it,
+naming the key.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+from collections import namedtuple
+from pathlib import Path
+
+import pytest
+
+from apm_cli.cache import inprocess_fetch as fetch
+
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-transport-selection")]
+
+Entry = namedtuple("Entry", "key value")
+
+GIT_FOR_WINDOWS_SYSTEM = [
+    Entry("diff.astextplain.textconv", "astextplain"),
+    Entry("filter.lfs.clean", "git-lfs clean -- %f"),
+    Entry("filter.lfs.smudge", "git-lfs smudge -- %f"),
+    Entry("filter.lfs.process", "git-lfs filter-process"),
+    Entry("filter.lfs.required", "true"),
+    Entry("http.sslbackend", "openssl"),
+    Entry("http.sslcainfo", "C:/Program Files/Git/mingw64/etc/ssl/certs/ca-bundle.crt"),
+    Entry("core.autocrlf", "true"),
+    Entry("core.fscache", "true"),
+    Entry("core.symlinks", "false"),
+    Entry("pull.rebase", "false"),
+    Entry("credential.helper", "manager"),
+    Entry("credential.https://dev.azure.com.usehttppath", "true"),
+    Entry("init.defaultbranch", "main"),
+]
+
+GIT_FOR_WINDOWS_ATTRIBUTES = """\
+*.c\tdiff=cpp
+*.h\tdiff=cpp
+*.py\tdiff=python
+*.doc\tdiff=astextplain
+*.DOC\tdiff=astextplain
+*.pdf\tdiff=astextplain
+*.rtf\tdiff=astextplain
+"""
+
+
+def test_git_for_windows_system_config_keeps_the_gate_open() -> None:
+    values, prefixes = fetch._classify(GIT_FOR_WINDOWS_SYSTEM)
+
+    assert values["http.sslbackend"] == "openssl"
+    assert prefixes == ()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("http.proactiveAuth", "basic"),
+        ("http.https://github.com/.extraHeader", "Authorization: Bearer x"),
+        ("http.proxy", "http://proxy.invalid:8080"),
+        ("http.sslVerify", "false"),
+        ("http.schannelUseSSLCAInfo", "true"),
+        ("core.gitProxy", "proxy-command"),
+        ("core.askPass", "askpass"),
+        ("protocol.allow", "never"),
+    ],
+)
+def test_each_key_that_changes_gits_request_closes_the_gate_by_name(key: str, value: str) -> None:
+    with pytest.raises(fetch._Refuse, match=key):
+        fetch._classify([*GIT_FOR_WINDOWS_SYSTEM, Entry(key, value)])
+
+
+def test_an_insteadof_rewrite_of_the_url_is_reported_for_the_url_check() -> None:
+    _values, prefixes = fetch._classify(
+        [Entry("url.https://mirror.invalid/.insteadOf", "https://github.com/")]
+    )
+
+    assert prefixes == ("https://github.com/",)
+
+
+def test_schannel_trusts_the_windows_store_and_other_backends_fall_back(monkeypatch) -> None:
+    """W3d SC2: schannel maps to the OS store on Windows only; any other backend is git's."""
+    from apm_cli.deps.anonymous_ref_listing import OS_TRUST
+
+    with pytest.raises(fetch._Refuse, match="sslBackend"):
+        fetch._trust({}, {"http.sslbackend": "gnutls"})
+    monkeypatch.setattr("os.name", "posix")
+    with pytest.raises(fetch._Refuse, match="schannel outside Windows"):
+        fetch._trust({}, {"http.sslbackend": "schannel"})
+    monkeypatch.setattr("os.name", "nt")
+    assert fetch._trust({}, {"http.sslbackend": "schannel"}) == ("file", OS_TRUST)
+    with pytest.raises(fetch._Refuse, match="not spelled 'schannel'"):
+        fetch._trust({}, {"http.sslbackend": "Schannel", "http.sslcainfo": "/ca.pem"})
+
+
+def test_openssl_trusts_exactly_gits_ca_file(tmp_path: Path) -> None:
+    ca = tmp_path / "ca.pem"
+    ca.write_text("x", encoding="utf-8")
+
+    assert fetch._trust({"GIT_SSL_CAINFO": str(ca)}, {"http.sslbackend": "openssl"}) == (
+        "file",
+        str(ca),
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git for Windows' curl bundle is not certifi")
+def test_openssl_on_windows_without_a_named_ca_file_falls_back() -> None:
+    with pytest.raises(fetch._Refuse, match="CA file"):
+        fetch._trust({}, {"http.sslbackend": "openssl"})
+
+
+@pytest.mark.parametrize("key", ["transfer.fsckObjects", "fetch.fsckObjects"])
+def test_fsck_on_receive_keeps_git(key: str) -> None:
+    with pytest.raises(fetch._Refuse, match=key):
+        fetch._classify([*GIT_FOR_WINDOWS_SYSTEM, Entry(key, "true")])
+    fetch._classify([*GIT_FOR_WINDOWS_SYSTEM, Entry(key, "false")])
+
+
+def test_git_for_windows_attributes_are_inert(tmp_path: Path) -> None:
+    path = tmp_path / "gitattributes"
+    path.write_text(GIT_FOR_WINDOWS_ATTRIBUTES, encoding="utf-8")
+
+    assert fetch._inert_attributes(str(path))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "* text=auto",
+        "*.md eol=crlf",
+        "*.sh -text",
+        "*.bin filter=lfs diff=lfs merge=lfs",
+        "*.c ident",
+        "*.txt working-tree-encoding=UTF-16",
+        "*.x crlf",
+        "[attr]mine text",
+        '"a b" diff',
+        "*.y unknown-attr",
+    ],
+)
+def test_any_checkout_affecting_or_unknown_attribute_refuses(tmp_path: Path, line: str) -> None:
+    path = tmp_path / "gitattributes"
+    path.write_text(GIT_FOR_WINDOWS_ATTRIBUTES + line + "\n", encoding="utf-8")
+
+    assert not fetch._inert_attributes(str(path))
+
+
+class _Response:
+    def __init__(self, status: int, headers: dict[str, str]) -> None:
+        self.status_code = status
+        self.headers = headers
+
+    def iter_content(self, _size: int):
+        yield b"0000"
+
+
+def test_a_401_challenge_falls_back_without_sending_credentials(monkeypatch) -> None:
+    sent: dict = {}
+
+    @contextlib.contextmanager
+    def fake_request(session, method, url, **kwargs):
+        sent.update(kwargs)
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    import certifi
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+
+    with pytest.raises(fetch._Refuse, match="auth challenge"):
+        fetch._post(
+            "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where()), b"0000"
+        )
+
+    assert "Authorization" not in sent["headers"]
+    assert sent["ambient_credentials"] is False
+    assert sent["max_hops"] == 0
+
+
+def _frozen_from(config: Path):
+    """A stand-in for git_network_env: freezes the config file's entries into env."""
+    built: list[str] = []
+
+    def fake_network_env(url, env):
+        built.append(url)
+        frozen = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        section = ""
+        entries = []
+        for line in config.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                section = line.strip("[]").split()[0].lower()
+            elif "=" in line:
+                key, value = (part.strip() for part in line.split("=", 1))
+                entries.append((f"{section}.{key}", value))
+        frozen["GIT_CONFIG_COUNT"] = str(len(entries))
+        for index, (key, value) in enumerate(entries):
+            frozen[f"GIT_CONFIG_KEY_{index}"] = key
+            frozen[f"GIT_CONFIG_VALUE_{index}"] = value
+        return frozen
+
+    return built, fake_network_env
+
+
+@pytest.fixture
+def frozen_world(tmp_path: Path, monkeypatch):
+    config = tmp_path / "gitconfig"
+    config.write_text("[user]\n\tname = a\n", encoding="utf-8")
+    built, fake = _frozen_from(config)
+    monkeypatch.setattr("apm_cli.utils.git_env.git_network_env", fake)
+    import sys
+
+    # Collaborators only: the config files git reports, and a stable "git" binary to stat.
+    monkeypatch.setattr(
+        "apm_cli.utils.git_config_memo.git_config_paths", lambda env: (str(config),)
+    )
+    monkeypatch.setattr("apm_cli.utils.git_env.get_git_executable", lambda: sys.executable)
+    return config, built
+
+
+def test_the_frozen_network_env_is_reused_only_while_nothing_it_read_changed(frozen_world):
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    config, built = frozen_world
+    env = {"HOME": "/home/a"}
+
+    with invocation_scope():
+        first = fetch._network_env(env)
+        assert fetch._network_env(env) == first
+        assert len(built) == 1
+
+        fetch._network_env({**env, "HOME": "/home/b"})
+        assert len(built) == 2
+
+        config.write_text("[user]\n\tname = b\n", encoding="utf-8")
+        fetch._network_env(env)
+        assert len(built) == 3
+
+        config.write_text("[include]\n\tpath = other\n", encoding="utf-8")
+        fetch._network_env(env)
+        fetch._network_env(env)
+        assert len(built) == 5
+
+
+def test_an_extra_header_added_mid_command_falls_back(frozen_world):
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    config, _built = frozen_world
+    env = {"HOME": "/home/a"}
+
+    with invocation_scope():
+        fetch._effective(env)
+        config.write_text("[http]\n\textraHeader = Authorization: x\n", encoding="utf-8")
+        with pytest.raises(fetch._Refuse, match="extraHeader"):
+            fetch._effective(env)
+
+
+def _managed_env(scheme: str = "github-basic", token: str = "ghp_" + "t" * 36) -> dict[str, str]:
+    from apm_cli.core.auth import AuthResolver
+
+    if scheme == "github-basic":
+        return AuthResolver.build_public_github_authenticated_git_env(token, base_env={})
+    # The shape utils/git_env.set_git_authorization_header writes, with a Bearer scheme.
+    return {
+        fetch._MANAGED_INTENT: "1",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {token}",
+    }
+
+
+def test_only_apms_github_basic_header_is_taken_and_the_env_left_has_no_token() -> None:
+    token = "ghp_" + "t" * 36
+    header, env = fetch._split_managed_auth(_managed_env(token=token))
+
+    assert header is not None and header.startswith("Authorization: Basic ")
+    assert fetch._MANAGED_INTENT not in env
+    assert not any("Authorization" in value for value in env.values())
+    assert not any(token in value for value in env.values())
+
+
+def test_a_bearer_or_foreign_header_is_not_consumed() -> None:
+    with pytest.raises(fetch._Refuse):
+        fetch._split_managed_auth(_managed_env(scheme="bearer"))
+    env = _managed_env()
+    count = int(env["GIT_CONFIG_COUNT"])
+    env["GIT_CONFIG_COUNT"] = str(count + 1)
+    env[f"GIT_CONFIG_KEY_{count}"] = "http.extraheader"
+    env[f"GIT_CONFIG_VALUE_{count}"] = "X-Corp: 1"
+    header, left = fetch._split_managed_auth(env)
+    assert header is not None
+    assert "X-Corp: 1" in left.values()  # stays, so the gate sends the fetch to git
+    with pytest.raises(fetch._Refuse, match="extraheader"):
+        fetch._classify(
+            [
+                Entry(left[f"GIT_CONFIG_KEY_{i}"], left[f"GIT_CONFIG_VALUE_{i}"])
+                for i in range(int(left["GIT_CONFIG_COUNT"]))
+            ]
+        )
+
+
+def test_no_managed_auth_leaves_the_env_untouched() -> None:
+    env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "c"}
+
+    assert fetch._split_managed_auth(env) == (None, env)
+
+
+def test_the_header_is_sent_per_request_and_never_on_the_session(monkeypatch) -> None:
+    sent: dict = {}
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        sent.update(kwargs, session=session_arg)
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    import certifi
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+
+    with pytest.raises(fetch._Refuse, match="auth challenge"):
+        fetch._post(
+            "https://github.com/o/r/git-upload-pack",
+            None,
+            ("file", certifi.where()),
+            b"0000",
+            "Authorization: Basic eA==",
+        )
+
+    assert sent["headers"]["Authorization"] == "Basic eA=="
+    assert sent["max_hops"] == 0
+    assert sent["base_url"] == "https://github.com/o/r/git-upload-pack"
+    assert "Authorization" not in sent["session"].headers
+
+
+@pytest.mark.parametrize("credential", [None, "Authorization: Basic eA=="])
+def test_the_caps_get_sends_the_managed_header_only_per_request(monkeypatch, credential) -> None:
+    """#5377 x #5353: the sparse caps GET carries A' exactly as _post does, or nothing."""
+    sent: dict = {}
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        sent.update(kwargs, session=session_arg, method=method, url=url)
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    import certifi
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+
+    with pytest.raises(fetch._Refuse, match="auth challenge"):
+        fetch._caps_get(
+            "https://github.com/o/r/git-upload-pack",
+            None,
+            ("file", certifi.where()),
+            b"",
+            credential,
+        )
+
+    refs = "https://github.com/o/r/info/refs?service=git-upload-pack"
+    assert (sent["method"], sent["url"], sent["base_url"]) == ("GET", refs, refs)
+    assert sent["max_hops"] == 0
+    assert sent["ambient_credentials"] is False
+    assert sent["headers"].get("Authorization") == (credential and "Basic eA==")
+    assert "Authorization" not in sent["session"].headers
+
+
+@pytest.mark.parametrize("ca", ["os", "file"])
+def test_the_caps_get_and_the_post_share_one_verify_owner(monkeypatch, ca) -> None:
+    """#5376 x #5377: an OS-store (schannel) trust verifies the caps GET as it does the POST."""
+    import certifi
+
+    from apm_cli.deps.anonymous_ref_listing import OS_TRUST
+
+    trust = ("file", OS_TRUST if ca == "os" else certifi.where())
+    seen: list = []
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        seen.append(kwargs["verify"])
+        yield _Response(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+    upload = "https://github.com/o/r/git-upload-pack"
+    for send in (fetch._caps_get, fetch._post):
+        with pytest.raises(fetch._Refuse, match="auth challenge"):
+            send(upload, None, trust, b"0000")
+
+    assert seen == [fetch._requests_verify(trust[1])] * 2
+
+
+class _Raw:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    def read1(self, _size: int, decode_content: bool = True) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class _Streamed(_Response):
+    def __init__(self, chunks: list[bytes], headers: dict[str, str] | None = None) -> None:
+        super().__init__(200, headers or {})
+        self.raw = _Raw(chunks)
+
+
+def _caps_server(monkeypatch, chunks: list[bytes], headers: dict[str, str] | None = None):
+    sent: list[dict] = []
+
+    @contextlib.contextmanager
+    def fake_request(session_arg, method, url, **kwargs):
+        sent.append(dict(kwargs, method=method, session=session_arg))
+        yield _Streamed(chunks, headers)
+
+    monkeypatch.setattr("apm_cli.utils.http_credentials.origin_bounded_request", fake_request)
+    return sent
+
+
+def test_the_caps_get_carries_the_managed_header_through_the_gate(monkeypatch) -> None:
+    """A' on the sparse path: the caps GET goes through _admitted_post with the header."""
+    import certifi
+
+    sent = _caps_server(monkeypatch, [b"0013fetch=shallow filter\n0000"])
+    features = fetch._fetch_caps(
+        "https://github.com/o/r/git-upload-pack",
+        None,
+        ("file", certifi.where()),
+        "Authorization: Basic eA==",
+    )
+
+    assert features == frozenset({"shallow", "filter"})
+    (request,) = sent
+    assert request["method"] == "GET" and request["stream"] is True
+    assert request["headers"]["Authorization"] == "Basic eA=="
+    assert "Authorization" not in request["session"].headers
+
+
+@pytest.mark.parametrize(
+    ("chunks", "headers", "reason"),
+    [
+        ([b"x" * 65536, b"x"], None, "size cap"),
+        ([b"0000"], {"Content-Encoding": "gzip"}, "encoded response"),
+    ],
+)
+def test_an_oversized_or_encoded_caps_answer_falls_back(monkeypatch, chunks, headers, reason):
+    """The caps GET streams under the same cap and deadline discipline as _post."""
+    import certifi
+
+    _caps_server(monkeypatch, chunks, headers)
+    with pytest.raises(fetch._Refuse, match=reason):
+        fetch._caps_get(
+            "https://github.com/o/r/git-upload-pack", None, ("file", certifi.where()), b""
+        )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"* diff\reol=crlf\n", "*\u00a0eol=crlf\n".encode(), b"* diff\x0beol=crlf\n"],
+    ids=["lone-cr", "nbsp", "vertical-tab"],
+)
+def test_whitespace_git_does_not_split_on_refuses_the_cone(data: bytes) -> None:
+    """git splits records only on LF and fields on " \\t\\r\\n"; Python splits on more."""
+    oid = "a" * 40
+
+    assert not fetch._cone_attributes_ok(
+        {oid: ("blob", data)}, "b" * 40, [(".gitattributes", oid, False)]
+    )
+    assert fetch._attributes_source_ok(b"*.md diff\r\n*.c\tdiff\n")
+
+
+def test_an_executable_cone_gitattributes_keeps_its_mode() -> None:
+    import hashlib
+
+    def obj(kind: str, data: bytes) -> str:
+        raw = b"%s %d\x00" % (kind.encode(), len(data)) + data
+        return hashlib.new("sha1", raw, usedforsecurity=False).hexdigest()
+
+    blob = b"*.md diff\n"
+    blob_id = obj("blob", blob)
+    inner = b"100755 .gitattributes\x00" + bytes.fromhex(blob_id)
+    inner_id = obj("tree", inner)
+    root = b"40000 pkg\x00" + bytes.fromhex(inner_id)
+    root_id = obj("tree", root)
+    commit = b"tree %s\n\nmsg\n" % root_id.encode()
+    sha = obj("commit", commit)
+    objects = {
+        sha: ("commit", commit),
+        root_id: ("tree", root),
+        inner_id: ("tree", inner),
+        blob_id: ("blob", blob),
+    }
+
+    files, _ = fetch._sparse_plan(objects, sha, ("pkg",))
+
+    assert files == [("pkg/.gitattributes", blob_id, True)]
+
+
+def test_a_carriage_return_in_an_attributes_record_refuses(tmp_path: Path) -> None:
+    """git splits records on LF and reads CR as whitespace: ``eol=crlf`` would apply."""
+    attributes = tmp_path / "attributes"
+    attributes.write_bytes(b"* diff\reol=crlf\n")
+    crlf = tmp_path / "crlf"
+    crlf.write_bytes(b"*.pdf diff=astextplain\r\n*.c diff=cpp\r\n")
+
+    assert not fetch._inert_attributes(str(attributes))
+    assert fetch._inert_attributes(str(crlf)), "a CRLF line ending is only whitespace to git"
+
+
+@pytest.mark.parametrize("configured", ["~/.gitattributes", "%(prefix)/etc/attrs", "rel/attrs"])
+def test_an_attributes_file_git_must_resolve_falls_back(configured: str) -> None:
+    with pytest.raises(fetch._Refuse, match="path resolution"):
+        fetch._attribute_files(
+            {"GIT_ATTR_NOSYSTEM": "1"}, [Entry("core.attributesfile", configured)]
+        )
+
+
+def test_attributes_are_checked_under_the_checkout_env_not_the_parents(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The parent's attributesFile is inert, but the isolated checkout reads XDG's crlf."""
+    inert = tmp_path / "inert"
+    inert.write_text("*.pdf diff\n", encoding="utf-8")
+    xdg = tmp_path / "xdg"
+    (xdg / "git").mkdir(parents=True)
+    (xdg / "git" / "attributes").write_text("* eol=crlf\n", encoding="utf-8")
+    seen: list[dict] = []
+
+    def checkout_config(env):
+        seen.append(dict(env))
+        # The isolated checkout config names no attributesFile: git uses the XDG default.
+        return namedtuple("Snapshot", "entries")([])
+
+    monkeypatch.setattr("apm_cli.utils.git_env._read_effective_git_config", checkout_config)
+    env = {"XDG_CONFIG_HOME": str(xdg), "GIT_ATTR_NOSYSTEM": "1", "PATH": os.environ["PATH"]}
+
+    with pytest.raises(fetch._Refuse, match="checkout-affecting"):
+        fetch._require_inert_checkout_attributes(env)
+    assert seen and seen[0]["GIT_TERMINAL_PROMPT"] == "0"  # the cached_repo_env fence
+    # Killed control: the parent's view (its inert attributesFile) would have admitted it.
+    fetch._require_inert_attributes(env, [Entry("core.attributesfile", str(inert))])

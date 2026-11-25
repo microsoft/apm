@@ -15,7 +15,7 @@ $ apm install microsoft/apm-sample-package#v1.0.0
   |-- 2 prompts integrated -> .github/prompts/
   |-- 2 agents integrated -> .claude/agents/, .github/agents/
   |-- 2 commands integrated -> .claude/commands/
-  |-- 1 instruction(s) integrated -> .github/instructions/
+  |-- 2 instruction(s) integrated -> .claude/rules/, .github/instructions/
   |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
 [i] Added apm_modules/ to .gitignore
 [i] Instructions installed for claude. Run 'apm compile' to update AGENTS.md / CLAUDE.md.

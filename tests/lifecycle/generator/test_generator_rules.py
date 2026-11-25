@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import itertools
 import json
 import subprocess
 from functools import cache
@@ -35,18 +34,34 @@ from tests.lifecycle.generator.rules import (
     FIRST_PARTY_MCP_CELL,
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
+    ORG_DENY_OPS,
     REFUSAL_EVIDENCE,
     RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
     RULES,
+    U_BIN_BUNDLE_PIN,
     U_BIN_PIN,
+    U_USER_ORG_POLICY_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
+    Verdict,
     classify,
+    mapped_cell,
     refusal_cell,
 )
 from tests.lifecycle.generator.space import Entry, build_space, raw_cells
-from tests.lifecycle.generator.witnesses import credits, machine_cells
+from tests.lifecycle.generator.witnesses import (
+    BIN_WITNESSES,
+    FORM_SOURCES,
+    GATE_PLUGIN_BIN_SPINE,
+    SOURCE_SPINE,
+    SOURCE_SPINE_UNOBSERVED,
+    credits,
+    credits_bin,
+    credits_dimension,
+    deployable_prims,
+    machine_cells,
+)
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -311,12 +326,15 @@ def test_parallel_prs_crediting_adjacent_cells_merge_cleanly(tmp_path: Path) -> 
     """Two PRs that credit neighbouring cells merge to exactly their regenerated union."""
     base = json.loads(_generated()[0])
     keys = list(base["obligations"])
-    first = next(
-        key
-        for key, after in itertools.pairwise(keys)
-        if base["obligations"][key]["status"] == base["obligations"][after]["status"] == "baseline"
-    )
-    second = keys[keys.index(first) + 1]
+    # Two neighbouring cells in baseline: the ledger may hold none, so demote them.
+    first, second = keys[0], keys[1]
+    for key in (first, second):
+        record = base["obligations"][key]
+        base["obligations"][key] = {
+            name: value
+            for name, value in record.items()
+            if name not in ("credited_by", "tracking", "witness")
+        } | {"status": "baseline"}
     ours, theirs, union = (copy.deepcopy(base) for _ in range(3))
     _promote(ours, first, "ours")
     _promote(theirs, second, "theirs")
@@ -556,7 +574,9 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U6", _u6),
         ("U8", lambda cell: _u8(cell) is not None),
         ("U-BIN-OPS", lambda cell: _u_bin_ops(cell)),
+        ("U-BIN-BUNDLE", lambda cell: _u_bin_bundle(cell)),
         ("U-MCPOWN-USER", _u_mcpown_user),
+        ("U-USER-SCOPE-ORG-POLICY", lambda cell: _u_user_org_policy(cell)),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -622,7 +642,12 @@ def test_executable_gate_levels_of_an_mcp_source_map_to_the_first_party_rule_cel
 def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     mapped = {key: entry for key, entry in data["mapped"].items() if entry["rules"][0] == "U8"}
-    named = {key for key, cell in _raw().items() if _u8_mapping(cell) is not None}
+    # U-BIN-BUNDLE removes install of a local bundle shipping bin/ before U8 maps it.
+    named = {
+        key
+        for key, cell in _raw().items()
+        if _u8_mapping(cell) is not None and key not in _removed_by("U-BIN-BUNDLE")
+    }
     assert set(mapped) == named, sorted(set(mapped) ^ named)[:10]
     clauses: dict[str, int] = {}
     for key, entry in mapped.items():
@@ -644,7 +669,7 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         else:
             assert entry["maps_to"] == UNINSTALL_MCP_REFUSALS[cell["SRC"]], key
     assert clauses == {
-        "install of a local bundle is bundle-install": 9,
+        "install of a local bundle is bundle-install": 8,
         "marketplace add of a source without a catalog": 43,
         "uninstall of a local bundle": 9,
         "update of a local bundle": 9,
@@ -706,7 +731,11 @@ def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
 def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     assert bin_pin.predicate_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
-    assert data["pins"] == {"U-BIN": U_BIN_PIN}
+    assert data["pins"] == {
+        "U-BIN": U_BIN_PIN,
+        "U-BIN-BUNDLE": U_BIN_BUNDLE_PIN,
+        "U-USER-SCOPE-ORG-POLICY": U_USER_ORG_POLICY_PIN,
+    }
 
 
 def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
@@ -728,6 +757,123 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
         assert entry["status"] == "required" and entry["witness"].endswith(spine), (key, entry)
 
 
+# -- U-BIN-BUNDLE: a local bundle never deploys bin/ (#4095 lane T-1c) ----------
+
+
+def _u_bin_bundle(cell) -> bool:
+    """A PRIM=bin cell of a local bundle that no earlier rule removes and U8 maps to
+    no rule cell (install of a local bundle is bundle-install, so it goes too)."""
+    if cell.get("PRIM") != "bin" or not (
+        cell.get("OP") == "bundle-install" or cell.get("SRC") == "local-bundle"
+    ):
+        return False
+    if _u_bin_ops(cell) or _u6(cell) or _u8(cell) is not None:
+        return False
+    mapped = mapped_cell(cell)
+    return mapped is None or not isinstance(mapped[0], str)
+
+
+def test_u_bin_bundle_removes_the_bundle_bin_cells_and_keeps_the_deny_refusal() -> None:
+    """The ruled cells are removed; the bundle deny itself stays witnessed by the spine."""
+    removed = _removed_by("U-BIN-BUNDLE")
+    for key in (
+        "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency",
+        "pair|OP=bundle-install|PRIM=bin",
+        *(
+            f"T3|OP={op}|SRC=local-bundle|PRIM=bin"
+            for op in ("approve-deny", "audit", "bundle-install", "compile", "lock")
+        ),
+    ):
+        assert key in removed, key
+    assert bin_pin.bundle_bin_digest() == U_BIN_BUNDLE_PIN, (
+        "the bundle deploy routing changed: re-prove that a bundle deploys no bin/ "
+        "(test_u_bin_seam.py tripwire), then update U_BIN_BUNDLE_PIN"
+    )
+    kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    deny = kept["pair|OP=bundle-install|GATE=denied-dependency"]
+    assert deny["status"] == "required", deny
+
+
+def test_a_changed_bundle_routing_reinstates_the_bundle_bin_cells(monkeypatch) -> None:
+    cell = {"OP": "bundle-install", "PRIM": "bin", "GATE": "denied-dependency"}
+    assert classify("T1", cell) == Verdict("removed", ("U-BIN-BUNDLE",))
+    monkeypatch.setattr(bin_pin, "bundle_bin_digest", lambda *_: "0" * 64)
+    assert classify("T1", cell).rules == ("U-BIN-BUNDLE",)
+    assert classify("T1", cell).must_cover
+
+
+# -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
+
+
+def _u_user_org_policy(cell) -> bool:
+    """An org dependency deny under install/lock/update/mcp-install at user scope."""
+    op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
+    return (
+        cell.get("GATE") == "denied-dependency"
+        and cell.get("SCOPE") == "user"
+        and op in ("install", "lock", "update", "mcp-install")
+    )
+
+
+def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
+    """Tripwire: the rule removes the #3703 cells only while user scope discovers no
+    org policy. #3703 must change core/scope.policy_discovery_uses_git_remote, so
+    the digest differs and this test fails, as does the live check below: drop
+    the rule and restore the cells as strict obligations then.
+    """
+    from apm_cli.core.scope import get_apm_home, policy_discovery_uses_git_remote
+
+    assert bin_pin.user_org_policy_digest() == U_USER_ORG_POLICY_PIN, (
+        "#3703 changed the user-scope org-policy decision: drop U-USER-SCOPE-ORG-POLICY"
+    )
+    assert policy_discovery_uses_git_remote(get_apm_home()) is False
+    assert policy_discovery_uses_git_remote(tmp_path) is True
+    removed = _removed_by("U-USER-SCOPE-ORG-POLICY")
+    assert removed == {"T2|SCOPE=user|GATE=denied-dependency|FROZEN=on"}
+    kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    assert kept["pair|OP=install|GATE=denied-dependency"]["status"] == "required"
+    # A scope-free bin cell rests only on a witness that deploys bin/ (#4981): the project
+    # matrix's p-exec bin/ never deploys, so each cell names a bin witness or is baseline.
+    for op in sorted(ORG_DENY_OPS):
+        key = f"T1|OP={op}|PRIM=bin|GATE=denied-dependency"
+        entry = kept[key]
+        if "witness" in entry:
+            assert credits_bin(entry["witness"], parse_cell(key)[1]), (op, entry)
+        else:
+            assert entry["status"] == "baseline", (op, entry)
+
+
+def test_a_local_path_bin_cell_maps_to_the_native_plugin_source_while_u_bin_holds(
+    monkeypatch,
+) -> None:
+    """U-BIN-SRC: a local directory that can deploy bin/ is a Claude plugin directory, the
+    native-plugin source; the mapping's targets are witnessed, and it lapses with U-BIN."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    mapped = {k: v for k, v in data["mapped"].items() if v["rules"] == ["U-BIN-SRC"]}
+    ops = ("approve-deny", "audit", "compile", "install", "lock", "prune", "uninstall", "update")
+    named = {f"T3|OP={op}|SRC=local-path|PRIM=bin" for op in ops} | {"pair|SRC=local-path|PRIM=bin"}
+    assert set(mapped) == named, sorted(set(mapped) ^ named)
+    for key, entry in mapped.items():
+        assert entry["maps_to"] == key.replace("SRC=local-path", "SRC=native-plugin"), entry
+        target = data["obligations"][entry["maps_to"]]
+        assert target["status"] == "required", (key, target)
+    cell = {"OP": "install", "SRC": "local-path", "PRIM": "bin"}
+    assert classify("T3", cell).rules == ("U-BIN-SRC",)
+    monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
+    assert classify("T3", cell) == Verdict("obligation", ())
+
+
+def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
+    pins = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["pins"]
+    assert pins["U-USER-SCOPE-ORG-POLICY"] == U_USER_ORG_POLICY_PIN, pins
+    cell = {"SCOPE": "user", "GATE": "denied-dependency", "FROZEN": "on"}
+    assert classify("T2", cell) == Verdict("removed", ("U-USER-SCOPE-ORG-POLICY",))
+    monkeypatch.setattr(bin_pin, "user_org_policy_digest", lambda *_: "0" * 64)
+    assert classify("T2", cell) == Verdict(
+        "obligation", ("U-USER-SCOPE-ORG-POLICY",), must_cover=True
+    )
+
+
 def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
     """The user-scope bin spine implies this pair only through strict #3703 cells and
     sorts first by node id; the project matrix passes it, so it stays required."""
@@ -736,6 +882,37 @@ def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
     assert entry["status"] == "required", entry
     assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]"), entry
     assert "tracking" not in entry, entry
+
+
+def test_no_ungoverned_user_scope_step_credits_an_org_deny() -> None:
+    """User scope discovers no org policy (#3703): a bin spine step under the org
+    deny never evaluates it, so only a strict known cell may carry that label, and
+    no required obligation rests on a user-scope denied-dependency receipt."""
+    from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
+
+    credited = {key for key in bin_cells() if key.endswith("|denied-dependency|user")}
+    assert credited == set(KNOWN_DD), sorted(credited ^ set(KNOWN_DD))
+    rows = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    for key in (
+        "pair|OP=compile|GATE=denied-dependency",
+        "pair|OP=lock|GATE=denied-dependency",
+        "pair|OP=mcp-install|GATE=denied-dependency",
+        "pair|OP=uninstall|GATE=denied-dependency",
+        "pair|OP=approve-deny|GATE=denied-dependency",
+    ):
+        assert rows[key]["status"] == "required", (key, rows[key])
+        assert rows[key]["witness"].endswith("[project]"), (key, rows[key])
+    # The project matrix's p-exec bin/ never deploys there, so it credits no bin cell
+    # (#4981); the whole-plugin bin spine, whose bin/ deploys at project scope, does.
+    bin_cell = "T1|OP=compile|PRIM=bin|GATE=denied-dependency"
+    assert rows[bin_cell]["witness"] == GATE_PLUGIN_BIN_SPINE, (bin_cell, rows[bin_cell])
+    assert rows[bin_cell]["credited_by"] == ["G1|compile|bin|denied-dependency|project|plugin"]
+    for key, row in rows.items():
+        user_only = row.get("credited_by") and all(
+            cell.endswith("|denied-dependency|user") for cell in row["credited_by"]
+        )
+        if user_only:
+            assert row["status"] == "known-failing", (key, row)
 
 
 # -- U-MCPOWN-USER: bound to the live retired-claim reader ---------------------------
@@ -758,6 +935,8 @@ def test_u_mcpown_user_holds_only_while_the_reader_ignores_user_scope(tmp_path) 
             servers, hashes, apm_version="0.36.0", project_root=tmp_path, user_scope=user_scope
         )
 
+    # No retired destination file on disk: the verdict comes from the lock claims alone.
+    assert not (tmp_path / ".github" / "mcp.json").exists()
     project = claims(user_scope=False)
     assert project.names["vscode"] == {"srv"}, "the fixture lock carries a retired claim"
     user = claims(user_scope=True)
@@ -786,3 +965,80 @@ def test_only_a_changed_target_set_routes_an_offline_pair_to_target_history() ->
         if entry["family"] == "pair" and "NET=offline" in key and "-unchanged" in key
     }
     assert len(unchanged) == 2 and set(unchanged.values()) == {"T-6e"}, unchanged
+
+
+# -- a witness credits only the primitives it exercises (#4981, generalized) -----
+
+
+def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive(
+    tmp_path: Path,
+) -> None:
+    """A receipt proves a primitive only when its witness deploys it (or its gate decides
+    it) at the cell's scope: a row acting on p-exec at project scope never deploys its
+    loose bin/, and the source spine never observed a registry or local bundle
+    executable at a non-install step (dimension audit, run 45258714621)."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    wrong = sorted(
+        key
+        for key, entry in data["obligations"].items()
+        if "witness" in entry and not credits_dimension(entry["witness"], parse_cell(key)[1])
+    )
+    assert wrong == [], (
+        f"{len(wrong)} cells credited by a witness that never exercises them: {wrong[:5]}"
+    )
+    root = Path(__file__).parents[3]
+    for node in BIN_WITNESSES:
+        path, name = node.split("::")
+        assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node
+    for op, src, prim in SOURCE_SPINE_UNOBSERVED:
+        key = f"T3|OP={op}|SRC={src}|PRIM={prim}"
+        entry = data["obligations"].get(key)
+        # Unobserved by the source spine: baseline, removed by a rule, or credited by
+        # another spine that does observe it (the registry kit spine, #4096).
+        assert entry is None or entry.get("witness") != SOURCE_SPINE, (key, entry)
+    # A projected pair keeps no unexercised step among its credits (it names no OP).
+    unexercised = {
+        f"T3|{op}|{form}|{prim}"
+        for form, src in FORM_SOURCES.items()
+        for op, unobserved_src, prim in SOURCE_SPINE_UNOBSERVED
+        if src == unobserved_src
+    }
+    projected = sorted(
+        key
+        for key, entry in data["obligations"].items()
+        if unexercised & set(entry.get("credited_by") or ())
+    )
+    assert projected == [], f"credited by an unexercised source step: {projected[:5]}"
+    # Negative controls: the static rule refuses what a witness cannot exercise.
+    project_bin = {"OP": "install", "PRIM": "bin", "SCOPE": "project"}
+    assert not credits_dimension("tests/x.py::test_row", project_bin)
+    assert credits_bin("tests/x.py::test_row", {"PRIM": "skill"})
+    assert not credits_dimension(SOURCE_SPINE, {"OP": "lock", "SRC": "pkg-registry", "PRIM": "lsp"})
+    assert credits_dimension(SOURCE_SPINE, {"OP": "install", "SRC": "pkg-registry", "PRIM": "lsp"})
+    assert credits_dimension("tests/x.py::test_row", {"OP": "audit", "SRC": "git", "PRIM": "hook"})
+    assert "other-file" in deployable_prims("project")
+    assert "other-file" not in deployable_prims("user")
+    assert not credits_dimension("tests/x.py::test_row", {"PRIM": "other-file", "SCOPE": "user"})
+    # The runtime half: an admitted gate-matrix install must leave its primitive deployed.
+    from tests.lifecycle.oracles import Observation, dimension_problems
+
+    def observed(*deployed: str) -> Observation:
+        return Observation(
+            state=None,
+            artifacts=None,
+            deployed=frozenset(deployed),
+            deploy_root=tmp_path,
+            lock=None,
+        )
+
+    ok = CommandResult(("apm", "install"), 0, "", "", tmp_path)
+    cell = "G1|install|hook|allowed|project"
+    assert dimension_problems(cell, observed("p-exec/hook/copilot"), ok) == []
+    assert dimension_problems(cell, observed("p-exec/mcp/copilot"), ok) == [
+        f"{cell}: the admitted hook is not deployed after install; nothing exercised it"
+    ]
+    # A withheld primitive, a refusal and a non-resolving step are the gate's decision.
+    assert dimension_problems("G1|install|hook|unapproved-exec|project", observed(), ok) == []
+    refused = CommandResult(("apm", "install"), 1, "", "", tmp_path)
+    assert dimension_problems(cell, observed(), refused) == []
+    assert dimension_problems("G1|audit|hook|allowed|project", observed(), ok) == []

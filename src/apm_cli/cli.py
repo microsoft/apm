@@ -12,6 +12,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import warnings
 
 import click
@@ -415,6 +416,12 @@ class _OutputModeGroup(click.Group):
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         cmd = super().get_command(ctx, cmd_name)
+        if cmd_name == "install" and type(cmd) is _LazyCommand:
+            from apm_cli.install.fast_entry import fast_install_command
+
+            fast = fast_install_command(ctx, cmd)
+            if fast is not None:
+                return fast
         if isinstance(cmd, _LazyCommand):
             return cmd.resolved()
         return cmd
@@ -729,8 +736,82 @@ def _route_sigterm_to_interrupt() -> None:
         signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
 
 
+@contextlib.contextmanager
+def _signals_blocked(signums: tuple[int, ...]):
+    """Block *signums* at the OS level (POSIX) while handlers are swapped."""
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, signums)
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+def _restore_handlers(items: list[tuple[int, object]]) -> None:
+    """Restore every handler even if an interrupt (delivered on another thread) raises midway."""
+    if not items:
+        return
+    (signum, handler), rest = items[0], items[1:]
+    try:
+        signal.signal(signum, handler)
+    finally:
+        _restore_handlers(rest)
+
+
+@contextlib.contextmanager
+def interrupts_deferred():
+    """Hold Ctrl+C and SIGTERM across a spawn whose handle must exist before an interrupt.
+
+    A child started in its own session can be stopped only through its handle,
+    and Popen returns only after the child has exec'd: an interrupt raised
+    inside it leaves nothing to reap (#5303). A deferred signal is replayed
+    through the saved handler on exit. Only signals with a Python handler are
+    deferred, so SIG_IGN and SIG_DFL keep their meaning; under
+    ``_interrupt_on_sigterm`` a second SIGTERM still terminates at once.
+    Handlers are swapped with both signals blocked, so an interrupt during the
+    swap cannot leave one bound to the deferral; the spawn itself runs
+    unblocked, so the child never inherits a blocked mask.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    signums = (signal.SIGINT, signal.SIGTERM)
+    pending: list[int] = []
+    saved: dict[int, object] = {}
+
+    def _defer(num: int, _frame: object) -> None:
+        if num in pending and saved.get(num) is _interrupt_on_sigterm:
+            signal.signal(num, signal.SIG_DFL)
+            signal.raise_signal(num)
+        pending.append(num)
+
+    try:
+        with _signals_blocked(signums):
+            for signum in signums:
+                handler = signal.getsignal(signum)
+                if callable(handler):
+                    saved[signum] = handler
+                    signal.signal(signum, _defer)
+        yield
+    except BaseException:
+        with _signals_blocked(signums):
+            _restore_handlers(list(saved.items()))
+        raise
+    with _signals_blocked(signums):
+        _restore_handlers(list(saved.items()))
+    if pending:
+        signal.raise_signal(pending[0])
+
+
 def main():
     """Main entry point for the CLI."""
+    from apm_cli.utils.git_env import disable_implicit_cwd_search
+
+    # A bare program name never resolves from the working directory, in this
+    # process or any APM helper child (Windows searches it before PATH).
+    disable_implicit_cwd_search()
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
     _route_sigterm_to_interrupt()

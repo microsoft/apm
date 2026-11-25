@@ -23,7 +23,7 @@ content. Global uninstalls also remove the Claude plugin declarations APM made.
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. A local bundle installed with `apm install <bundle>` is not in `apm.yml`; uninstall refuses it and says so. An MCP server name is refused with the route that removes it: delete it under `dependencies.mcp` and run `apm install`, or uninstall the package that brings it in; a server from a local bundle cannot be uninstalled yet ([#3887](https://github.com/microsoft/apm/issues/3887)). |
+| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. A local bundle installed with `apm install <bundle>` is not in `apm.yml`: its path (as given to install) or installed name (the `--as` name, if any) removes the bundle's deployed hooks on every target, their scripts and lockfile claims, keeps its other files and says so, and is refused when it has no deployed hooks, matches several installed copies, or is mixed with other packages. A hook file that cannot be removed (for example a symlink) fails the command and stays recorded; when the hooks are removed but `apm_modules/.local-bundle-pending.json` cannot be updated (for example a locked file), the command fails and names the file, and running the same uninstall again finishes the update; a linked or unreadable hook config, or a lockfile APM cannot rewrite, refuses the uninstall before any change. A hook APM does not own that still runs one of the bundle's scripts, in any target and under any spelling (`./x.sh`, `cd <dir> && ./x.sh`, a path with `./` segments), also refuses it and is named; a hook that runs another file of the same name (for example `bash -e "/opt/tools/x.sh"`) does not. A hook with a `cwd` field is judged from that directory: `./x.sh` there refuses only when it is the bundle's script, and a `cwd` APM cannot resolve inside the project refuses. An MCP server name is refused with the route that removes it: delete it under `dependencies.mcp` and run `apm install`, or uninstall the package that brings it in; a server from a local bundle cannot be uninstalled yet ([#3887](https://github.com/microsoft/apm/issues/3887)). |
 
 ## Options
 
@@ -100,9 +100,16 @@ What gets removed, in order:
    A requested direct dependency that another installed package still
    needs is removed from `apm.yml` only: it stays installed, its lockfile
    entry now names that package as its parent, and `apm install --frozen`
-   keeps passing. The output says which package still needs it. For a
-   local (path) dependency, uninstall instead refuses before any change and
-   names the package that still needs it; uninstall that package first.
+   keeps passing. The output says which package still needs it. A local
+   (path) dependency also takes the lockfile identity it has under that
+   package, the same entry `apm install` records, and keeps its deployment
+   receipts. If the packages that need it cannot be read offline, or APM
+   cannot prove it wrote the package's files, uninstall refuses before any
+   change. A skill another package also ships takes the writer `apm install`
+   would record; when that would change its bytes, or no receipt proves
+   them, uninstall refuses before any change. Re-anchoring runs on its own:
+   uninstall other packages in a separate command. A failed or interrupted
+   re-anchor restores `apm.yml`, the lockfile and the receipts together.
    Now-empty `apm_modules/` parent directories are cleaned at this step.
 2. Target-scoped files owned only by the removed packages, while lockfile
    ownership is still available for safe cleanup.

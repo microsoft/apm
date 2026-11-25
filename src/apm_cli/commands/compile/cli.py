@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
+from ...compilation.root_context_protection import catalog_root_context_markers
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...core.deprecations import deprecation_message
@@ -697,6 +698,11 @@ def _validate_project(
             logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
             logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
             logger.progress("   3. Then create .instructions.md or .agent.md files")
+            root_contexts = ", ".join(catalog_root_context_markers())
+            logger.progress(
+                f" Hand-authored root context files ({root_contexts}) are never overwritten."
+            )
+            logger.progress(" To find local packages you can declare: apm init --discover")
 
         if not dry_run:  # Don't exit on dry-run to allow testing
             sys.exit(1)
@@ -1314,7 +1320,9 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
                             else:
                                 from ...compilation.output_writer import CompiledOutputWriter
 
-                                CompiledOutputWriter().write(output_path, final_content)
+                                CompiledOutputWriter(compiler.base_dir).write(
+                                    output_path, final_content
+                                )
                             from ...compilation.claude_agents_md import refresh_compiled_digest
 
                             refresh_compiled_digest(

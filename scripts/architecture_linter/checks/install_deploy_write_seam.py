@@ -9,8 +9,14 @@ would leave it on disk. This guard keeps the seam closed-world:
   raw file writer -- ``Path.write_text``/``unlink``/``mkdir``/..., ``shutil``
   and ``os`` copies, moves and removals, ``open`` for writing, or a writer
   helper imported from ``utils`` instead of the seam;
-* every seam writer records its path before it writes;
+* every seam writer records its path before it writes and reports the
+  finished write after it (the journal's post-write seal, #4863);
+* only a closed list of functions outside the seam records a path itself,
+  and each of them also reports its finished write;
 * the transaction listens at the seam;
+* the local-bundle deploy (#5046) and its retire deletes (#5130) write
+  through the seam too, and its
+  command entry runs it under the deploy journal inside its lockfile writer;
 * only the commit gate's write plan enters ``planning`` (#4381) and only the
   locked render's private scratch tree enters ``private_scratch``.
 
@@ -85,7 +91,44 @@ _WRITE_MODE = re.compile(r"""(?:,\s*|mode\s*=\s*)["'][rbt]*[wax+][rbt+]*["']""")
 _WRITE_MODE_TEXT = re.compile(r"^[rbt]*[wax+][rbt+]*$")
 _WRITE_FLAGS = re.compile(r"\bos\.O_(?:WRONLY|RDWR|CREAT|TRUNC|APPEND)\b")
 _RECORDERS = frozenset({"record_before_write", "record_before_mkdir"})
-_SEAM_CONTROL = frozenset({"listen", "stop_listening", "planning", "private_scratch", *_RECORDERS})
+_AFTER = "record_after_write"
+_SEAM_CONTROL = frozenset(
+    {
+        "listen",
+        "stop_listening",
+        "active_journal",
+        "planning",
+        "private_scratch",
+        _AFTER,
+        *_RECORDERS,
+    }
+)
+# (path, function) of every caller outside the seam that records a path
+# itself (#4863), with the call that reports its finished write.
+_JOURNAL_CONFIG = "journal_config_write"
+_DIRECT_RECORDERS = {
+    ("src/apm_cli/integration/base_integrator.py", "write_text_if_changed"): _AFTER,
+    ("src/apm_cli/adapters/client/config_journal.py", "journal_config_write"): None,
+    ("src/apm_cli/install/skill_path_migration.py", "execute_migration"): _AFTER,
+    ("src/apm_cli/install/skill_path_migration.py", "_cleanup_empty_parents"): _AFTER,
+    ("src/apm_cli/adapters/client/base.py", "_write_json_config"): "journal_config_written",
+    ("src/apm_cli/adapters/client/codex.py", "_write_config"): "journal_config_written",
+    ("src/apm_cli/adapters/client/claude.py", "_merge_user_mcp"): "journal_config_written",
+    ("src/apm_cli/adapters/client/hermes.py", "update_config"): "journal_config_written",
+    ("src/apm_cli/adapters/client/intellij.py", "_write_config"): "journal_config_written",
+}
+# Deploy writers outside integration/ that write through the seam: named functions,
+# or None for every call in the module (the bundle route's retires, #5130).
+_SEAMED_FUNCTIONS: dict[str, frozenset[str] | None] = {
+    "src/apm_cli/install/services.py": frozenset({"integrate_local_bundle"}),
+    "src/apm_cli/install/local_bundle_canvas.py": None,
+    "src/apm_cli/install/local_bundle_hook_trust.py": None,
+    "src/apm_cli/install/local_bundle_pending.py": None,
+}
+_BUNDLE_ENTRY = "src/apm_cli/commands/install.py"
+_BUNDLE_JOURNALED = (
+    "lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(journaled_local_bundle(_install_lb))("
+)
 # (path, enclosing function) of the only callers of each journal-suspending mode.
 _SEAM_MODES = {
     "planning": frozenset({("src/apm_cli/install/commit_gate.py", "_planned_keeps")}),
@@ -170,17 +213,22 @@ def _opens_for_writing(call: ast.Call | None) -> bool:
     )
 
 
-def _bypass_violations(provider: FactsProvider, path: str, rule_id: str) -> list[Violation]:
+def _bypass_violations(
+    provider: FactsProvider, path: str, rule_id: str, scopes: frozenset[str] | None = None
+) -> list[Violation]:
+    """Raw writes in *path*, or only in its functions named in *scopes*."""
     facts, failures = _facts_for(provider, path, rule_id)
     if failures:
         return list(failures)
     lines = _lines(facts)
     found: list[Violation] = []
     for call in facts.calls:
-        if _EXEMPT in lines[call.line - 1]:
+        if _EXEMPT in lines[call.line - 1] or (scopes is not None and call.scope not in scopes):
             continue
         window = "\n".join(lines[call.line - 1 : call.line + 8])[call.column :]
         writer = _raw_write(call.qualname, _call_text(lines, call.line, call.column), window)
+        if writer is None and scopes is not None and call.qualname in _WRITER_HELPERS:
+            writer = call.qualname  # a helper imported inside the function
         if writer is not None:
             found.append(
                 violation(
@@ -190,7 +238,7 @@ def _bypass_violations(provider: FactsProvider, path: str, rule_id: str) -> list
                     line=call.line,
                 )
             )
-    for fact in facts.imports:
+    for fact in facts.imports if scopes is None else ():
         module = (fact.module or "").lstrip(".")
         helpers = sorted(set(fact.names) & _WRITER_HELPERS)
         if helpers and module not in _SEAM_MODULES and _EXEMPT not in lines[fact.line - 1]:
@@ -212,8 +260,26 @@ def _seam_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
         return [_summary(rule_id, _SEAM, "the deploy write seam is missing")]
     found: list[Violation] = []
     for node in ast.parse(text).body:
-        if not isinstance(node, ast.FunctionDef) or node.name in _SEAM_CONTROL:
+        if (
+            not isinstance(node, ast.FunctionDef)
+            or node.name in _SEAM_CONTROL
+            or node.name.startswith("_")
+        ):
             continue
+        reported = {
+            item.func.id
+            for item in ast.walk(node)
+            if isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+        }
+        if not reported & {_AFTER, "_SealOnClose"}:
+            found.append(
+                violation(
+                    rule_id,
+                    _SEAM,
+                    f"seam writer {node.name} must report its finished write ({_AFTER})",
+                    line=node.lineno,
+                )
+            )
         calls = [
             item.value.func
             for item in node.body
@@ -272,6 +338,43 @@ def _mode_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
     return found
 
 
+def _direct_recorder_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Recording outside the seam stays on the closed list, and reports each write."""
+    found: list[Violation] = []
+    recorders = {*_RECORDERS, _JOURNAL_CONFIG}
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path == _SEAM:
+            continue
+        facts, failures = _facts_for(provider, path, rule_id)
+        if failures:
+            found += failures
+            continue
+        names = {call.scope: set() for call in facts.calls}
+        for call in facts.calls:
+            names[call.scope].add(call.qualname.rsplit(".", 1)[-1])
+        for scope, called in names.items():
+            if not called & recorders:
+                continue
+            key = (path, (scope or "").rsplit(".", 1)[-1])
+            if key not in _DIRECT_RECORDERS:
+                found.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{key[1]} records a deploy path outside the write seam's closed list",
+                    )
+                )
+            elif _DIRECT_RECORDERS[key] is not None and _DIRECT_RECORDERS[key] not in called:
+                found.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{key[1]} must report its finished write ({_DIRECT_RECORDERS[key]})",
+                    )
+                )
+    return found
+
+
 def check_deploy_write_seam(provider: FactsProvider) -> tuple[Violation, ...]:
     """Integrator file writes go through the seam the install transaction journals."""
     rule_id = GUARD_DEPLOY_WRITE_SEAM
@@ -281,13 +384,31 @@ def check_deploy_write_seam(provider: FactsProvider) -> tuple[Violation, ...]:
             found += _bypass_violations(provider, path, rule_id)
     found += _seam_violations(provider, rule_id)
     found += _mode_violations(provider, rule_id)
+    found += _direct_recorder_violations(provider, rule_id)
+    for path, scopes in _SEAMED_FUNCTIONS.items():
+        found += _bypass_violations(provider, path, rule_id, scopes)
+    entry, failures = _facts_for(provider, _BUNDLE_ENTRY, rule_id)
+    found += failures
+    if not failures and _BUNDLE_JOURNALED not in "\n".join(_lines(entry)):
+        found.append(
+            _summary(rule_id, _BUNDLE_ENTRY, "a local-bundle install must run under the journal")
+        )
     transaction, failures = _facts_for(provider, _TRANSACTION, rule_id)
     if failures:
         return (*found, *failures)
     transaction_text = "\n".join(_lines(transaction))
-    if "write_seam.listen(self._record_deploy_write)" not in transaction_text:
+    # The journal token lets the config file records name this install (#5051).
+    listen = "write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal=token)"
+    if (
+        listen not in transaction_text
+        or "token = self._deploy_journal.token" not in transaction_text
+    ):
         found.append(
-            _summary(rule_id, _TRANSACTION, "InstallTransaction must journal at the write seam")
+            _summary(
+                rule_id,
+                _TRANSACTION,
+                "InstallTransaction must journal at the write seam with its journal's token",
+            )
         )
     return tuple(found)
 

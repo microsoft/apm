@@ -11,6 +11,7 @@ local-package stale-file deletion. These tests pin its invariants:
 * unlink failures are retained for retry on next install
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -568,6 +569,53 @@ def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(tmp_path, diag
     assert any("failed path resolution" in m for m in msgs)
 
 
+def _cowork_link(tmp_path, name: str, target: Path, *, linked_ancestor: bool = False):
+    """A cowork:// claim whose file is a link to *target*; optionally under a linked dir."""
+    cowork = tmp_path / "cowork-skills"
+    skill = cowork / "alpha"
+    if linked_ancestor:
+        real = tmp_path / "cowork-skills" / "real-alpha"
+        real.mkdir(parents=True)
+        try:
+            skill.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+    else:
+        skill.mkdir(parents=True)
+    try:
+        (skill / name).symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    return cowork, f"cowork://skills/alpha/{name}"
+
+
+@pytest.mark.parametrize("linked_ancestor", [False, True], ids=["dangling", "linked-ancestor"])
+def test_cowork_outward_final_link_stays_retained_as_a_failure(
+    tmp_path, diagnostics, monkeypatch, linked_ancestor
+):
+    """Only the ancestor-checked gate allows an outward final link (#5022); cleanup's own
+    decode keeps full containment, so the entry and its lock row are retained."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    outside = tmp_path / "outside.md"
+    if linked_ancestor:
+        outside.write_text("outside\n", encoding="utf-8")
+    cowork, stale = _cowork_link(tmp_path, "notes.md", outside, linked_ancestor=linked_ancestor)
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+
+    result = remove_stale_deployed_files(
+        [stale],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
+    )
+
+    assert stale in result.failed and result.deleted == [], result
+    assert (cowork / "alpha" / "notes.md").is_symlink()
+
+
 def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, diagnostics):
     """A stale spelling that is the live file's directory entry is renamed, never deleted."""
     rules = project_root / ".github" / "instructions"
@@ -778,3 +826,77 @@ def test_trust_lockfile_consent_needs_one_matching_recorded_hash(
     assert (evidence.verdict(rel, target) == AUTHORIZED) is consentable
     target.write_text("edited after the decision\n", encoding="utf-8")
     assert evidence.verdict(rel, target) == UNPROVEN
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_safety_rejection_of_a_consent_kept_file_is_always_a_failure(
+    tmp_path: Path, diagnostics
+) -> None:
+    """#4815: consent kept it earlier, but a current path-safety rejection still fails."""
+    from apm_cli.integration.cleanup import DeploymentEvidence, consent_outcome
+
+    rel = ".github/hooks/kept.json"
+    target = _make_managed_file(tmp_path, rel)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=lambda _owner: None,
+        owners={rel: ("pkg",)},
+        kept=(),
+        recorded_hashes={rel: frozenset({"sha256:" + "0" * 64})},
+    )
+    evidence.consent_to_lockfile_hashes()
+    assert evidence.refusals([rel]) and evidence.kept_under_consent() == frozenset({rel})
+    outside = tmp_path / "outside-hooks"
+    target.parent.rename(outside)
+    target.parent.symlink_to(outside, target_is_directory=True)
+
+    result = remove_stale_deployed_files(
+        [rel], tmp_path, dep_key="pkg", targets=None, diagnostics=diagnostics, evidence=evidence
+    )
+    failures, unsafe = consent_outcome(result, evidence)
+
+    assert rel in result.rejected and rel in failures and rel in unsafe
+    assert (outside / "kept.json").is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+@pytest.mark.parametrize("consent", [True, False], ids=["trust-lockfile", "plain"])
+def test_hook_sync_unlinks_agrees_with_the_hook_sync_under_consent(
+    tmp_path: Path, consent: bool
+) -> None:
+    """#5139: the read-only hook link decision keeps what the consented hook sync keeps."""
+    from apm_cli.integration.cleanup import (
+        DeploymentEvidence,
+        hook_sync_unlinks,
+        managed_hook_prefixes,
+        remove_synced_files,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    rel = ".github/hooks/pkg-hooks.json"
+    real = _make_managed_file(tmp_path, "elsewhere/hooks.json")
+    link = tmp_path / rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path, receipts={}, render=lambda _owner: None, kept=()
+    )
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+
+    predicted = hook_sync_unlinks(rel, tmp_path, recorded_hash=None, lockfile_consent=consent)
+    result = remove_synced_files(
+        {rel},
+        tmp_path,
+        prefixes=managed_hook_prefixes(),
+        dep_key="<uninstall hooks>",
+        targets=list(KNOWN_TARGETS.values()),
+        evidence=evidence,
+        recorded_hashes={},
+        allow_final_symlink=True,
+    )
+
+    assert predicted is (rel in result.deleted)
+    assert predicted is not consent
+    assert link.is_symlink() is consent

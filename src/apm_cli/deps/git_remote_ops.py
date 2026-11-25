@@ -133,6 +133,54 @@ def tag_commit_shas(
     return commits, frozenset(annotated)
 
 
+_BRANCH_OR_TAG = ("refs/heads/", "refs/tags/")
+
+
+def refuse_non_branch_ref(ref: str, where: str) -> None:
+    """Refuse a fully spelled ref outside ``refs/heads/`` and ``refs/tags/``.
+
+    Raises:
+        RuntimeError: *ref* names another namespace (for example a review ref).
+    """
+    if ref.startswith("refs/") and not ref.startswith(_BRANCH_OR_TAG):
+        raise RuntimeError(
+            f"Ref '{ref}' for {where} is not a branch or tag. "
+            "Use a branch, a tag, or a commit SHA reachable from one."
+        )
+
+
+def exact_branch_or_tag_sha(records: Iterable[tuple[str, str]], ref: str, where: str) -> str:
+    """Return the commit *ref* names among ``git ls-remote`` ``(sha, refname)`` records.
+
+    *ref* resolves only to ``refs/heads/<ref>`` or ``refs/tags/<ref>`` (or to
+    itself when spelled in full under one of them); an annotated tag resolves
+    to its commit. There is no tail match and no fallback to another record.
+
+    Raises:
+        RuntimeError: *ref* is no branch or tag of the origin, or a short
+            name is both a branch and a tag.
+    """
+    records = list(records)
+    known = {name: sha for sha, name in records if name.startswith("refs/heads/")}
+    known.update(tag_commit_shas(records)[0])
+    wanted = (
+        (ref,) if ref.startswith(_BRANCH_OR_TAG) else tuple(f"{p}{ref}" for p in _BRANCH_OR_TAG)
+    )
+    matches = {name: known[name] for name in wanted if name in known}
+    if len(matches) > 1:
+        both = " and ".join(sorted(matches))
+        raise RuntimeError(
+            f"Ref '{ref}' for {where} is ambiguous: it names both {both}. "
+            "Spell it in full as refs/heads/<name> or refs/tags/<name>."
+        )
+    if not matches:
+        raise RuntimeError(
+            f"Could not resolve ref '{ref}' for {where}: it is not a branch or tag "
+            "of the origin. Use a branch, a tag, or a commit SHA reachable from one."
+        )
+    return next(iter(matches.values()))
+
+
 def parse_ls_remote_output(output: str) -> list[RemoteRef]:
     """Parse ``git ls-remote --tags --heads`` output into RemoteRef objects.
 

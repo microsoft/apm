@@ -131,7 +131,11 @@ from apm_cli.install.services import (
     _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
 from apm_cli.install.summary import render_post_install_summary as _post_install_summary
-from apm_cli.install.transaction import InstallTransaction
+from apm_cli.install.transaction import (
+    InstallTransaction,
+    journaled_local_bundle,
+    replay_before_install_entry,
+)
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
@@ -144,6 +148,7 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
+from apm_cli.install.verdict_attest import attest_clean_install
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -191,6 +196,7 @@ from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
     explicit_policy_option,
+    setup_project_root_discovery,
     trust_transitive_mcp_option,
 )
 
@@ -478,6 +484,11 @@ def _resolve_package_references(
                 dependency_reference_cls=DependencyReference,
                 default_registry=default_registry,
                 logger=logger,
+                # install <pkg>#<ref> alone changes only the entry's ref (#5154).
+                ref_only=bool(dep_ref.reference)
+                and not skill_subset_from_cli
+                and marketplace_dep_ref is None
+                and not dep_ref.is_insecure,
             )
             if update_error:
                 _reject(invalid_outcomes, logger, package, update_error)
@@ -851,6 +862,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         retry_args=builtins.tuple(retry_args),
         no_policy=no_policy,
     )
+    # Policy warnings this entry collected render as the pipeline's do (#4957).
+    logger.render_summary()
 
 
 @click.command(
@@ -1195,9 +1208,8 @@ def install(  # noqa: PLR0913
     # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
-    logger = dry_run_manifest_tmp = None
-    command_result: InstallResult | None = None
-    transaction: InstallTransaction | None = None
+    logger = dry_run_manifest_tmp = command_result = transaction = None
+    packages = setup_project_root_discovery(ctx, packages, enabled=not global_ and not root)
     from ..install.service import InstallService, resolve_frozen
 
     frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
@@ -1236,7 +1248,7 @@ def install(  # noqa: PLR0913
     )
     _source_root = Path.cwd()
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
-    _root_redirect.__enter__()
+    _created_root = _root_redirect.__enter__()
     try:
         check_current_cli(
             _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
@@ -1259,6 +1271,10 @@ def install(  # noqa: PLR0913
             no_policy=no_policy,
             dry_run=dry_run,
             logger=logger,
+        )
+        # Every entry, before it writes: replay what a killed install left (#4863).
+        replay_before_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT, dry_run=dry_run, logger=logger
         )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
@@ -1295,7 +1311,7 @@ def install(  # noqa: PLR0913
                         )
                     ),
                 )
-                lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(_install_lb)(
+                lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(journaled_local_bundle(_install_lb))(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
                     target=target,
@@ -1625,15 +1641,18 @@ def install(  # noqa: PLR0913
             )
             command_result = transaction.complete(command_result)
 
-            command_result = _post_install_summary(
-                logger=logger,
-                apm_count=apm_count,
-                mcp_count=mcp_count,
-                lsp_count=lsp_count,
-                apm_diagnostics=apm_diagnostics,
-                force=force,
-                elapsed_seconds=time.perf_counter() - install_started_at,
-                result=command_result,
+            command_result = attest_clean_install(
+                _post_install_summary(
+                    logger=logger,
+                    apm_count=apm_count,
+                    mcp_count=mcp_count,
+                    lsp_count=lsp_count,
+                    apm_diagnostics=apm_diagnostics,
+                    force=force,
+                    elapsed_seconds=time.perf_counter() - install_started_at,
+                    result=command_result,
+                ),
+                dry_run=dry_run,
             )
             summary_rendered = True
 
@@ -1703,7 +1722,7 @@ def install(  # noqa: PLR0913
     finally:
         # Restore cwd before summary rendering, regardless of the exit path.
         # Always close the transaction even if root restoration fails.
-        close_install_contexts(_root_redirect, transaction)
+        close_install_contexts(_root_redirect, transaction, _created_root, command_result)
         if dry_run_manifest_tmp is not None:
             dry_run_manifest_tmp.cleanup()
         # F5 (#1116): render minimal elapsed-time line on exit paths that
@@ -1799,6 +1818,7 @@ def _install_apm_packages(ctx, outcome):
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,
                 target=ctx.target or ctx.runtime,
+                install_mcp=ctx.install_mode != InstallMode.APM,
             ),
             allow_pending_mcp=ctx.install_mode != InstallMode.MCP,
         )
@@ -2011,6 +2031,9 @@ def _install_apm_packages(ctx, outcome):
             raise render_apm_dependency_failure(e, logger, verbose=ctx.verbose) from e
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
+        from apm_cli.native_plugins.claude_marketplaces import release_undeclared_marketplaces
+
+        release_undeclared_marketplaces(_cli_project_root, ctx.scope, logger)  # #5258
 
     service_result = reconcile_services.settle(install_result)
     ctx.target_decision = service_result.target_decision

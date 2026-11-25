@@ -395,6 +395,7 @@ jobs:
           tests/quality/test_generated_obligations.py \
           tests/quality/test_known_cells_cite_open_issues.py \
           tests/quality/test_known_cell_closing.py \
+          tests/quality/test_oracle_compile_record.py \
           tests/quality/test_oracle_user_writes.py \
           tests/quality/test_scenario_refusal_credit.py \
           tests/quality/test_cli_command_literals.py
@@ -402,7 +403,9 @@ jobs:
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # The job takes about 250 s at p50 and 296 s at p90 (2026-11-23), so a
+    # 5-minute cap cancelled it on slow runners; 10 minutes is headroom only.
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -430,6 +433,8 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+        tests/perf/test_architecture_linter_scaling.py::test_binary_selection_prefilter_finds_what_every_detector_finds
+        tests/perf/test_architecture_linter_scaling.py::test_definition_index_answers_every_real_query_like_the_direct_scan
 
   # Required by merge-gate.yml at PR time and on merge_group. It gates only
   # the deterministic contracts: the wall-clock scaling ratio stays its own

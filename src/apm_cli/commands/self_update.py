@@ -10,7 +10,6 @@ in the current directory).
 """
 
 import os
-import shutil
 import sys
 from dataclasses import dataclass
 
@@ -20,6 +19,7 @@ from apm_cli.core.remediation import (
     CLI_BINARY_OUTDATED,
     CLI_INSTALLER_UNREACHABLE,
 )
+from apm_cli.utils import git_env
 
 from ..bootstrap_mirror import (
     append_url_path,
@@ -149,12 +149,14 @@ def _log_no_direct_metadata_error(logger: CommandLogger) -> None:
 def _get_installer_run_command(script_path: str) -> list[str]:
     """Return the installer execution command for the current platform."""
     if _is_windows_platform():
-        powershell_path = shutil.which("powershell") or shutil.which("pwsh")
+        powershell_path = git_env.trusted_executable("powershell") or git_env.trusted_executable(
+            "pwsh"
+        )
         if not powershell_path:
             raise FileNotFoundError("PowerShell executable not found in PATH")
         return [powershell_path, "-ExecutionPolicy", "Bypass", "-File", script_path]
 
-    shell_path = shutil.which("bash")
+    shell_path = git_env.trusted_executable("bash")
     if not shell_path:
         if os.path.exists("/bin/bash"):
             shell_path = "/bin/bash"
@@ -194,7 +196,8 @@ def _build_self_update_installer_env(
     """
     from ..config import get_self_update_install_dir
 
-    env = external_process_env()
+    # APM authored the installer: what it calls resolves outside the project.
+    env = git_env.trusted_path_environment(external_process_env())
     install_dir = get_self_update_install_dir()
     if install_dir and _ENV_INSTALL_DIR not in env:
         env[_ENV_INSTALL_DIR] = install_dir

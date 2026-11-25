@@ -28,6 +28,7 @@ from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
+from ..utils.realpath_win import release_held
 
 _logger = logging.getLogger(__name__)
 
@@ -544,6 +545,7 @@ def _remove_stale_normalized_skills(
                 raise PluginIntegrityError(
                     f"Refusing to remove symlinked plugin skill destination: {stale}"
                 )
+            release_held(stale)
             shutil.rmtree(stale)
 
 
@@ -907,7 +909,7 @@ def _native_mcp_transport(spec: dict[str, Any]) -> str | None:
 
 
 def claude_native_mcp_servers(
-    plugin_path: Path, manifest: dict[str, Any]
+    plugin_path: Path, manifest: dict[str, Any], *, keys: list[str] | None = None
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Every MCP server Claude's plugin loader would start, and what APM cannot model.
 
@@ -920,6 +922,7 @@ def claude_native_mcp_servers(
     *unmodeled* names each entry APM cannot read (unparseable or missing file,
     path outside the plugin, ``.mcpb``/``.dxt`` bundle, URL, non-object entry,
     unknown transport). Callers must not assume an unmodeled entry complies.
+    *keys*, when given, collects every raw server key, modeled or not.
     The loose (normalized) route keeps :func:`_extract_mcp_servers`.
     """
     servers: list[dict[str, Any]] = []
@@ -929,6 +932,9 @@ def claude_native_mcp_servers(
         if not isinstance(mapping, dict):
             unmodeled.append(f"{source} (not a server mapping)")
             return
+        if keys is not None:
+            # Every raw server key Claude would see, whatever its transport.
+            keys.extend(str(name) for name in mapping)
         for name, spec in mapping.items():
             transport = _native_mcp_transport(spec) if isinstance(spec, dict) else None
             if transport is None:
@@ -1048,8 +1054,10 @@ def _read_mcp_json(
 
 def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
     """Resolve plugin-root placeholders in an in-memory manifest value."""
+    from apm_cli.utils.realpath import resolve_path
+
     if isinstance(value, str):
-        return value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_path.resolve()))
+        return value.replace("${CLAUDE_PLUGIN_ROOT}", str(resolve_path(plugin_path)))
     if isinstance(value, dict):
         return {
             key: resolve_plugin_root_placeholders(item, plugin_path) for key, item in value.items()

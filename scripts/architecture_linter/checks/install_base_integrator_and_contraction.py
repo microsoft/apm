@@ -739,6 +739,7 @@ def check_target_file_contraction(provider: FactsProvider) -> tuple[Violation, .
 
 
 _DEPLOYMENT_LEDGER = "src/apm_cli/core/deployment_ledger.py"
+_DEPLOYMENT_REANCHOR = "src/apm_cli/core/deployment_reanchor.py"
 
 
 _OWNER_ATTRIBUTES = frozenset({"owners", "active_owner", "deployment_ledger"})
@@ -1408,7 +1409,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "record.active_owner not in self._valid_owners",
             "self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]",
             "value = deployed_path_entry(path, self.root, targets)",
-            "deployed_path_entry(path, self.root, targets),",
+            "deployed_path_entry(path, self.root, targets, candidate, roots(self.root)),",
             "self._written[key] = value",
             "for key, value in self._written.items():",
             "record.active_owner == owner",
@@ -1466,6 +1467,14 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "finally:",
             "project_root, removed_skill_paths, user_scope=user_scope",
         ),
+        # The locked fast path records the outputs it wrote, as a live install does.
+        "src/apm_cli/install/diff_apply.py": (
+            "DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)",
+            "session.record(written, targets, owner)",
+            # The project bounds the fast apply's rollback (#5207).
+            "journaled_apply(project_root) as journal:",
+            "session.flush()",
+        ),
         # MCP write evidence (#4737) borrows the session's binding and paths only.
         "src/apm_cli/install/mcp/write_receipts.py": (
             "session = DeploymentMaterializationSession(Path(project_root), scope, None)",
@@ -1478,6 +1487,12 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "integration_cleanup.materialization_session.bind_committed_claims(lockfile)",
         ),
     }
+    # A re-anchored owner keeps its receipts' hash history: same bytes, same writer (#4889).
+    requirements[_DEPLOYMENT_REANCHOR] = (
+        "class _ReanchorSession(DeploymentMaterializationSession):",
+        "or self._bindings.get(claim.locator.key) != expected",
+        "self._bindings[key] = [renamed.active_owner, self._claim_signature(value)]",
+    )
     for path, snippets in requirements.items():
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)

@@ -19,7 +19,7 @@ For the workflow (where to put the file, how to roll it out), see [Govern with a
 - **Which versions install** -- whether refs must be pinned to bounded constraints, and how version conflicts on required packages resolve.
 - **What the lockfile records and verifies** -- which artifacts the lockfile records, and what the install-time audit pass checks over them once written.
 
-`apm install` enforces the dependency and MCP source rules, `dependencies.max_depth`, `manifest.scripts` and `unmanaged_files.action: deny` during install; `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
+`apm install` enforces the dependency and MCP source rules, `dependencies.max_depth`, `manifest.scripts` and `unmanaged_files.action: deny` during install; `manifest.scripts` and `unmanaged_files` are judged the same way for a dependency install, `--mcp` and a local bundle (`enforcement: warn` warns, `--dry-run` previews each verdict without writing); `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
 
 ## What apm-policy.yml does NOT govern
 
@@ -112,7 +112,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 | `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Always wins over `allow`. |
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. Exact and host-bound; see below. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
-| `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`. Under `enforcement: block`, `apm install` stops resolving at the limit and refuses the deeper chain before fetching past it; under `warn` it warns. |
+| `max_depth`          | integer               | `50`             | Maximum depth in the resolved dependency graph. Canonical source identities are ref-insensitive and first-wins: later edges reuse the same dependency at its existing depth, even with a different ref, while a different origin remains distinct. Must be `> 0`. Under `enforcement: block`, `apm install` stops resolving at the limit and refuses the deeper chain before fetching past it; under `warn` it warns. |
 | `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, exact package release tag such as `name@1.2.3` or `@scope/name@1.2.3`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
 
 ### `require_pinned_constraint` reference
@@ -227,6 +227,17 @@ proving a supply-chain attack. Every finding is enriched in place:
 ```text
 [!] .github/agents/rogue.agent.md [type: agent] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue*)
 ```
+
+A merged hook config (for example `.claude/settings.json`) and its
+`apm-hooks.json` sidecar count as managed only while their ownership is
+attested by the committed lock or the committed apm.yml approval. Every entry
+the sidecar records must name a dependency the lock records, or a local
+bundle whose exact approval key apm.yml grants `hooks: true`, and the config's
+hooks must be exactly those entries. Any user-authored hook in the file, or a
+linked, unreadable or hand-edited file, leaves both files unmanaged. Other
+keys in the config are covered at file granularity. A special file (such as a
+FIFO) in a governed directory is always reported.
+With no executables block, bundle hook files count as unmanaged; approve them to attest.
 
 ## security
 

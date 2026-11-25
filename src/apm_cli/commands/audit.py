@@ -538,6 +538,8 @@ def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
         )
         for detail in check.details:
             click.echo(f"    - {printable_ascii_text(detail)}", err=True)
+        if check.next_step:
+            click.echo(f"    {printable_ascii_text(check.next_step)}", err=True)
     summary = ci_result.to_json()["summary"]
     click.echo(
         f"{STATUS_SYMBOLS['cross']} {summary['failed']} of {summary['total']} check(s) failed",
@@ -615,6 +617,8 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                             color="dim",
                             err=not check.warned,
                         )
+                    if check.next_step and not check.passed:
+                        _rich_echo(f"    {printable_ascii_text(check.next_step)}", err=True)
 
             console.print()
             summary = ci_result.to_json()["summary"]
@@ -645,6 +649,8 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
         if (check.warned or not check.passed) and check.details:
             for detail in check.details:
                 _rich_echo(f"      - {printable_ascii_text(detail)}", color="dim")
+        if check.next_step and not check.passed:
+            _rich_echo(f"      {printable_ascii_text(check.next_step)}")
 
     _rich_echo("")
     summary = ci_result.to_json()["summary"]
@@ -739,6 +745,19 @@ def _route_ci_policy_outcome(cfg: _AuditConfig, fetch_result, *, auto_discovered
     return fetch_result
 
 
+def _echo_replay_summary(verbose: bool) -> None:
+    """Under --verbose, one line: how many packages the drift replay served from records (#4940)."""
+    from ..install.drift_records import last_replay_summary
+
+    summary = last_replay_summary() if verbose else None
+    if summary is not None:
+        served, live = summary
+        click.echo(
+            f"{STATUS_SYMBOLS['info']} drift replay: {served} package(s) from records, {live} live",
+            err=True,
+        )
+
+
 def _audit_ci_gate(
     cfg: _AuditConfig,
     policy_source: str | None,
@@ -783,8 +802,13 @@ def _audit_ci_gate(
         # policy outcome itself below.
         return resolve_trust_policy(cfg.project_root, announce=False, fetch_result=fetch_policy())
 
+    # The discovery replay_policy routes; render records bind to it (#4940).
+    replay_fetch = None if no_policy and not policy_source else fetch_policy
     materialization = resolve_ci_audit_materialization(
-        cfg.project_root, verbose=cfg.verbose, policy_provider=replay_policy
+        cfg.project_root,
+        verbose=cfg.verbose,
+        policy_provider=replay_policy,
+        policy_fetch=replay_fetch,
     )
     prepared_replay = materialization.prepared_replay
     prepared_replay_error = materialization.error
@@ -867,6 +891,7 @@ def _audit_ci_gate(
                     prepared_replay.modules_root if prepared_replay is not None else None
                 ),
                 no_policy=no_policy,
+                policy_source=fetch_result.source,
             )
             if policy_obj.enforcement == "block":
                 ci_result.checks.extend(policy_result.checks)
@@ -914,7 +939,9 @@ def _audit_ci_gate(
                         verbose=cfg.verbose,
                         prepared_replay=prepared_replay,
                         policy_provider=replay_policy,
+                        policy_fetch=replay_fetch,
                     )
+                    _echo_replay_summary(cfg.verbose)
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":
         # In structured output (json/sarif), --no-drift is implicit from

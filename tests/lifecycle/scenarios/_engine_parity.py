@@ -21,7 +21,7 @@ the state oracle are shared with W4's incremental-vs-fresh suite.
 DECISIONS (engine contract agreed with the no-op and diff-apply owners):
 ``no-op (...)``, ``applied a verified diff (<n> files)`` or ``full run
 (<reason>)``. A cell names the decision it requires, so it is red while the
-engine owning that decision is absent: a ``KnownFailure`` (tracking #4770,
+engine owning that decision is absent: a ``KnownFailure`` (tracking the engine's issue: #4939 for fresh-apply,
 signature: the missing decision) until the engine module exists, then required. Only
 the missing decision is the expected failure: a parity break or a failed
 command fails the cell even at main.
@@ -33,7 +33,6 @@ import hashlib
 import importlib.util
 import os
 import re
-import shutil
 import signal
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -51,9 +50,10 @@ from tests.lifecycle.scenarios._deploy_diff import (
     comparable,
     diff,
     revoke_user_approval,
+    rooted,
 )
 from tests.lifecycle.world import World
-from tests.lifecycle.world.clone import clone
+from tests.lifecycle.world.clone import clone, remove_tree
 from tests.lifecycle.world.packages import MCP_SERVER
 from tests.lifecycle.world.scopes import use_policy, use_registry
 from tests.lifecycle.world.services import (
@@ -120,7 +120,7 @@ class MissingDecision(AssertionError):
     """The fast world did not take the decision the cell requires."""
 
 
-_ENGINE_ISSUE = "#4770"
+_ENGINE_ISSUE = "#4939"  # the only absent engine is fresh-apply (#4770 shipped no-op and diff)
 
 
 _MISSING = r"expected a [a-z/-]+ decision, got"
@@ -184,7 +184,7 @@ def _normalized(world: World, text: str) -> list[str]:
     Dependencies resolve in parallel, so each run of consecutive progress lines
     ("[>] Resolving ...") is compared as a sorted block; all other order counts.
     """
-    text = _POLICY_AGE.sub("", _DECISION.sub("", text)).replace(str(world.root), "<ROOT>")
+    text = rooted(_POLICY_AGE.sub("", _DECISION.sub("", text)), str(world.root))
     text = _ELAPSED.sub("<T>", text)
     lines: list[str] = []
     block: list[str] = []
@@ -212,7 +212,7 @@ def _modes(world: World) -> dict[str, str]:
     skips = {
         "project": (".git", ".apm-local"),
         "home": (*HOME_CACHES, ".apm/cache"),
-        "apm_home": ("cache", "logs"),
+        "apm_home": ("cache", "logs", "verdicts", "verdict.key"),
     }
     for name, root in roots.items():
         skip = skips[name]
@@ -336,10 +336,19 @@ def _publish_skill(twin: Twin, body: str, tag: str) -> None:
     twin.fast.services.publish_revision(f"{ORG}/p-skill", {skill: text}, tag=tag)
 
 
+def _rmtree(path: Path) -> None:
+    """Remove *path* completely, or fail: a partial delete would differ between twins.
+
+    remove_tree clears the read-only bit git sets on pack files, which Windows
+    would otherwise refuse to delete.
+    """
+    remove_tree(path, missing_ok=True)
+
+
 def _remove_deployed(world: World) -> None:
     for path in _deployed(world):
         path.unlink()
-    shutil.rmtree(world.project / "apm_modules", ignore_errors=True)
+    _rmtree(world.project / "apm_modules")
 
 
 def _checkout(world: World, files: dict[str, bytes]) -> None:
@@ -396,7 +405,7 @@ def _cache_roots(world: World) -> list[Path]:
 def _empty_store(world: World) -> None:
     _remove_deployed(world)
     for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
 
 
 def _tamper_store(world: World) -> None:
@@ -457,7 +466,7 @@ SOURCES: dict[str, Callable[[Twin], None]] = {
 
 def _clear_policy_cache(world: World) -> None:
     for root in _cache_roots(world):
-        shutil.rmtree(root / POLICY_CACHE, ignore_errors=True)
+        _rmtree(root / POLICY_CACHE)
 
 
 def _deny_executables_at_the_same_origin(twin: Twin) -> None:
@@ -490,18 +499,18 @@ def _fresh_checkout(world: World) -> None:
     """
     _remove_deployed(world)
     (world.project / "apm.lock.yaml").unlink()
-    shutil.rmtree(world.project / ".apm-local", ignore_errors=True)
+    _rmtree(world.project / ".apm-local")
     for folder in {
         world.home / ".apm" / "deployment-receipts",
         world.apm_home / "deployment-receipts",
     }:
-        shutil.rmtree(folder, ignore_errors=True)
+        _rmtree(folder)
 
 
 def _fresh_store_miss(world: World) -> None:
     _fresh_checkout(world)
     for root in _cache_roots(world):
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
 
 
 def _fresh_tampered_store(world: World) -> None:

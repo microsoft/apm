@@ -394,13 +394,15 @@ def local_scripted_https_proxy(
     handlers: Mapping[str, Handler],
     *,
     rtt_ms: float = 0.0,
+    crl_url: str | None = None,
 ) -> Iterator[ScriptedHttpsProxy]:
     """Serve each host in *handlers* over a recording HTTPS proxy.
 
     *rtt_ms* simulates a network round-trip time (see the module docstring).
+    *crl_url* puts a CRL distribution point on the leaf (``_mint_certificates``).
     """
     hosts = tuple(sorted(host.lower() for host in handlers))
-    ca_pem, leaf_pem, leaf_key = _mint_certificates(directory, hosts)
+    ca_pem, leaf_pem, leaf_key = _mint_certificates(directory, hosts, crl_url=crl_url)
     with _stdlib_server_tls():
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2

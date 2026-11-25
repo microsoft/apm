@@ -125,11 +125,6 @@ def resolve_frozen(
     return True
 
 
-def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
-    """One ``--frozen`` refusal line for an unrecorded service claim."""
-    return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"
-
-
 def frozen_services_error(reasons: list[str]) -> Exception:
     """The ``--frozen`` refusal for service claims the lockfile cannot replay."""
     from apm_cli.install.errors import FrozenInstallError
@@ -220,6 +215,7 @@ class InstallService:
         this same error otherwise.
         """
         from apm_cli.adapters.client._remote_shapes import may_refuse_remote
+        from apm_cli.install.errors import frozen_unrecorded_reason
         from apm_cli.install.mcp.native_entry import (
             native_mcp_entry_matches_declaration,
             native_mcp_entry_present,
@@ -364,6 +360,7 @@ class InstallService:
             self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
+            request.hold_deploy_evidence()  # before a post-install script resets the memos
             post_event = self._build_event("post-install", request)
             if request.post_install_after_services:
                 result.post_install = lambda: runner.fire("post-install", post_event)
@@ -630,6 +627,7 @@ class InstallService:
                 # The hydrated check and the MCP phase report parked servers.
                 logger=without_parked_notices(request.logger),
                 allow_pending=allow_pending_mcp,
+                include_dependency_mcp=request.install_mcp,
             )
         )
 
@@ -766,6 +764,7 @@ class InstallService:
         logger: InstallLogger | None,
         allow_pending: bool,
         active_package_keys: frozenset[str] | None = None,
+        include_dependency_mcp: bool = True,
     ) -> list[str]:
         """Compare actual declarations, deferring only unavailable source evidence.
 
@@ -775,10 +774,14 @@ class InstallService:
         check uses the pipeline's routed trust context and is authoritative
         before anything deploys.
         """
+        from apm_cli.install.frozen_mcp_drift import frozen_mcp_drift_reasons
         from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
         if allow_pending and not (
-            package.get_all_mcp_dependencies() or lockfile.mcp_configs or lockfile.mcp_servers
+            package.get_all_mcp_dependencies()
+            or lockfile.mcp_configs
+            or lockfile.mcp_servers
+            or lockfile.mcp_omissions
         ):
             return []
         current = CurrentMcpConfigView.select(
@@ -790,28 +793,11 @@ class InstallService:
             logger=logger,
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
+            include_dependency_mcp=include_dependency_mcp,
         )
         pending = current.pending_servers(lockfile) if allow_pending else frozenset()
         diff = current.diff(lockfile.mcp_configs)
-        reasons = [f"  - {problem.package_key}: {problem.message}" for problem in current.problems]
-        consent = current.consent_problems(lockfile)
-        for name, message in consent.items():
-            reasons.append(f"  - MCP server {name!r} is {message}")
-        for name in sorted(diff.changed):
-            reasons.append(f"  - MCP server {name!r} config differs from apm.lock.yaml")
-        for name in sorted(diff.source_only):
-            reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
-        for name in sorted(diff.lock_only - pending - set(consent)):
-            evidence = current.omissions.get(name)
-            reason = evidence.get("reason") if isinstance(evidence, Mapping) else None
-            if reason is not None:
-                # Still declared: the gate left it out this run (#3957).
-                reasons.append(f"  - MCP server {name!r} is now left out ({reason})")
-            else:
-                reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
-        if set(current.configs) | pending != set(lockfile.mcp_servers) and not reasons:
-            reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")
-        return reasons
+        return frozen_mcp_drift_reasons(current, lockfile, diff, pending)
 
     @staticmethod
     def enforce_hydrated_mcp(
@@ -822,6 +808,7 @@ class InstallService:
         admission: McpAdmission,
         logger: InstallLogger | None,
         active_package_keys: frozenset[str] | None = None,
+        include_dependency_mcp: bool = True,
     ) -> None:
         """Reject restored MCP drift before a package can activate native configuration."""
         from apm_cli.install.errors import FrozenInstallError
@@ -835,6 +822,7 @@ class InstallService:
             logger=without_parked_notices(logger),
             allow_pending=False,
             active_package_keys=active_package_keys,
+            include_dependency_mcp=include_dependency_mcp,
         )
         if reasons:
             raise FrozenInstallError(
@@ -937,12 +925,14 @@ class InstallService:
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.local_edits import edited_file_remediations
         from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
+        from apm_cli.policy.ci_checks import resolve_claim_targets as claims  # #5312
 
         lockfile_path = _frozen_lockfile_path(request)
         committed = committed or LockFile.read(lockfile_path)
         if committed is None:  # nothing declared, nothing locked (#4050)
             return
         deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+        targets = claims(lockfile_path.parent, committed, user_scope=user_scope, targets=targets)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
         if not deployed and drifted:
             # Stale APM output (receipt-proven) is replaced, then re-verified.

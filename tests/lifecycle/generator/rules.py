@@ -230,8 +230,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "packages. Parsed-then-refused shapes are refusal cells, one per message class: "
         "marketplace add of a source without a catalog, uninstall of an MCP server "
         "(a registry name is not found in apm.yml; an inline name is an MCP server), and a "
-        "local bundle, which writes no manifest entry (uninstall refuses it; update and "
-        "prune leave it untouched). A native plugin carries no canvas primitive",
+        "local bundle, which writes no manifest entry (uninstall removes only its deployed "
+        "hooks and refuses a bundle with none; update and prune leave it untouched). "
+        "A native plugin carries no canvas primitive",
         (
             Ev(_INSTALL, "install", "detect_local_bundle"),
             Ev(_INSTALL, "install", '"--registry"'),
@@ -257,9 +258,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
                 "was not found in apm.yml",
             ),
             Ev(
-                "src/apm_cli/commands/uninstall/engine.py",
-                "_mcp_server_hint",
-                "cannot remove local-bundle",
+                "src/apm_cli/commands/uninstall/local_bundle.py",
+                "uninstall_local_bundles",
+                "has no hooks deployed",
             ),
             Ev(
                 "src/apm_cli/commands/update.py",
@@ -321,7 +322,10 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "is not listed: it retires a trusted project-scope whole plugin's root, bin/ "
         "included (#4559, #4808); nor is audit: its drift replay fingerprints that root "
         "(drift.verify_claude_native_cache). An org-policy level stays its own cell (U2 "
-        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses",
+        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. "
+        "Under marketplace that org-policy level is a real cell (#4894): a trusted "
+        "project-scope plugin deploys whole, bin/ included, and the plugin bin spine "
+        "checks that marketplace leaves that bin/ unchanged under the deny",
         (
             Ev(
                 "src/apm_cli/install/exec_gate.py",
@@ -329,6 +333,69 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
                 "PackageType.MARKETPLACE_PLUGIN",
             ),
             Ev("src/apm_cli/install/exec_gate.py", "plugin_bin_deployable", "InstallScope.USER"),
+        ),
+    ),
+    "U-BIN-BUNDLE": (
+        "a local bundle never deploys bin/, at any scope or gate level (#4095 lane T-1c, "
+        "QL ruling): integrate_local_bundle routes every packed file through "
+        "bundle_deploy_relative_path, which keeps only files under a primitive a target "
+        "deploys (_lower_to_target, _is_primitive_deploy_path); no target declares a bin "
+        "primitive, and the only bin/ deploy decision (exec_gate.plugin_bin_deployable) "
+        "belongs to the package pipeline, which the bundle side door never calls. So every "
+        "PRIM=bin cell of OP=bundle-install or SRC=local-bundle is vacuous for bin/, the "
+        "org-policy level included: the bundle spine still witnesses the deny's refusal "
+        "itself. Self-reinstating: bin_pin.bundle_bin_digest hashes the routing elements; "
+        "when it differs from U_BIN_BUNDLE_PIN the cells become must-cover, and the "
+        "tripwire test_no_target_routes_a_bundle_bin_file fails if any target ever routes "
+        "a bundle bin/ path",
+        (
+            Ev(
+                "src/apm_cli/install/services.py",
+                "integrate_local_bundle",
+                "_deploy_rel = _bundle_rel(",
+            ),
+            Ev(
+                "src/apm_cli/install/local_bundle_paths.py",
+                "bundle_deploy_relative_path",
+                "return _lower_to_target(deploy_rel, target, rendering_extension)",
+            ),
+            Ev(
+                "src/apm_cli/install/local_bundle_paths.py",
+                "_lower_to_target",
+                "if not _is_primitive_deploy_path(rel_path, target):",
+            ),
+            Ev(
+                "src/apm_cli/install/exec_gate.py",
+                "plugin_bin_deployable",
+                "PackageType.MARKETPLACE_PLUGIN",
+            ),
+        ),
+    ),
+    "U-BIN-SRC": (
+        "a local path whose package can deploy bin/ is a Claude plugin directory, which is "
+        "the native-plugin source: bin/ deploys only for a MARKETPLACE_PLUGIN package, "
+        "loose at user scope (exec_gate.plugin_bin_deployable) or whole at project scope "
+        "(admission.plan_native_claude_plugin), and a local directory with an eligible "
+        "apm.yml is an APM package (format_detection.NormalizationPlanner.plan), never a "
+        "marketplace plugin. So OP x SRC=local-path x PRIM=bin maps to the same cell with "
+        "SRC=native-plugin, which the M-SOURCE bin spine witnesses. Self-reinstating: the "
+        "mapping holds only while the U-BIN pin holds (generator/bin_pin.py)",
+        (
+            Ev(
+                "src/apm_cli/install/exec_gate.py",
+                "plugin_bin_deployable",
+                "PackageType.MARKETPLACE_PLUGIN",
+            ),
+            Ev(
+                "src/apm_cli/claude_plugins/admission.py",
+                "plan_native_claude_plugin",
+                "package_type is not PackageType.MARKETPLACE_PLUGIN",
+            ),
+            Ev(
+                "src/apm_cli/models/format_detection.py",
+                "NormalizationPlanner.plan",
+                "return PackageType.APM_PACKAGE, None",
+            ),
         ),
     ),
     "U9": (
@@ -429,6 +496,50 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_RETIRED, "split_mcp_claims", "return RetiredMcpClaims({}, {})"),
         ),
     ),
+    "U-USER-SCOPE-ORG-POLICY": (
+        "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not "
+        "a defect): user scope has no git remote, so policy_discovery_uses_git_remote is "
+        "False at $APM_HOME and install, lock, update and install --mcp at -g discover no "
+        "org policy; the local executables gate still parks bin/ there, and project scope "
+        "refuses the denied plugin with exit 1. A user-scope cell whose GATE is "
+        "denied-dependency under one of those commands is removed until #3703 lands; a "
+        "scope-free PRIM=bin cell is not (a whole native plugin carries bin/ at project "
+        "scope, where the org deny refuses it). Self-reinstating: "
+        "generator/bin_pin.py hashes the predicate, and when the hash differs from "
+        "U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails",
+        (
+            Ev(
+                "src/apm_cli/core/scope.py",
+                "policy_discovery_uses_git_remote",
+                "def policy_discovery_uses_git_remote",
+            ),
+            Ev(
+                "src/apm_cli/core/scope.py",
+                "policy_discovery_uses_git_remote",
+                "return not is_user_scope_root(root)",
+            ),
+            Ev(
+                "src/apm_cli/policy/discovery.py",
+                "_auto_discover",
+                "policy_discovery_uses_git_remote",
+            ),
+            Ev(
+                "docs/src/content/docs/enterprise/apm-policy.mdx",
+                "",
+                "Org policy does not govern user-scope (`-g`) installs",
+            ),
+            Ev(
+                "docs/src/content/docs/enterprise/security.md",
+                "Threat model",
+                "user-scope installs (`apm install -g`) are not governed by it",
+            ),
+            Ev(
+                "docs/src/content/docs/reference/cli/policy.md",
+                "`apm policy status`",
+                "User scope has no git remote, so no org policy is discovered",
+            ),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (
@@ -502,8 +613,8 @@ UNINSTALL_MCP_REFUSALS: Mapping[str, str] = {
     "mcp-registry": "rule|U8|uninstall-refuses-a-registry-mcp-name",
     "inline-mcp": "rule|U8|uninstall-refuses-an-inline-mcp-name",
 }
-# A local bundle writes no manifest entry: uninstall refuses it, update and
-# prune parse and leave it untouched (one cell per message class).
+# A local bundle writes no manifest entry: uninstall refuses one with no deployed
+# hooks (#3700), update and prune parse and leave it untouched (one cell per message class).
 LOCAL_BUNDLE_REFUSALS: Mapping[str, str] = {
     "uninstall": "rule|U8|uninstall-refuses-a-local-bundle",
     "update": "rule|U8|update-leaves-a-local-bundle-untouched",
@@ -514,7 +625,7 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     MARKETPLACE_ADD_REFUSAL: (1, r"No marketplace\.json found in"),
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
-    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
+    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"Local bundle 'p-exec' has no hooks deployed\."),
     # p-exec ships only executables the gate parks, so its bundle install records
     # nothing: update has no bundle to name (#4318 names a recorded one).
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
@@ -618,6 +729,10 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U8"
     if u_bin_ops_applies(cell) and u_bin_pinned():
         return "U-BIN-OPS"
+    if u_bin_bundle_applies(cell) and u_bin_bundle_pinned():
+        return "U-BIN-BUNDLE"
+    if u_user_org_policy_applies(cell) and u_user_org_policy_pinned():
+        return "U-USER-SCOPE-ORG-POLICY"
     if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
         return "U-MCPOWN-USER"
     if (deployed in ("clean", "edited") and lock == "absent") or (
@@ -699,6 +814,8 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     source = _source_mapping(cell)
     if source is not None:
         return source
+    if prim == "bin" and cell.get("SRC") == "local-path" and u_bin_pinned():
+        return {**cell, "SRC": "native-plugin"}, "U-BIN-SRC"
     rule_target = _rule_cell_target(cell)
     if rule_target is not None:
         return rule_target
@@ -726,6 +843,10 @@ def must_cover_rules(cell: Mapping[str, str]) -> tuple[str, ...]:
         rules.append("U9")
     if u_bin_applies(cell) and not u_bin_pinned():
         rules.append("U-BIN")
+    if u_bin_bundle_applies(cell) and not u_bin_bundle_pinned():
+        rules.append("U-BIN-BUNDLE")
+    if u_user_org_policy_applies(cell) and not u_user_org_policy_pinned():
+        rules.append("U-USER-SCOPE-ORG-POLICY")
     return tuple(rules)
 
 
@@ -787,3 +908,63 @@ def u_bin_pinned() -> bool:
     from tests.lifecycle.generator.bin_pin import predicate_digest
 
     return predicate_digest() == U_BIN_PIN
+
+
+# -- U-BIN-BUNDLE: a local bundle never deploys bin/ (#4095 lane T-1c) ----------
+
+# The approved digest of the bundle deploy routing (generator/bin_pin.py). While the
+# live digest equals it, every PRIM=bin cell of a local bundle is removed; when it
+# differs they are must-cover and --check fails until a reviewed change updates it.
+# Re-pinned after main's bundle frontmatter-hooks fixes (2dfb0a11..37df5b73): they add one
+# more skip (_declares_unapproved_hooks) to bundle_deploy_relative_path and leave
+# _lower_to_target and _is_primitive_deploy_path unchanged, so routing only narrowed.
+# The pin also covers integrate_local_bundle's target= on its routing call
+# (bin_pin.BUNDLE_BIN_CALLER).
+U_BIN_BUNDLE_PIN = "b83d2577325ef5b20d7d43c0bc0f3e1c5baa8e7cf090d1a7a0defc10f5b301f7"
+
+
+def u_bin_bundle_applies(cell: Mapping[str, str]) -> bool:
+    """U-BIN-BUNDLE: a PRIM=bin cell whose package arrives as a local bundle.
+
+    A command U8 maps to a rule cell (one that refuses or ignores a local bundle)
+    keeps that mapping: the refusal is proven there, whatever the bundle ships.
+    install of a local bundle is bundle-install, so it is removed with it.
+    """
+    if cell.get("PRIM") != "bin" or not (
+        cell.get("OP") == "bundle-install" or cell.get("SRC") == "local-bundle"
+    ):
+        return False
+    mapped = mapped_cell(cell)
+    return mapped is None or not isinstance(mapped[0], str)
+
+
+def u_bin_bundle_pinned() -> bool:
+    from tests.lifecycle.generator.bin_pin import bundle_bin_digest
+
+    return bundle_bin_digest() == U_BIN_BUNDLE_PIN
+
+
+# -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
+
+# The approved digest of core/scope.policy_discovery_uses_git_remote. #3703 must
+# change that decision; the digest then differs, the cells return as must-cover
+# and the tripwire in test_generator_rules.py fails until the rule is dropped.
+U_USER_ORG_POLICY_PIN = "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
+# Commands an org dependency deny governs at project scope (FROZEN alone is install).
+ORG_DENY_OPS = frozenset({"install", "lock", "update", "mcp-install"})
+
+
+def u_user_org_policy_applies(cell: Mapping[str, str]) -> bool:
+    """A user-scope cell whose promise is that an org dependency deny governs it."""
+    if cell.get("GATE") != "denied-dependency":
+        return False
+    # Only an explicit user-scope cell: a scope-free bin cell is reachable at project
+    # scope too, where a whole native plugin carries bin/ and the org deny refuses it.
+    op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
+    return cell.get("SCOPE") == "user" and op in ORG_DENY_OPS
+
+
+def u_user_org_policy_pinned() -> bool:
+    from tests.lifecycle.generator.bin_pin import user_org_policy_digest
+
+    return user_org_policy_digest() == U_USER_ORG_POLICY_PIN

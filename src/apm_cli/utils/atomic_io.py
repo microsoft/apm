@@ -13,10 +13,20 @@ backward compatibility with existing tests) and
 
 import contextlib
 import os
+import re
 import secrets
 import stat
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+
+# Name prefix of the staging file an atomic write creates beside its target.
+# A process killed before ``os.replace`` leaves it behind; deploy journal
+# replay recognizes it next to a write APM began and never sealed (#5395).
+STAGING_PREFIX = "apm-atomic-"
+# The whole name ``tempfile.mkstemp`` gives it: the prefix, 8 characters of
+# its random sequence, and no suffix.
+STAGING_NAME = re.compile(rf"{re.escape(STAGING_PREFIX)}[a-z0-9_]{{8}}")
 
 
 def umask_file_mode(path: Path) -> int | None:
@@ -73,7 +83,7 @@ def atomic_copy(source: Path, destination: Path, *, metadata: bool = True) -> Pa
         mode: int | None = stat.S_IMODE(source_stat.st_mode)
     else:
         mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else umask_file_mode(target)
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-atomic-", dir=str(target.parent))
+    fd, tmp_name = tempfile.mkstemp(prefix=STAGING_PREFIX, dir=str(target.parent))
     try:
         try:
             _stage_copy(source, fd)
@@ -158,11 +168,13 @@ def atomic_write_text(
     *,
     new_file_mode: int | None = None,
     normalize_line_endings: bool = True,
-    temp_prefix: str = "apm-atomic-",
+    temp_prefix: str = STAGING_PREFIX,
     temp_suffix: str = "",
     create_only: bool = False,
-) -> None:
-    """Atomically write ``data`` (UTF-8) to ``path``.
+    before_publish: Callable[[], bool] | None = None,
+    file_mode: int | None = None,
+) -> bool:
+    """Atomically write ``data`` (UTF-8) to ``path``; return whether it was published.
 
     The temp file is created in ``path.parent`` so the eventual
     ``os.replace`` is a same-filesystem rename. Caller is responsible
@@ -189,6 +201,11 @@ def atomic_write_text(
     appears during staging, is never overwritten. Unsupported filesystems fail
     explicitly rather than falling back to a racy check followed by replacement.
 
+    ``before_publish`` runs once the temp file is complete, right before it
+    is published; when it returns ``False`` the temp file is discarded, the
+    destination is left as it is and ``False`` is returned (a compare-and-swap
+    against another writer). An exception it raises propagates the same way.
+
     On any failure, the temp file is removed and the original target
     file (if any) remains untouched.
     """
@@ -203,7 +220,8 @@ def atomic_write_text(
     )
     fd_wrapped = False
     try:
-        mode = existing_mode if existed else new_file_mode
+        # file_mode is the published file's mode whether or not it existed.
+        mode = file_mode if file_mode is not None else (existing_mode if existed else new_file_mode)
         if mode is not None and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
                 os.fchmod(fd, mode)
@@ -211,12 +229,15 @@ def atomic_write_text(
         fd_wrapped = True
         with fh:
             fh.write(normalize_crlf_to_lf(data) if normalize_line_endings else data)
+        if before_publish is not None and not before_publish():
+            os.unlink(tmp_name)
+            return False
         if create_only:
             os.link(tmp_name, path)
             os.unlink(tmp_name)
         else:
             _replace_atomic_file(tmp_name, path)
-    except Exception:
+    except BaseException:  # a cancellation still removes the staged file
         if not fd_wrapped:
             # fdopen never took ownership of the descriptor; close it so
             # Windows can release its lock and the tmp file can be unlinked.
@@ -225,3 +246,4 @@ def atomic_write_text(
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise
+    return True

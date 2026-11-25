@@ -36,6 +36,7 @@ from scripts.architecture_linter.checks.contracts_test_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.frontmatter_boundary import frontmatter_fence_uses
 from scripts.architecture_linter.checks.lexical_shared import (
     body_has as _body_has,
 )
@@ -1383,6 +1384,7 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 )
             )
 
+    findings.extend(frontmatter_fence_uses(provider, rule_id, _FRONTMATTER_OWNER))
     for path in _python_paths(provider, _SRC_PREFIX):
         facts, facts_fail = _facts_for(provider, path, rule_id)
         findings.extend(facts_fail)

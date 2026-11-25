@@ -45,6 +45,7 @@ pytestmark = [
         "P-OWN-native-instruction-projection",
         "P-OWN-local-bundle-compile-staging",
         "P-OWN-compiled-output-writes",
+        "P-OWN-claude-agents-md-instruction-routing",
     ),
 ]
 
@@ -264,9 +265,53 @@ def test_bundle_ships_root_skills_with_apm_dir(lifecycle_world) -> None:
     assert "skills/f-bun/SKILL.md" in names, f"the bundle drops the root skill: {sorted(names)}"
 
 
+_ALWAYS_ON = "Always-on marker for the Claude AGENTS.md route."
+
+
+def test_claude_routes_an_always_on_instruction_to_agents_md(lifecycle_world) -> None:
+    """#4005 + #5343: with no compiled AGENTS.md carrying it, install keeps an always-on
+    ('**') instruction as its 0.37 Claude rule; a Claude-only compile then keeps it out
+    of AGENTS.md, so Claude has exactly one copy. The package's skill and its
+    path-scoped instruction stay deployed across compile."""
+    use_policy(lifecycle_world, "allow")
+    root = skill_package(LocalPackageFactory(lifecycle_world.root / "route-always"), "f-all")
+    instruction = root / ".apm" / "instructions" / "f-all.instructions.md"
+    instruction.parent.mkdir(parents=True, exist_ok=True)
+    instruction.write_text(
+        f"---\napplyTo: '**'\ndescription: Always on.\n---\n\n{_ALWAYS_ON}\n", encoding="ascii"
+    )
+    scoped = instruction.with_name("f-all-py.instructions.md")
+    scoped.write_text(_INSTRUCTION, encoding="ascii")
+    scenario = Scenario(
+        lifecycle_world,
+        {"f-all": str(root)},
+        kinds={"f-all": ["skill"]},
+        targets=("claude",),
+        policy="allow",
+    )
+    step = scenario.run("install f-all")
+    assert "apm compile" in step.output, step.output
+    project = lifecycle_world.project
+    ruled = [p for p in (project / ".claude").rglob("*.md") if _ALWAYS_ON in p.read_text("utf-8")]
+    assert [p.name for p in ruled] == ["f-all.md"], ruled
+    scenario.assert_deployed()
+    _assert_route(scenario, "deployed", targets=("claude",))
+    compiled = scenario.run("compile", credit=_assignments("compile", _SINGLE, "deployed"))
+    agents = project / "AGENTS.md"
+    compiled_text = agents.read_text(encoding="utf-8") if agents.is_file() else ""
+    assert _ALWAYS_ON not in compiled_text, compiled.output
+    assert (project / ".claude" / "rules" / "f-all.md").is_file(), compiled.output
+    scenario.assert_deployed()
+    _assert_route(scenario, "deployed", targets=("claude",))
+    scenario.finish()
+
+
 CREDITS = credits(
     __file__,
     {
+        "test_claude_routes_an_always_on_instruction_to_agents_md": _assignments(
+            "compile", _SINGLE, "deployed"
+        ),
         **{
             f"test_install_routes_file_primitives[{tgt}-{route}]": _assignments(
                 "install", tgt, route

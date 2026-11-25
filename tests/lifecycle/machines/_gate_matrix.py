@@ -189,13 +189,24 @@ class GateMatrix(StepRunner):
                 for package in command.packages
                 if package == MIXED
             )
+        if self.state.denied_by_policy and command.exits == frozenset({1}):
+            # A refusal under the org deny names the denied packages and changes
+            # nothing (AGENTS.md included), so it holds for every primitive they
+            # ship: p-exec's bin/ and p-mixed's instruction too.
+            unobserved = frozenset()
         if command.op == "mcp-install" and self.state.gate("p-exec", "mcp") not in _MCP_LEVELS:
             # U7 credits the collateral primitives only: a first-party server
             # requested by name is never gated (U-FIRST-PARTY-MCP).
             unobserved = unobserved | {"mcp"}
+        # The plugin-bin spine has its own approve/bin denial witness.
         return sorted(
             {
                 f"G1|{command.op}|{kind}|{self.state.gate(package, kind)}|{self.scope}"
+                + (
+                    "|matrix"
+                    if kind == "bin" and command.op == "approve" and self.state.denied_by_policy
+                    else ""
+                )
                 for package in command.packages
                 for kind in KINDS[package] - unobserved
             }
@@ -211,7 +222,10 @@ class GateMatrix(StepRunner):
     def run(self, op: str, *words: str, packages: Sequence[str] = (), exits=(0,)) -> None:
         """Run one command, check I1-I9, credit its cells, then advance the state."""
         named = tuple(packages)
-        command = Command(op, words, named or tuple(self.state.declared), named, frozenset(exits))
+        expected_exits = (1,) if op == "approve" and self._policy_refuses_approval(named) else exits
+        command = Command(
+            op, words, named or tuple(self.state.declared), named, frozenset(expected_exits)
+        )
         cells = self.cells(command)
         self.credited.update(cells)
         requested = self._requested(command)
@@ -234,6 +248,10 @@ class GateMatrix(StepRunner):
         # Every exit is pinned: a refused command leaves the inputs as they were.
         if 0 in command.exits:
             self.state = requested
+
+    def _policy_refuses_approval(self, packages: Sequence[str]) -> bool:
+        """A project approval is refused before writing if org policy denies any package."""
+        return self.scope == "project" and bool(self.state.denied_by_policy.intersection(packages))
 
     def _reconciles(self, op: str, words: Sequence[str]) -> bool:
         """Whether I4 holds this command to the model's allowed set afterwards."""
@@ -269,11 +287,12 @@ class GateMatrix(StepRunner):
             # A project approval writes apm.yml's executables block, which opts the
             # project into the gate; a user approval (APM_HOME/config.json) never
             # does (security/executables.py gate_enabled).
-            if self.scope == "project":
-                state.gate_on = True
-            for package in named:
-                state.decisions[package] = "allowed"
-                state.revoked.discard(package)
+            if not self._policy_refuses_approval(named):
+                if self.scope == "project":
+                    state.gate_on = True
+                for package in named:
+                    state.decisions[package] = "allowed"
+                    state.revoked.discard(package)
         if verb == "deny":
             for package in named:
                 state.decisions[package] = "denied"
@@ -330,7 +349,7 @@ class GateMatrix(StepRunner):
             # A catalog command leaves every project byte, deployed or locked, alone.
             unchanged["project"] = ("*",)
         elif exit_code != 0:
-            unchanged["project"] = _DURABLE
+            unchanged["project"] = (*_DURABLE, _AGENTS_MD)
         elif command.op == "mcp-install":
             unchanged["project"] = _NON_MCP
         if command.args == _RENDER and exit_code == 0:

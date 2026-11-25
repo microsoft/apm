@@ -89,6 +89,9 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
             capture_output=True,
             timeout=10,
         )
+        from ..utils.git_config_memo import invalidate
+
+        invalidate(bare_path)  # its config changed: no earlier probe answers for it
         if result.returncode != 0:
             logging.getLogger(__name__).warning(
                 "Failed to redact remote URL from bare repo config at %s "
@@ -119,6 +122,125 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
             fetch_head,
             exc,
         )
+
+
+# Protocol v0 servers refuse a want for an unadvertised commit. Under v2 a
+# "not our ref" means the commit is gone on stock git, but some hosts answer
+# so for any unadvertised commit; neither may clone the history in full.
+_WANT_REFUSED = ("does not allow request for unadvertised object",)
+_NOT_OUR_REF = "not our ref"
+# git translates its own messages; the fetch runs untranslated so they match.
+_UNTRANSLATED = {"LC_ALL": "C", "LANGUAGE": "C"}
+
+
+def _refuses_want_by_commit(exc: subprocess.CalledProcessError) -> bool:
+    """Whether git failed because the server refuses to serve a commit by its id."""
+    return any(marker in _stderr_text(exc) for marker in _WANT_REFUSED)
+
+
+def _stderr_text(exc: subprocess.CalledProcessError) -> str:
+    detail = exc.stderr
+    if isinstance(detail, bytes):
+        detail = detail.decode("utf-8", "replace")
+    return (detail or "").lower()
+
+
+def _fetch_admitted_tip_by_name(
+    git_exe: str, path: Path, url: str, ref: str, sha: str, fetch_env: dict[str, str]
+) -> bool:
+    """Fetch *ref* by name when it still points at *sha*; ``False`` if unknown.
+
+    Both the listing and the fetch use *fetch_env*, the validated clone env of
+    *path*, so they reach the destination a clone would (a mirror rewrite).
+
+    Raises:
+        AdmittedCommitGoneError: *ref* no longer points at *sha*.
+    """
+    from ..cache.commit_reachability import admitted_tip_name
+
+    name = admitted_tip_name(url, ref, sha, fetch_env)
+    if name is None:
+        return False
+    subprocess.run(
+        [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, name],
+        env={**fetch_env, **_UNTRANSLATED},
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+    return True
+
+
+def fetch_commit_worktree(
+    execute_transport_plan: Callable[..., None],
+    repo_url_base: str,
+    target: Path,
+    *,
+    dep_ref: DependencyReference,
+    sha: str,
+    verbose_callback: Callable[[str], None] | None = None,
+) -> None:
+    """Check out commit *sha* at *target*, fetched by that commit, never by a name (#5138).
+
+    Shallow: ``git init``, ``git fetch --depth=1 --no-tags <url> <sha>`` and a
+    detached checkout. A server that refuses a want by commit falls back to a
+    full clone and a checkout of *sha*. A server that answers "not our ref"
+    gets the ref fetched by name, only while it still points at *sha*; the
+    checkout is still of *sha*. Runs over the clone transport plan. The
+    caller verifies the checkout against *sha* once links are materialized.
+    """
+    from ..utils.git_env import (
+        checkout_git_worktree,
+        clone_git_worktree,
+        get_git_executable,
+        git_clone_env,
+        git_no_templates_args,
+        git_subprocess_env,
+    )
+
+    git_exe = get_git_executable()
+
+    def _action(url: str, env: dict[str, str], path: Path) -> None:
+        env = git_subprocess_env(env)
+        if path.exists():
+            _rmtree(path)
+        # The env a clone would get, with remote-activated config applied.
+        fetch_env = git_clone_env(url, env, path)
+        try:
+            subprocess.run(
+                [git_exe, "init", "-q", *git_no_templates_args(), str(path)],
+                env=fetch_env,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, sha],
+                env={**fetch_env, **_UNTRANSLATED},
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+        except subprocess.CalledProcessError as exc:
+            # Only a server that refuses a want by commit gets the full clone; a
+            # missing commit or an auth failure fails here, at depth-1 cost.
+            ref = getattr(dep_ref, "reference", None)
+            if ref and _NOT_OUR_REF in _stderr_text(exc):
+                if not _fetch_admitted_tip_by_name(git_exe, path, url, ref, sha, fetch_env):
+                    raise
+                checkout_git_worktree(path, sha, env=env)
+                return
+            if not _refuses_want_by_commit(exc):
+                raise
+            if verbose_callback:
+                verbose_callback(
+                    f"Fetch by commit refused; cloning in full to check out {sha[:12]}"
+                )
+            if path.exists():
+                _rmtree(path)
+            clone_git_worktree(url, path, env=env, no_checkout=True)
+        checkout_git_worktree(path, sha, env=env)
+
+    execute_transport_plan(repo_url_base, target, dep_ref=dep_ref, clone_action=_action)
 
 
 def bare_clone_with_fallback(
@@ -259,20 +381,10 @@ def bare_clone_with_fallback(
             # would set resolved_commit to the abbreviation and lockfile
             # comparisons against `head.commit.hexsha` (always 40-char)
             # would never match. Copilot review finding (#1135).
-            full_sha_result = run_git_text(
-                [
-                    git_exe,
-                    "--git-dir",
-                    str(target),
-                    "rev-parse",
-                    "--verify",
-                    f"{ref}^{{commit}}",
-                ],
-                env=env,
-                check=True,
-                capture_output=True,
-            )
-            full_sha = full_sha_result.stdout.strip()
+            from ..utils.git_env import git_resolve_commit
+
+            # A commit pin: the full commit its (possibly abbreviated) name expands to.
+            full_sha = git_resolve_commit(target, ref, bare=True, env=env)
             subprocess.run(
                 [git_exe, "--git-dir", str(target), "update-ref", "HEAD", full_sha],
                 env=env,

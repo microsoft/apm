@@ -204,11 +204,10 @@ def run_service_integrations(  # noqa: PLR0913
                 if getattr(dep, "native_runtimes", None)
             },
         )
-    from apm_cli.deps.lockfile_write_authority import staged_lockfile_text
     from apm_cli.install.mcp.ownership import frozen_unrecorded_mcp_pairs
     from apm_cli.install.mcp.write_receipts import journal_mcp_writes
 
-    lock_before_mcp = staged_lockfile_text(lock_path)
+    lock_before_mcp = _staged_lockfile_state(lock_path)
     with (
         frozen_unrecorded_mcp_pairs(frozen_unrecorded),
         journal_mcp_writes(
@@ -274,9 +273,33 @@ def run_service_integrations(  # noqa: PLR0913
         no_policy=ctx.no_policy,
         prepared=prepared_lsp,
         # MCP writes are recorded only by this command's lockfile (#4697).
-        refuse_unwritten_conflict=staged_lockfile_text(lock_path) == lock_before_mcp,
+        refuse_unwritten_conflict=_staged_lockfile_unchanged(lock_path, lock_before_mcp),
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)
+
+
+def _staged_lockfile_state(lock_path: Path) -> object:
+    """What this command has staged for *lock_path*, without emitting a staged document."""
+    from apm_cli.deps.lockfile_write_authority import (
+        staged_lockfile_document,
+        staged_lockfile_text,
+    )
+
+    return staged_lockfile_document(lock_path) or staged_lockfile_text(lock_path)
+
+
+def _staged_lockfile_unchanged(lock_path: Path, before: object) -> bool:
+    """Whether the lockfile staged for *lock_path* still holds the text it held *before*."""
+    from apm_cli.deps.lockfile_write_authority import StagedDocument
+
+    after = _staged_lockfile_state(lock_path)
+    if after is before:
+        return True
+    # Compare the state already read: never read the lockfile a second time.
+    texts = [
+        state.text() if isinstance(state, StagedDocument) else state for state in (before, after)
+    ]
+    return texts[0] == texts[1]
 
 
 class ServiceReconciliation:

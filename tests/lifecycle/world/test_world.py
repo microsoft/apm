@@ -376,7 +376,8 @@ def test_git_source_installs_through_the_local_https_server(
     assert package in _locked(world, scope)
     _assert_surfaces(world, package, scope)
     requests = world.services.egress_log()
-    assert {(GITHUB_HOST, f"/lifecycle/{package}/info/refs")} <= {
+    # git's clone and the in-process pinned fetch both POST the upload-pack service.
+    assert {(GITHUB_HOST, f"/lifecycle/{package}/git-upload-pack")} <= {
         (entry["host"], entry["path"]) for entry in requests
     }, requests
     assert all(entry["status"] == 200 for entry in requests), requests
@@ -914,6 +915,7 @@ _POLICY_EXIT = {
     "scripts-deny": 0,
     "unmanaged-deny": 0,
     "unmanaged-deny-dirs": 0,
+    "fields-warn": 0,
     "max-depth-1": 0,
     "max-depth-2": 0,
 }

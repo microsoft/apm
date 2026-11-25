@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from apm_cli.core.remediation import SKILL_CONFLICT_UNMANAGED
-from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.install.deployed_paths import deployed_path_entry, refuse_symlinked_deploy
 from apm_cli.integration.base_integrator import (
     BaseIntegrator,
     recovery_directory,
@@ -21,8 +21,9 @@ from apm_cli.integration.skill_adoption import (
     skill_tree_baselines,
 )
 from apm_cli.integration.skill_support import skill_dir_has_content
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens, skill_subset_selects_all
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
+from apm_cli.utils.paths import relative_to
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -44,8 +45,9 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
     """Resolve the one source route consumed by deployment and preflight."""
     from apm_cli.integration.skill_integrator import SkillIntegrator, should_install_skill
     from apm_cli.models.apm_package import PackageType
+    from apm_cli.utils.realpath import resolve_path
 
-    root = package_info.install_path.resolve()
+    root = resolve_path(package_info.install_path)
     subskills = root / ".apm" / "skills"
 
     def local_children() -> dict[str, Path]:
@@ -100,7 +102,9 @@ def preflight_skill_selection(
     # parent's selection that matches nothing (#3735).
     for edge in getattr(dependency, "selection_contributors", ()) or ():
         edge_filter = skill_subset_filter_tokens(edge.skill_subset)
-        if SkillIntegrator._skill_filter_misses_available(edge_filter, available):
+        if SkillIntegrator._skill_filter_misses_available(
+            edge_filter, available, selects_all=skill_subset_selects_all(edge.skill_subset)
+        ):
             SkillIntegrator._error_no_skill_filter_match(
                 available,
                 tuple(edge.skill_subset or ()),
@@ -110,7 +114,9 @@ def preflight_skill_selection(
                 declared_by=edge.declared_by() if edge.parent_chain else None,
             )
             return False
-    if not SkillIntegrator._skill_filter_misses_available(name_filter, available):
+    if not SkillIntegrator._skill_filter_misses_available(
+        name_filter, available, selects_all=skill_subset_selects_all(skill_subset)
+    ):
         return True
     SkillIntegrator._error_no_skill_filter_match(
         available,
@@ -275,9 +281,15 @@ def find_unmanaged_conflicts(
         for target in targets:
             if target.supports("skills"):
                 destination = integrator._target_skill_dir(target, project_root, name)
-                destinations.setdefault(destination.resolve(), (destination, target))
+                try:
+                    resolved = destination.resolve()
+                except (OSError, RuntimeError):
+                    # A link loop cannot be resolved; it is refused like any link (#5287).
+                    refuse_symlinked_deploy(destination, project_root)
+                    raise
+                destinations.setdefault(resolved, (destination, target))
         for source in files:
-            suffix = source.relative_to(source_root)
+            suffix = relative_to(source, source_root)
             parent = source_root
             for part in suffix.parts:
                 if part in ignore(str(parent), [part]):

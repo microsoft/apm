@@ -1,0 +1,15 @@
+{
+  "issue": 5178,
+  "fixed_in": "Unreleased",
+  "summary": "Replay of an abandoned deploy journal detected only Linux POSIX ACLs, so on Windows a journaled path whose DACL held an explicit grant or deny was restored without it. Replay now keeps and reports a path whose DACL holds an ACE it did not inherit, or is protected from inheritance; a DACL that cannot be read is kept too.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_journal_replay_windows_acl.py::test_a_file_with_an_explicit_ace_is_kept_with_its_acl_and_reported",
+    "tests/integration/test_journal_replay_windows_acl.py::test_a_directory_with_an_explicit_ace_on_an_entry_is_kept_with_its_acl"
+  ]
+}

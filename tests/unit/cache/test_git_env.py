@@ -115,6 +115,7 @@ def test_modern_windows_missing_lookup_scales_linearly(
             "os",
             SimpleNamespace(
                 name="nt",
+                path=os.path,
                 pathsep=";",
                 environ={"PATHEXT": ";".join(extensions)},
                 get_exec_path=lambda: [str(trusted_bin)],
@@ -1113,7 +1114,9 @@ class TestGitSubprocessEnv:
         assert child.commands == []
 
     def test_http_urlmatch_failure_reports_status_without_raw_config(self) -> None:
-        headers = (GitConfigEntry("command", "http.extraheader", "Authorization: Basic sentinel"),)
+        # A wildcard key defers to Git (utils/git_config_once answers only plain keys).
+        key = "http.https://*.example.com.extraheader"
+        headers = (GitConfigEntry("command", key, "Authorization: Basic sentinel"),)
         child = _FakeGitConfigChild(128, stderr=b"private config detail")
         with (
             patch("subprocess.Popen", child),
@@ -1727,3 +1730,25 @@ class TestUncachedFallbackLineEndings:
         ).stdout.strip()
         assert head == old_sha
         assert (target / "f.txt").read_bytes() == b"a\nb\n"
+
+
+def test_project_path_keys_agree_across_unicode_case_and_composition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A case variant whose folding undoes composition is still treated as the project."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project-\u0390"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    variant = tmp_path / "PROJECT-\u03aa\u0301"
+    variant.mkdir(exist_ok=True)
+
+    def _unverifiable(*_args: object) -> bool:
+        raise PermissionError("cannot stat")
+
+    monkeypatch.setattr(os.path, "samefile", _unverifiable)
+    monkeypatch.chdir(project)
+
+    with pytest.raises(FileNotFoundError, match="No PATH directory outside the project"):
+        trusted_path_environment({"PATH": str(variant)})

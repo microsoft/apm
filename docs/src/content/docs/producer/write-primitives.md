@@ -142,6 +142,7 @@ APM merges it into `.claude/settings.json` for Claude Code, writes
 `.github/hooks/<package>-format.json` for Copilot, and copies
 `scripts/format.sh` where each harness can run it. Event names are renamed per
 harness (`PostToolUse` becomes `postToolUse` for Copilot). OpenCode gets no hooks.
+APM orders its own hook entries by source; do not rely on cross-package order; your own entries never move.
 
 Commands (slash commands) have no folder of their own: APM builds them from your
 prompts, as described above.

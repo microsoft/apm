@@ -122,6 +122,128 @@ def test_a_declared_server_is_never_retired(project: Path) -> None:
     assert _config(project).read_bytes() == before
 
 
+def _reconcile(
+    root: Path,
+    logger: _Logger,
+    admitted: dict[str, set[str]] | None,
+    *,
+    declared: set[str] = frozenset({SERVER}),
+    retire: bool = True,
+) -> None:
+    retire_undeclared_mcp_writes(
+        set(declared),
+        project_root=root,
+        user_scope=False,
+        exclude=None,
+        logger=logger,
+        retire=retire,
+        admitted=admitted,
+    )
+
+
+_UNTARGETED = (
+    f"Kept MCP server '{SERVER}' in .mcp.json: APM no longer deploys it for copilot. "
+    "Remove the entry if you no longer use it, or check targets: in apm.yml and in the "
+    "server's declaration."
+)
+
+
+@pytest.mark.parametrize(
+    ("admitted", "reported"),
+    [
+        ({"cursor": {SERVER}}, True),
+        ({"copilot": set()}, True),
+        ({"claude": {SERVER}}, False),
+        ({"copilot": {SERVER}}, False),
+        (None, False),
+    ],
+    ids=["untargeted", "not-admitted", "shared-destination", "targeted", "no-manifest-targets"],
+)
+def test_a_declared_entry_no_targeted_runtime_deploys_is_kept_and_reported(
+    project: Path, admitted: dict[str, set[str]] | None, reported: bool
+) -> None:
+    """Never removed; reported until a targeted runtime deploys there again (#4784)."""
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    _reconcile(project, logger, admitted)
+
+    assert _config(project).read_bytes() == before
+    assert not logger.removed
+    kept = kept_mcp_writes(project, user_scope=False, managed={SERVER})
+    if not reported:
+        assert not logger.warnings and kept == []
+        return
+    assert logger.warnings == [_UNTARGETED]
+    assert [(write.name, config) for write, config in kept] == [(SERVER, ".mcp.json")]
+    # Later installs announce it, with a lockfile or with --runtime (no admitted set).
+    for retire, again in ((False, admitted), (True, None)):
+        announced = _Logger()
+        _reconcile(project, announced, again, retire=retire)
+        assert announced.warnings == [_UNTARGETED]
+    assert _config(project).read_bytes() == before
+
+
+@pytest.mark.parametrize("retire", [True, False])
+def test_a_runtime_sharing_the_destination_clears_the_keep(project: Path, retire: bool) -> None:
+    """Claude reuses copilot's .mcp.json entry without a write: it is in use again."""
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+    _reconcile(project, _Logger(), {"cursor": {SERVER}})
+    logger = _Logger()
+
+    _reconcile(project, logger, {"claude": {SERVER}}, retire=retire)
+
+    assert _config(project).read_bytes() == before
+    assert not logger.warnings
+    assert kept_mcp_writes(project, user_scope=False, managed={SERVER}) == []
+
+
+@pytest.mark.parametrize(("flag", "reported"), [("copilot", False), (None, True)])
+def test_a_runtime_the_target_flag_selects_is_not_reported(
+    project: Path, flag: str | None, reported: bool
+) -> None:
+    """apm.yml targets cursor; `--target copilot` selects copilot for this run."""
+    from types import SimpleNamespace
+
+    from apm_cli.core.target_detection import FLAG_TARGET_SOURCE, EffectiveTargetDecision
+
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    retire_undeclared_mcp_writes(
+        {SERVER},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=logger,
+        manifest=SimpleNamespace(targets=["cursor"]),
+        dependencies=[SERVER],
+        target_decision=EffectiveTargetDecision([flag], FLAG_TARGET_SOURCE) if flag else None,
+    )
+
+    assert _config(project).read_bytes() == before
+    assert logger.warnings == ([_UNTARGETED] if reported else [])
+
+
+def test_a_kept_entry_whose_server_is_no_longer_declared_stays_reported(project: Path) -> None:
+    """Restoring copilot does not adopt an entry the lockfile no longer manages."""
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+    _reconcile(project, _Logger(), {"cursor": {SERVER}})
+    logger = _Logger()
+
+    _reconcile(project, logger, {"copilot": set()}, declared=set(), retire=False)
+
+    assert _config(project).read_bytes() == before
+    assert logger.warnings == [_UNTARGETED]
+    assert [
+        write.name for write, _ in kept_mcp_writes(project, user_scope=False, managed=set())
+    ] == [SERVER]
+
+
 def test_an_unrecorded_identical_entry_is_never_retired(project: Path) -> None:
     _write_entries(project, {SERVER: ENTRY})
     before = _config(project).read_bytes()
@@ -168,8 +290,11 @@ def test_a_kept_record_is_forgotten_once_its_entry_is_removed(project: Path) -> 
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
 
 
-def test_evidence_bound_to_another_installation_is_unusable(project: Path) -> None:
+def test_evidence_bound_to_another_installation_is_set_aside_once(project: Path) -> None:
+    """#5396: evidence another installation wrote is renamed once, never trusted or deleted."""
     _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    old = path.read_bytes()
     identity = project / ".apm-local" / "installation"
     identity.write_text("0" * 32 + "\n")
     logger = _Logger()
@@ -177,10 +302,128 @@ def test_evidence_bound_to_another_installation_is_unusable(project: Path) -> No
     with pytest.raises(ValueError, match="Invalid MCP write evidence"):
         McpWriteReceipts.open(project, user_scope=False)
     _retire(project, logger)
+    _retire(project, again := _Logger())
 
-    assert SERVER in _servers(project), "unusable evidence must not remove anything"
-    assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
+    assert SERVER in _servers(project), "set-aside evidence must not remove anything"
+    _assert_set_aside(logger.warnings, path, old)
+    assert again.warnings == [], "the set-aside is reported once"
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
+
+
+def test_a_reclone_sets_aside_the_sibling_receipt_its_new_identity_cannot_bind(
+    project: Path,
+) -> None:
+    """Copilot #5403: fresh MCP evidence creates this checkout's identity; the old
+    checkout's materialization receipt beside it must not then fail every ledger load."""
+    import shutil
+
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    _install_write(project, _Logger())
+    session = DeploymentMaterializationSession(project, InstallScope.PROJECT, None)
+    sibling = session.state_path
+    sibling.write_text(
+        json.dumps({**session.binding(), "records": [], "destinations": {}, "bindings": {}}),
+        encoding="utf-8",
+    )
+    shutil.rmtree(project / ".apm-local")  # a re-clone: the identity is not committed
+
+    _install_write(project, _Logger())
+
+    DeploymentMaterializationSession(project, InstallScope.PROJECT, None)  # loads, no raise
+    assert sibling.with_name(sibling.name + ".superseded").is_file(), "kept, never deleted"
+    assert not sibling.exists()
+
+
+@pytest.mark.parametrize("shape", ["not-json", "malformed-records"])
+def test_an_unusable_sibling_receipt_stays_while_the_evidence_is_set_aside(
+    project: Path, shape: str
+) -> None:
+    """Copilot #5403: a sibling receipt that is not well-formed is never archived (the
+    ledger keeps reporting it), and it never undoes the evidence set-aside or its warning."""
+    import shutil
+
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    _install_write(project, _Logger())
+    session = DeploymentMaterializationSession(project, InstallScope.PROJECT, None)
+    evidence, sibling = session.mcp_state_path, session.state_path
+    old = evidence.read_bytes()
+    body = {**session.binding(), "records": [{"bad": 1}], "destinations": {}, "bindings": {}}
+    sibling.write_text("{not json" if shape == "not-json" else json.dumps(body), encoding="utf-8")
+    before = sibling.read_bytes()
+    shutil.rmtree(project / ".apm-local")
+    logger = _Logger()
+
+    _install_write(project, logger)
+
+    _assert_set_aside(logger.warnings, evidence, old)
+    assert sibling.read_bytes() == before, "an unusable sibling stays in place"
+
+
+def _null_root_identity(data: dict) -> None:
+    data["root_identity"] = None
+
+
+def _string_root_identity(data: dict) -> None:
+    data["root_identity"] = "corrupt"
+
+
+def _device_only_change(data: dict) -> None:
+    """Same UUID and inode, another device and no matching birth time: ambiguous."""
+    data["root_identity"][0] += 1
+    data["root_birth_time"] = 1.0
+
+
+def _another_uuid_no_writes(data: dict) -> None:
+    data["installation"] = "0" * 32
+    del data["writes"]
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        "text",
+        _null_root_identity,
+        _string_root_identity,
+        _device_only_change,
+        _another_uuid_no_writes,
+    ],
+    ids=[
+        "not-json",
+        "null-root-identity",
+        "string-root-identity",
+        "device-only-change",
+        "another-uuid-no-writes",
+    ],
+)
+def test_corrupt_evidence_is_never_set_aside_by_an_install(project: Path, corrupt) -> None:
+    """Only well-formed evidence with positive proof of another installation rotates."""
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    if corrupt == "text":
+        path.write_text("{not json")
+    else:
+        data = json.loads(path.read_text())
+        corrupt(data)
+        path.write_text(json.dumps(data))
+    before = path.read_bytes()
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert SERVER in _servers(project)
+    assert path.read_bytes() == before, "corrupt evidence stays in place"
+    assert not path.with_name(path.name + ".superseded").exists()
+    assert logger.warnings and "Kept every MCP entry" in logger.warnings[0]
+
+
+def _assert_set_aside(warnings: list[str], path: Path, old: bytes) -> None:
+    aside = path.with_name(path.name + ".superseded")
+    assert len(warnings) == 1 and "Set aside MCP write evidence" in warnings[0], warnings
+    assert aside.read_bytes() == old, "the old evidence is kept byte for byte"
 
 
 def test_a_corrupt_evidence_file_is_rejected(project: Path) -> None:

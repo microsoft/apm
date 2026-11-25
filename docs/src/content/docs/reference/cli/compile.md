@@ -99,6 +99,11 @@ The compiled output is scanned for hidden Unicode before any file is
 written. Critical findings cause the command to exit non-zero. See
 [Drift and secure by default](../../../enterprise/drift-detection/).
 
+Project output is never written through a symlinked directory. If a directory
+on an output path (for example `.github`) is a symlink, that output batch is
+refused before any of it is written and the command exits non-zero; replace the
+symlink with a regular directory and rerun.
+
 ## Options
 
 ### Target selection
@@ -468,7 +473,7 @@ unchanged.
 | Code | Meaning |
 |------|---------|
 | 0 | Compilation succeeded (or `--validate` passed). |
-| 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, an installed package the org policy no longer allows, or compilation error. |
+| 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, an installed package the org policy no longer allows, or compilation error. Native `CLAUDE.md`, `AGENTS.md`, or `GEMINI.md` files are not APM content: with only those, compile reports `No APM content found to compile`. Hand-authored root context files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are never overwritten. |
 | 2 | Conflicting flags (e.g. `--all` combined with `--target`, or `--root` combined with `--watch`). |
 
 ## Related

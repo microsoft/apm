@@ -182,6 +182,7 @@ LOCAL_CATALOGS: Mapping[str, tuple[str, str]] = {
 _MARKET_FORMS = frozenset({"marketplace-object", "plugin-at-mkt", *LOCAL_CATALOGS})
 _MARKET_CACHE = ".apm/cache/marketplace"
 _PINS = f"{_MARKET_CACHE}/version-pins.json"
+_PINS_LOCK = f"{_MARKET_CACHE}/version-pins.lock"  # writers serialize on it (#5169)
 # The marketplace catalog cache a project install may refresh under APM_HOME.
 _CATALOG_CACHE = (
     f"{_MARKET_CACHE}/{MARKETPLACE_NAME}.json",
@@ -191,6 +192,8 @@ _CATALOG_CACHE = (
 # bookkeeping such as ``resolved_by`` (a diamond child re-parented on uninstall).
 _ROW_CONTENT = ("resolved_commit", "version", "content_hash", "deployed_file_hashes")
 _INCOMPLETE = re.compile(r"Orphan removals are not previewed|Dry run incomplete")
+_BUNDLE_PREVIEW = re.compile(r"Would deploy \d+ file\(s\) from local bundle")
+_PREVIEW_PATH = re.compile(r"^\s*\.?[\w-]+(?:/[\w.-]+)+\s*$")
 _PREVIEW_LINE = re.compile(r"^\s*\[[i!+\-~]\]\s+(?:-\s+)?(\S+)")
 
 
@@ -221,6 +224,8 @@ class Choice:
 
 
 _SKILL = frozenset({"skill"})
+# The world's kit packages (p-kit from the registry, p-pack as a local bundle).
+_KIT = frozenset({"skill", "hook", "canvas", "lsp", "other-file"})
 _EXEC = frozenset({"hook", "bin", "mcp"})
 _NATIVE = frozenset({"native"})
 CHOICES = (
@@ -230,6 +235,7 @@ CHOICES = (
     Choice("plugin-at-mkt", "p-exec", _EXEC),
     Choice("bundle", "p-exec-bundle", _EXEC),
     Choice("bundle", "p-lsp-bundle", frozenset({"lsp"})),
+    Choice("bundle", "p-pack-bundle", _KIT),
     Choice("local-path", "p-parent", _SKILL),
     Choice("local-path", "p-parent2", _SKILL),
     Choice("local-path", "p-lsp", frozenset({"lsp"})),
@@ -240,6 +246,7 @@ CHOICES = (
     Choice("local-path", DOC_PACKAGE, frozenset({"other-file"})),
     Choice("pkg-registry", "p-skill", _SKILL),
     Choice("pkg-registry", "p-exec", _EXEC),
+    Choice("pkg-registry", "p-kit", _KIT),
     Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
     *(
         Choice(
@@ -283,6 +290,7 @@ _REGISTRY_SKILL, _REGISTRY_EXEC = (
     next(c for c in CHOICES if c.form == "pkg-registry" and c.package == name)
     for name in ("p-skill", "p-exec")
 )
+_REGISTRY_KIT = next(c for c in CHOICES if c.form == "pkg-registry" and c.package == "p-kit")
 _MCP_FORMS = frozenset({"mcp-registry", "inline-mcp"})
 _CLI_FORMS = frozenset({"plugin-at-mkt", "bundle", *_MCP_FORMS})
 _DIAMOND = frozenset({"p-parent", "p-parent2"})
@@ -298,7 +306,12 @@ KINDS: Mapping[str, frozenset[str]] = {
         for c in CHOICES
         if c.form in ("local-path", "native", *LOCAL_CATALOGS)
     },
+    "p-kit": _KIT,
+    "p-pack": _KIT,
 }
+# Local bundles whose surfaces the model tracks, by the package name they deploy as
+# (p-pack's skill deploys ungated on install; the other bundles only park executables).
+_MODELED_BUNDLES: Mapping[str, str] = {"p-pack-bundle": "p-pack"}
 # At project scope a Claude plugin deploys whole to .agents/plugins for claude and copilot
 # (#3921): its carried skill and MCP server get no loose surface. The model expects only
 # the gated native unit; the oracle still observes the carried kinds, so a loose deploy fails.
@@ -473,6 +486,18 @@ def preview_names(output: str) -> frozenset[str]:
         for match in map(_PREVIEW_LINE.match, output.splitlines())
         if match
     }
+    # A local bundle preview lists the paths it would deploy, one per line, after
+    # "Would deploy N file(s) from local bundle"; each names its package in a segment.
+    listing = False
+    for line in output.splitlines():
+        if _BUNDLE_PREVIEW.search(line):
+            listing = True
+        elif listing and _PREVIEW_PATH.match(line):
+            parts = PurePosixPath(line.strip()).parts
+            names |= {package_name(part) for part in parts}
+            names |= {package_name(PurePosixPath(line.strip()).stem.split(".")[0])}
+        else:
+            listing = False
     return frozenset(name for name in names if name)
 
 
@@ -592,6 +617,10 @@ class SourceMachine(MachineBase):
         # Slot -> targets of the last resolving step that handled it: a later step under
         # the same targets is "unchanged" for that slot.
         self.resolved_targets: dict[str, frozenset[str]] = {}
+        # Bundle slot -> targets its files were copied into: ``apm install <bundle>`` is
+        # imperative (reference/cli/install.md), so a manifest install after a target
+        # widening deploys nothing new for it; a dropped target stays dropped.
+        self.bundle_targets: dict[str, frozenset[str]] = {}
         self.lock_before = "absent"
         self.proxy = False
         # Local catalog form -> its marketplace.json (the file ``marketplace update`` reads).
@@ -605,6 +634,11 @@ class SourceMachine(MachineBase):
 
     def declared_model(self) -> ModelState:
         names = {c.package for c in self.slots.values() if c.package in KINDS}
+        names |= {
+            _MODELED_BUNDLES[c.package]
+            for c in self.slots.values()
+            if c.package in _MODELED_BUNDLES
+        }
         names |= {"p-skill"} if "remote-skill" in self.slots else set()
         names |= {"p-exec"} if "remote-exec" in self.slots else set()
         if names & _DIAMOND:
@@ -649,14 +683,16 @@ class SourceMachine(MachineBase):
             found.add("SELECT=on")  # ``apm marketplace update NAME`` names one catalog
         # GATE=none is "no executables gate configured" (factors.py GateLevel "none");
         # with the gate on, only the executable kinds of a package have a gate level.
+        # A local bundle is modeled (approved, deployed) under its package's name.
+        name = _MODELED_BUNDLES.get(choice.package, choice.package)
         if "executables" not in self.bench.manifest():
             found.add("GATE=none")
         elif choice.form not in _MCP_FORMS:
             # The project's own MCP servers are first-party: the gate never parks them.
             gated = choice.kinds - UNGATED_KINDS
-            levels = {self.model.gate(choice.package, kind) for kind in gated}
+            levels = {self.model.gate(name, kind) for kind in gated}
             found |= {f"GATE={_GATE_LEVEL.get(level, level)}" for level in levels}
-        if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
+        if any(cell.startswith(f"{name}/") for cell in step.before.deployed):
             found.add("DEPLOYED=clean")
         hostid = None
         if any(c.startswith("HOSTID=") for c in X_CONTEXT.get((op, choice.form), ())):
@@ -779,7 +815,7 @@ class SourceMachine(MachineBase):
             cells=self.cells(op, "real", choices),
             converged=converged,
             model=allowed,
-            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS)},
+            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS, _PINS_LOCK)},
         )
         self.egress(step)
         if step.result.returncode == 0:
@@ -793,6 +829,8 @@ class SourceMachine(MachineBase):
             if op not in _KEEPING:
                 for choice in choices:
                     self.resolved_targets[choice.slot] = self.model.targets
+            for slot in self.bundle_targets:
+                self.bundle_targets[slot] &= self.model.targets
         return step
 
     def preview(
@@ -862,26 +900,33 @@ class SourceMachine(MachineBase):
         docs = [c for c in choices if "other-file" in c.prims and acts(op, c)]
         if not docs or op == "uninstall":
             return
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
         lock = step.after.lock
-        recorded = (
-            {path for dep in lock.get_package_dependencies() for path in dep.deployed_files}
-            if lock is not None
-            else set()
-        )
+        recorded: set[str] = set()
+        if lock is not None:
+            recorded |= {p for dep in lock.get_package_dependencies() for p in dep.deployed_files}
+            recorded |= set(lock.local_deployed_files)
+            recorded |= set(DeploymentLedgerCodec.local_bundle_paths(lock))
+            recorded |= set(DeploymentLedgerCodec.deployed_file_hashes(lock))
         for choice in docs:
-            for target in sorted(self.model.targets):
+            # A local bundle deploys its source package's instruction (p-pack-bundle -> p-pack).
+            name = _MODELED_BUNDLES.get(choice.package, choice.package)
+            targets = self.model.targets
+            if choice.form == "bundle":
+                targets &= self.bundle_targets.get(choice.slot, targets)
+            for target in sorted(targets):
                 mapping = KNOWN_TARGETS[target].primitives.get("instructions")
                 if mapping is None:
                     continue
                 relative = (
-                    f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/"
-                    f"{choice.package}{mapping.extension}"
+                    f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/{name}{mapping.extension}"
                 )
                 path = step.after.deploy_root / relative
                 where = f"{op} {choice.form} {choice.package}: {relative}"
                 assert path.is_file(), f"{where} is not deployed"
                 text = path.read_text(encoding="utf-8")
-                assert f"Follow the {choice.package} conventions." in text, f"{where}: {text!r}"
+                assert f"Follow the {name} conventions." in text, f"{where}: {text!r}"
                 assert relative in recorded, f"{where} is not recorded in the lock"
 
     def egress(self, step: Step) -> None:
@@ -961,7 +1006,7 @@ class SourceMachine(MachineBase):
             cells=self.cells("marketplace", "real", choices),
             mutating=True,
             forbidden={"project": ("*",), "outside": ("*",)},
-            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS)},
+            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS, _PINS_LOCK)},
         )
         catalog = [
             entry
@@ -1036,8 +1081,15 @@ class SourceMachine(MachineBase):
         before = self._apm_entries()
         self.slots[choice.slot] = choice
         self.converged = False
+        copied = self.bundle_targets.get(choice.slot)
+        if choice.form == "bundle":
+            self.bundle_targets[choice.slot] = self.model.targets
         step = self.command("install", args, (choice,), dry_run and choice.form not in _MCP_FORMS)
         if step.result.returncode != 0:
+            if choice.form == "bundle":
+                self.bundle_targets.pop(choice.slot)
+                if copied is not None:
+                    self.bundle_targets[choice.slot] = copied
             if had is None:
                 self.slots.pop(choice.slot)
             return
@@ -1187,8 +1239,9 @@ class SourceMachine(MachineBase):
     def _decided(self, verdict: str, choices: Collection[Choice]) -> ModelState:
         model = self.model
         for choice in choices:
-            kinds = KINDS.get(choice.package, choice.prims)
-            model = getattr(model, verdict)(choice.package, kinds)
+            name = _MODELED_BUNDLES.get(choice.package, choice.package)
+            kinds = KINDS.get(name, choice.prims)
+            model = getattr(model, verdict)(name, kinds)
         return model
 
     def reinstall(self, manifest: list[Choice], *, refresh: bool) -> None:
@@ -1302,11 +1355,23 @@ class SourceMachine(MachineBase):
         self.reconcile("install", False)
 
     def deploys_what_the_model_allows(self, step: Step) -> None:
-        """A resolving step deploys exactly the observable surfaces the model allows."""
+        """A resolving step deploys exactly the observable surfaces the model allows.
+
+        A local bundle's executables deploy only with an approval of that exact bundle
+        content and a bundle install; a manifest install never re-installs a bundle, so
+        the project gate (even off) does not deploy them.
+        """
+        model = self.declared_model()
+        bundled = set(_MODELED_BUNDLES.values())
         wanted = {
             "/".join(cell)
-            for cell in expected_deployed(self.declared_model(), _EXPECTED_KINDS)
+            for cell in expected_deployed(model, _EXPECTED_KINDS)
             if (cell[1], cell[2]) in _SURFACE_GLOBS
+            and not (
+                cell[0] in bundled
+                and cell[1] not in UNGATED_KINDS
+                and model.decisions.get((cell[0], cell[1])) != "allowed"
+            )
         }
         deployed = set(step.after.deployed)
         assert deployed == wanted, f"deployed {sorted(deployed)}, model {sorted(wanted)}"
@@ -1473,7 +1538,7 @@ class SourceMachine(MachineBase):
 
 
 _DURABLE = {
-    "home": (_PINS,),
+    "home": (_PINS, _PINS_LOCK),
     "project": (
         "apm.yml",
         "apm.lock.yaml",
@@ -1493,6 +1558,7 @@ def replay_spine(machine: SourceMachine) -> None:
     for choice in CHOICES:
         if choice.form in ("local-path", "native", *LOCAL_CATALOGS):
             machine.declare(choice, False)
+    machine.declare(_REGISTRY_KIT, False)
     for form in ("plugin-at-mkt", "bundle", "mcp-registry", "inline-mcp"):
         for choice in CHOICES:
             if choice.form == form:
@@ -1533,6 +1599,7 @@ def replay_spine(machine: SourceMachine) -> None:
         "p-native-claude-bin",
         "p-native-claude-exec",
         DOC_PACKAGE,
+        "p-kit",
     ):
         machine.uninstall(slot, True)
     for slot in _MCP_SERVERS:
