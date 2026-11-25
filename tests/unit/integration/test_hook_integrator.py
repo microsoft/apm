@@ -1455,12 +1455,18 @@ class TestCursorIntegration:
         assert stats["files_removed"] == 1
         assert not (temp_project / ".cursor" / "hooks").exists()
 
-    def test_sync_removes_empty_hooks_key_cursor(self, temp_project):
-        """A hooks.json left with only Cursor's version skeleton is deleted (#4852)."""
+    def test_sync_removes_empty_hooks_key_cursor(self, temp_project, tmp_path, monkeypatch):
+        """A hooks.json APM created, left with only Cursor's version skeleton, is deleted (#4852)."""
+        from apm_cli.integration.config_file_provenance import recorded_config_write
+
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
         hooks_path = temp_project / ".cursor" / "hooks.json"
-        hooks_path.write_text(
-            json.dumps({"version": 1, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
-        )
+        with recorded_config_write(hooks_path, manifest_root=temp_project):
+            hooks_path.write_text(
+                json.dumps(
+                    {"version": 1, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}}
+                )
+            )
 
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
@@ -1700,13 +1706,17 @@ class TestSyncIntegration:
         assert stats["files_removed"] == 0
         assert stats["errors"] == 0
 
-    def test_sync_removes_empty_hooks_key(self, temp_project):
-        """Empty hooks key goes; a settings.json left empty is deleted (#4852)."""
+    def test_sync_removes_empty_hooks_key(self, temp_project, tmp_path, monkeypatch):
+        """Empty hooks key goes; a settings.json APM created and left empty is deleted (#4852)."""
+        from apm_cli.integration.config_file_provenance import recorded_config_write
+
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
         claude_dir = temp_project / ".claude"
         claude_dir.mkdir()
         settings_path = claude_dir / "settings.json"
         settings = {"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}}
-        settings_path.write_text(json.dumps(settings))
+        with recorded_config_write(settings_path, manifest_root=temp_project):
+            settings_path.write_text(json.dumps(settings))
 
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)

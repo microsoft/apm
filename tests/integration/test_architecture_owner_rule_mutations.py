@@ -945,7 +945,9 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/write_seam.py",
-            "    record_before_write(destination, follow=True, expected=_file_hash(source))\n"
+            "    record_before_write(\n"
+            "        destination, follow=True, expected=_file_hash(source), size=_file_size(source)\n"
+            "    )\n"
             "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
             "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
             id="seam-writer-skips-record",
@@ -4663,6 +4665,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/verdict_inputs.py",
+        old="    if has_symlink_component(root, root / parent):\n",
+        new="    if os.path.islink(root / parent):\n",
+        intent="The no-op verdict judges a linked deployed parent itself, not through path_security (#5438).",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
         path="src/apm_cli/install/local_bundle_hook_cwd.py",
         old="        ensure_path_within(spelled, root)\n",
         new="        Path(os.path.realpath(spelled)).relative_to(root)\n",
@@ -5398,7 +5408,7 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/utils/git_env.py",
-        old="    return filesystem_containment(path, root) is not False",
+        old="    return root is not None and filesystem_containment(path, root) is not False",
         new="    return os.path.samefile(path, root) or filesystem_containment(path, root) is not False",
         intent="Helper exclusion computes containment itself beside the path_security owner.",
     ),
@@ -5573,14 +5583,14 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/integration/hook_ownership.py",
-            "return delete_emptied_config(json_path, root=root, empty=hook_file_emptied(data, defaults))",
-            "return hook_file_emptied(data, defaults) and not json_path.unlink()",
+            "if delete_emptied_config(json_path, root=root, empty=emptied, require_created=True):",
+            "if emptied and not json_path.unlink():",
             id="hook-cleanup-deletes-an-emptied-file-without-provenance-4867",
         ),
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/integration/hook_integrator.py",
-            "if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root):",
+            "if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root, stats):",
             "if modified and not write_seam.unlink(json_path):",
             id="hook-reconcile-deletes-an-emptied-file-without-provenance-4867",
         ),

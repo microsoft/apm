@@ -375,12 +375,8 @@ def _perform_init(
         if target_flag is not None:
             _option_targets_or_exit(target_flag, logger)
 
-        # Determine project directory and name
+        # Determine project name
         if project_name:
-            project_dir = Path(project_name)
-            project_dir.mkdir(exist_ok=True)
-            os.chdir(project_dir)
-            logger.progress(f"Created project directory: {project_name}", symbol="folder")
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
@@ -395,9 +391,8 @@ def _perform_init(
                         f'Using default project name "{final_project_name}" because '
                         f"derived name {derived_project_name!a} is invalid"
                     )
-        project_root = Path.cwd()
 
-        # Validate plugin name early
+        # Validate the plugin name before creating anything (#5404)
         if plugin and not _validate_plugin_name(final_project_name):
             logger.error(
                 f"Invalid plugin name '{final_project_name}'. "
@@ -405,6 +400,12 @@ def _perform_init(
                 "begin and end with a letter or number; and do not use '..' or '--'."
             )
             sys.exit(1)
+
+        if project_name:
+            Path(project_name).mkdir(exist_ok=True)
+            os.chdir(project_name)
+            logger.progress(f"Created project directory: {project_name}", symbol="folder")
+        project_root = Path.cwd()
 
         # Check for existing generated files
         apm_yml_exists = manifest_file(Path(".")).exists()

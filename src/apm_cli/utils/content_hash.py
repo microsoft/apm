@@ -339,6 +339,11 @@ def text_write_hash(
     return exact_hash_of_bytes(data.encode(encoding))
 
 
+def text_write_size(data: str, *, lf: bool = False) -> int:
+    """The byte length of the UTF-8 text :func:`text_write_hash` hashes (#5411)."""
+    return len((normalize_crlf_to_lf(data) if lf else data).encode("utf-8"))
+
+
 def canonical_digest(raw: bytes) -> str:
     """Return the hex digest :func:`compute_file_hash` records for *raw* bytes."""
     return hashlib.sha256(_canonical_hash_bytes(raw)).hexdigest()

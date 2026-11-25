@@ -1540,3 +1540,248 @@ def test_terminal_styling_never_hides_a_deferral_warning(
 
 def _assert_replays(expected: bool) -> None:
     assert verdict_record.replay(["install"]) is expected
+
+
+# #5434 (RT1, W3d): the full run decides Claude rules from carriers -- the root
+# AGENTS.md / CLAUDE.md, the compile record, and a directory's AGENTS.md for a
+# routable instruction. The replay never re-decides them: it declines while a root
+# carrier or record may stand in (compiled_agents_md_may_carry's owner), a run that
+# decided routing records nothing, and the engine declines for a routable instruction.
+_CARRIER = "## Global Instructions\n\nAlways run the linter.\n"
+
+
+def _nested_carrier(project: Path) -> None:
+    nested = project / "src" / "test"
+    nested.mkdir(parents=True, exist_ok=True)
+    (nested / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (nested / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["AGENTS.md", "CLAUDE.md"])
+def test_a_root_carrier_appearing_after_the_record_misses(project: Path, capsys, name: str) -> None:
+    _record()
+    (project / name).write_text(_CARRIER, encoding="utf-8")
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_a_compile_record_appearing_after_the_record_misses(project: Path, capsys) -> None:
+    from apm_cli.core.agents_md_compile_record import write_record
+
+    _record()
+    write_record(project, {"AGENTS.md": {"sha256": "sha256:0", "instructions": []}})
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_a_root_carrier_removed_after_the_record_misses(project: Path, capsys) -> None:
+    """A run with a root carrier writes no replayable record, so removing it cannot hit."""
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    _record()
+    assert not verdict_record._record_path(project).exists()
+    (project / "AGENTS.md").unlink()
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_control_with_no_carrier_the_record_still_replays(project: Path, capsys) -> None:
+    _record()
+    capsys.readouterr()
+
+    _assert_replays(True)
+
+
+def _decide_claude_routing(project: Path, apply_to: str) -> None:
+    """The instruction integrator's Claude routing step for one instruction."""
+    from types import SimpleNamespace
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    source = project / "apm_modules" / "o" / "p" / ".apm" / "instructions" / "t.instructions.md"
+    content = f"---\napplyTo: '{apply_to}'\n---\nRun the tests.\n"
+    prepared = {source: SimpleNamespace(content=content, body="Run the tests.\n")}
+    InstructionIntegrator()._claude_rule_sources(
+        KNOWN_TARGETS["claude"],
+        [source],
+        prepared,
+        SimpleNamespace(),
+        project,
+        InstallScope.PROJECT,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("apply_to", "replays"),
+    [("**", False), ("src/test/**", False), ("**/*.py", True)],
+)
+def test_a_run_that_decided_claude_routing_records_nothing(
+    project: Path, capsys, apply_to: str, replays: bool
+) -> None:
+    """A routable instruction (always-on or one literal directory, even while that
+    directory is absent) means the run decided routing: nothing is recorded, so a
+    carrier created later (src/test/AGENTS.md importing CLAUDE.md) cannot be skipped.
+    A path-scoped instruction never routes: its no-op still records and replays."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        _decide_claude_routing(project, apply_to)
+        verdict_record.note_verified_noop()
+    _nested_carrier(project)
+    capsys.readouterr()
+
+    _assert_replays(replays)
+
+
+def _ship_instruction(project: Path, apply_to: str) -> None:
+    instructions = project / "apm_modules" / "o" / "p" / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "t.instructions.md").write_text(
+        f"---\napplyTo: '{apply_to}'\n---\nRun the tests.\n", encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("apply_to", "carrier", "declines"),
+    [
+        ("src/test/**", True, True),
+        ("src/test/**", False, True),  # the directory does not exist yet: still routable
+        ("**", False, True),
+        ("**/*.py", True, False),
+        (None, True, False),  # no instruction: a nested carrier decides nothing
+        ("missing-copy", False, True),  # a copy the engine would restore: unknown counts
+    ],
+)
+def test_the_engine_fast_path_declines_for_a_routable_instruction(
+    project: Path, apply_to: str | None, carrier: bool, declines: bool
+) -> None:
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install import diff_apply
+
+    if apply_to == "missing-copy":
+        shutil.rmtree(project / "apm_modules" / "o" / "p")
+    elif apply_to is not None:
+        _ship_instruction(project, apply_to)
+    if carrier:
+        _nested_carrier(project)
+    lock = LockFile.read(project / "apm.lock.yaml")
+    claude = [SimpleNamespace(compile_family="claude")]
+
+    if declines:
+        with pytest.raises(diff_apply.Decline):
+            diff_apply._refuse_claude_carried_rules(project, claude, lock)
+    else:
+        diff_apply._refuse_claude_carried_rules(project, claude, lock)
+    # Another target family never declines here.
+    diff_apply._refuse_claude_carried_rules(project, [SimpleNamespace(compile_family="x")], lock)
+
+
+def test_the_replay_and_the_engine_share_one_carrier_owner(project: Path, capsys) -> None:
+    """Every root carrier the engine's predicate names also stops the record and the replay."""
+    from apm_cli.compilation.claude_agents_md import compiled_agents_md_may_carry
+    from apm_cli.core.agents_md_compile_record import ROOT_CARRIERS
+
+    for name in ROOT_CARRIERS:
+        (project / name).write_text(_CARRIER, encoding="utf-8")
+        assert compiled_agents_md_may_carry(project)
+        _record()
+        capsys.readouterr()
+        _assert_replays(False)
+        (project / name).unlink()
+    assert not compiled_agents_md_may_carry(project)
+    _record()
+    capsys.readouterr()
+    _assert_replays(True)
+
+
+def _link_dir(path: Path, target: Path) -> None:
+    """A symlink to *target* (a junction on Windows, which needs no privilege)."""
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(path))
+    else:
+        path.symlink_to(target, target_is_directory=True)
+
+
+def _swap_for_link(project: Path, rel: str) -> None:
+    """Replace the governed directory *rel* with a link to an identical copy outside."""
+    outside = project.parent / "outside" / rel
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(project / rel, outside, symlinks=True)
+    shutil.rmtree(project / rel)
+    _link_dir(project / rel, outside)
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("rel", [".github", ".github/prompts"], ids=["root", "subdir"])
+def test_a_governed_directory_swapped_for_a_link_misses_the_replay(
+    project: Path, capsys, rel: str
+) -> None:
+    """The engine never deploys through a link (diff_apply._within), so a hit must not (#5438)."""
+    _record()
+    _swap_for_link(project, rel)
+    capsys.readouterr()
+
+    hit = verdict_record.replay(["install"])
+
+    assert (hit, capsys.readouterr().out) == (False, "")
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("rel", [".github", ".github/prompts"], ids=["root", "subdir"])
+def test_a_governed_directory_swapped_for_a_link_misses_the_attested_hit(
+    project: Path, rel: str
+) -> None:
+    _attest(project)
+    assert _attested_hit() is True, "positive control: run 2 matches the attestation"
+
+    _swap_for_link(project, rel)
+
+    _assert_proves_itself()
+
+
+@pytest.mark.windows_compat
+def test_the_engine_fast_path_refuses_a_linked_target_root(project: Path) -> None:
+    """Control: the owner the record must agree with declines the same state."""
+    from apm_cli.install.diff_apply import Decline, _within
+
+    _swap_for_link(project, ".github")
+
+    with pytest.raises(Decline, match="symlink in a deployed path"):
+        _within(project, _REL)
+
+
+@pytest.mark.windows_compat
+def test_a_linked_target_root_is_never_recorded(project: Path) -> None:
+    _swap_for_link(project, ".github")
+
+    _record()
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
+def test_a_nested_directory_link_present_before_recording_is_never_recorded(
+    project: Path, dangling: bool
+) -> None:
+    """A link listed among a governed directory's files, with no deployed file
+    beneath it, still names content the record cannot key (#5438)."""
+    outside = project.parent / "shared"
+    outside.mkdir()
+    (outside / "notes.md").write_text("shared\n")
+    _link_dir(project / ".github" / "shared", outside)
+    if dangling:
+        shutil.rmtree(outside)
+
+    _record()
+
+    assert not (_home(project) / "verdicts").exists()

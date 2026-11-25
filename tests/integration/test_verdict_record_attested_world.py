@@ -127,6 +127,29 @@ def test_a_valid_attestation_never_skips_the_claude_carried_rules_refusal(world_
     _assert_full_pipeline_ran(second)
 
 
+@pytest.mark.parametrize("world_install", ["tree-10-claude"], indirect=True)
+def test_a_root_agents_md_after_a_replay_record_misses_and_the_full_run_decides(
+    world_install,
+) -> None:
+    """#5434: the replayed no-op was recorded with no carrier; a root AGENTS.md that
+    appears later can decide Claude rules, so the next install is not a replay and
+    prints what the full pipeline prints for that state."""
+    install, project, _world = world_install
+    _assert_attested(install())
+    _assert_attested_hit(install())
+    (project / "AGENTS.md").write_text("# Project notes\n", encoding="utf-8")
+    before = _tree_bytes(project)
+
+    after, full = install(), install(fast="0")
+
+    assert after[0] == 0, after[1] + after[2]
+    assert "hit" not in _traces(after[2]), after[2]
+    assert "attested hit" not in _traces(after[2]), after[2]
+    assert full[0] == 0 and not _traces(full[2]), full[1] + full[2]
+    assert _normalized(after[1]) == _normalized(full[1])
+    assert _tree_bytes(project) == before
+
+
 def _assert_full_pipeline_ran(result: tuple[int, str, str]) -> None:
     """The record matched ("attested hit" is the check, not the outcome), yet the fast
     path declined: the full pipeline re-attested and no attested commit recorded output."""

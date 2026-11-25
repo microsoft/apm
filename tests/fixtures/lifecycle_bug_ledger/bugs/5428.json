@@ -1,0 +1,14 @@
+{
+  "issue": 5428,
+  "fixed_in": "Unreleased",
+  "summary": "The install fast path migrated a legacy $APM_HOME/approvals.yml into config.json (and deleted it) during its speculative decision, even under APM_INSTALL_FAST_PATH=decide; the fast path now reads legacy consent without migrating it and the full install keeps the migration.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_fast_path_consent.py::test_a_fast_path_decision_never_migrates_a_legacy_approvals_file"
+  ]
+}

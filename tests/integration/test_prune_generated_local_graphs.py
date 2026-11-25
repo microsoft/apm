@@ -219,7 +219,7 @@ class _Exempt:
     """Rows the convergence oracle skips, each for a stated reason."""
 
     rows: frozenset[str]  # named fail-closed keeps; a hand-dropped root (#3668)
-    rekeyed: frozenset[str]  # promoted or alias-spelled survivors: install re-keys (#5238)
+    rekeyed: frozenset[str]  # promoted or alias-spelled survivors: install re-keys (#5435)
     # Rows beneath either: install moves their parent, depth and dev status
     # (or drops them) when it drops or re-keys the row above.
     beneath: frozenset[str]
@@ -251,9 +251,9 @@ def _recorded_under(rows: dict, exempt: _Exempt) -> set[str]:
 
 
 def _rekey_verdict(seed: int, settled: dict, after: dict, names: set[str]) -> str:
-    """The companion's verdict on the #5238 rows *names*.
+    """The companion's verdict on the #5435 rows *names*.
 
-    Only a changed lock identity is the #5238 re-key: a new repo_url, a move
+    Only a changed lock identity is the #5435 re-key: a new repo_url, a move
     between a direct and a transitive record (a promotion), or a row recorded
     under such a row. Any other change on these rows is reported unsigned.
     """
@@ -279,7 +279,7 @@ def _converges(seed: int, project: Path, exempt: _Exempt, *, rekeyed: bool, tall
 
     Every row but the exempt ones is compared; the edited manifest's new
     content hash is install's to record, not prune's. With *rekeyed* only the
-    #5238 rows are compared, each failure naming the re-key. *tally* counts
+    #5435 rows are compared, each failure naming the re-key. *tally* counts
     the rows seen and the rows compared; a graph that compared none is
     "vacuous", never "converged".
     """
@@ -315,7 +315,7 @@ def _check_seed(
 
     The verdict is "converged" when prune kept every declared package and a
     fresh resolve records the same graph for every row the oracle does not
-    exempt (with *rekeyed*: for the #5238 rows only) and compared at least one,
+    exempt (with *rekeyed*: for the #5435 rows only) and compared at least one,
     "vacuous" when it compared none, "unchanged" when prune left the lock
     as it was, "skipped" when install refused the graph, else the failure
     with its seed first. *tally* accumulates the rows seen and compared.
@@ -376,7 +376,7 @@ def _check_seed(
         return verdict, removed
     # A fail-closed keep is named; a hand-dropped root another package still
     # declares stays direct until install records it (#3668); a promoted or
-    # alias-spelled survivor is re-keyed only by install (#5238, checked by the
+    # alias-spelled survivor is re-keyed only by install (#5435, checked by the
     # companion cell below). Every other row is compared on every field.
     rows = frozenset(named | ({dropped} if dropped in needed else set()))
     rekeyed_rows = frozenset(({promoted} if promoted else set()) | (graph.aliased & needed))
@@ -445,7 +445,7 @@ def test_prune_never_deletes_a_declared_package_on_generated_graphs(
 
 
 _REKEYED = KnownFailure(
-    "#5238",
+    "#5435",
     "prune keeps a promoted or alias-spelled survivor's row that install re-keys",
     r"install re-keyed",
 )
@@ -456,7 +456,7 @@ _REKEYED = KnownFailure(
 def test_prune_converges_on_graphs_install_rekeys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The rows the main cell exempts as #5238's: a fresh resolve keeps prune's record.
+    """The rows the main cell exempts as #5435's: a fresh resolve keeps prune's record.
 
     Any other failure is reported without the signature, so it fails the cell.
     """

@@ -363,6 +363,34 @@ def _reflink_copy_file(src: str, dst: str, *, follow_symlinks: bool = True) -> s
     return shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
 
 
+class _LinkCopyRelease:
+    """``copytree(symlinks=True)`` ``ignore`` hook: link-free proofs under *dst* never outlive a link.
+
+    Before copytree writes a directory listing that holds a link, the hook
+    releases *dst* (``release_held`` drops the proofs there), so a resolve in
+    flight cannot publish a proof that misses the link; :meth:`settle` releases
+    once more after the copy, so no proof taken while links were being written
+    survives them (R4). A tree without links pays one ``scandir`` per directory
+    and releases nothing.
+    """
+
+    def __init__(self, dst: str, ignore: Any) -> None:
+        self._dst = dst
+        self._ignore = ignore
+        self.saw_link = False
+
+    def __call__(self, directory: str, names: list[str]) -> Any:
+        with os.scandir(directory) as entries:
+            if any(entry.is_symlink() for entry in entries):
+                self.saw_link = True
+                release_held(self._dst)
+        return self._ignore(directory, names) if self._ignore is not None else set()
+
+    def settle(self) -> None:
+        if self.saw_link:
+            release_held(self._dst)
+
+
 def robust_copytree(
     src: Path | str,
     dst: Path | str,
@@ -400,13 +428,14 @@ def robust_copytree(
     Path to the destination directory.
     """
     src_s, dst_s = str(src), str(dst)
+    links = _LinkCopyRelease(dst_s, ignore) if symlinks else None
 
     def _do_copytree() -> str:
         return shutil.copytree(
             src_s,
             dst_s,
             symlinks=symlinks,
-            ignore=ignore,
+            ignore=links if links is not None else ignore,
             copy_function=_reflink_copy_file,
             dirs_exist_ok=dirs_exist_ok,
         )
@@ -424,6 +453,8 @@ def robust_copytree(
         max_retries=max_retries,
         before_retry=_cleanup_partial,
     )
+    if links is not None:
+        links.settle()
     return Path(result)
 
 

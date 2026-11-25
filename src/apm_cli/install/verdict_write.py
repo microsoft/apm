@@ -86,6 +86,11 @@ def _record_after(
     if attested:
         _write_at_entry(entry, argv, "", "", deployed, kind=ATTESTED, provenance=ATTESTED)
         return
+    from apm_cli.core.agents_md_compile_record import may_carry
+
+    if may_carry(Path.cwd()):
+        vr._trace("no record (a compiled AGENTS.md may carry a Claude rule)")  # #5434
+        return
     provenance = ATTESTED if ATTESTED in vr._VERIFIED_NOOP else PROVEN
     out_text, err_text = "".join(out.parts), "".join(err.parts)
     _write_at_entry(entry, argv, out_text, err_text, deployed, provenance=provenance)
