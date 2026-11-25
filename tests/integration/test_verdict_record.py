@@ -1574,3 +1574,32 @@ def test_rt1_control_the_record_hits_with_a_carrier_unchanged(project: Path, cap
     capsys.readouterr()
 
     assert verdict_record.replay(["install"]) is True
+
+
+def test_rt1_a_nested_directory_carrier_appearing_after_the_record_misses(
+    project: Path, capsys
+) -> None:
+    # A directory instruction (applyTo: "src/test/**") is carried by src/test/AGENTS.md
+    # when src/test/CLAUDE.md imports it (CompiledCoverage._destination_carrier).
+    _record()
+    nested = project / "src" / "test"
+    nested.mkdir(parents=True)
+    (nested / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (nested / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+
+
+def test_rt1_the_engine_fast_path_declines_on_a_nested_directory_carrier(project: Path) -> None:
+    from types import SimpleNamespace
+
+    from apm_cli.install import diff_apply
+
+    nested = project / "src" / "test"
+    nested.mkdir(parents=True)
+    (nested / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (nested / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+
+    with pytest.raises(diff_apply.Decline):
+        diff_apply._refuse_claude_carried_rules(project, [SimpleNamespace(compile_family="claude")])
