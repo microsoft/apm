@@ -116,3 +116,40 @@ def test_an_intermediate_symlink_followed_by_dotdot_lands_where_the_filesystem_d
     (sub / "link").symlink_to("../other/inner")
 
     assert resolve_cli_packages_for_project_root(("./link/../pkg",), sub, root) == ("./other/pkg",)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize("spelling", ["./sel.prompt.md/.", "./././sel.prompt.md"])
+def test_a_dot_component_never_hides_a_selected_symlink(tmp_path: Path, spelling: str) -> None:
+    """``.`` components are dropped before the final one is kept, so the link stays named."""
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root = tmp_path / "project"
+    sub = root / "sub"
+    sub.mkdir(parents=True)
+    (root / "actual.prompt.md").write_text("# actual\n", encoding="utf-8")
+    (sub / "sel.prompt.md").symlink_to("../actual.prompt.md")
+
+    assert resolve_cli_packages_for_project_root((spelling,), sub, root) == ("./sub/sel.prompt.md",)
+
+
+def test_a_package_on_another_windows_drive_keeps_its_absolute_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With no relative path between drives, discovery keeps going (#4545)."""
+    import os
+
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root = tmp_path / "project"
+    sub = root / "sub"
+    sub.mkdir(parents=True)
+
+    def other_drive(path, start=None):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+    monkeypatch.setattr(os.path, "relpath", other_drive)
+
+    assert resolve_cli_packages_for_project_root(("./pkg",), sub, root) == (
+        (sub.resolve() / "pkg").as_posix(),
+    )
