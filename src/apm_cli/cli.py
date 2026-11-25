@@ -749,6 +749,17 @@ def _signals_blocked(signums: tuple[int, ...]):
         signal.pthread_sigmask(signal.SIG_SETMASK, previous)
 
 
+def _restore_handlers(items: list[tuple[int, object]]) -> None:
+    """Restore every handler even if an interrupt (delivered on another thread) raises midway."""
+    if not items:
+        return
+    (signum, handler), rest = items[0], items[1:]
+    try:
+        signal.signal(signum, handler)
+    finally:
+        _restore_handlers(rest)
+
+
 @contextlib.contextmanager
 def interrupts_deferred():
     """Hold Ctrl+C and SIGTERM across a spawn whose handle must exist before an interrupt.
@@ -776,20 +787,22 @@ def interrupts_deferred():
             signal.raise_signal(num)
         pending.append(num)
 
-    with _signals_blocked(signums):
-        for signum in signums:
-            handler = signal.getsignal(signum)
-            if callable(handler):
-                saved[signum] = handler
-                signal.signal(signum, _defer)
     try:
-        yield
-    finally:
         with _signals_blocked(signums):
-            for signum, handler in saved.items():
-                signal.signal(signum, handler)
-        if pending:
-            signal.raise_signal(pending[0])
+            for signum in signums:
+                handler = signal.getsignal(signum)
+                if callable(handler):
+                    saved[signum] = handler
+                    signal.signal(signum, _defer)
+        yield
+    except BaseException:
+        with _signals_blocked(signums):
+            _restore_handlers(list(saved.items()))
+        raise
+    with _signals_blocked(signums):
+        _restore_handlers(list(saved.items()))
+    if pending:
+        signal.raise_signal(pending[0])
 
 
 def main():

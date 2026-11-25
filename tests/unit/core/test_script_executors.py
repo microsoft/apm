@@ -360,6 +360,37 @@ class TestCommandExecutor:
         )
         assert result.returncode == returncode, (result.returncode, result.stderr)
 
+    def test_an_interrupt_during_handler_restore_still_restores_every_handler(self) -> None:
+        """A KeyboardInterrupt raised midway through restoring leaves no handler on the deferral."""
+        from apm_cli import cli
+
+        saved = {num: signal.getsignal(num) for num in (signal.SIGINT, signal.SIGTERM)}
+        signal.signal(signal.SIGTERM, cli._interrupt_on_sigterm)
+        real_signal = signal.signal
+        raised: list[int] = []
+
+        def _interrupt_first_restore(num, handler):
+            previous = real_signal(num, handler)
+            if getattr(handler, "__name__", "") != "_defer" and not raised:
+                raised.append(num)
+                raise KeyboardInterrupt
+            return previous
+
+        try:
+            with (
+                patch.object(signal, "signal", side_effect=_interrupt_first_restore),
+                pytest.raises(KeyboardInterrupt),
+                cli.interrupts_deferred(),
+            ):
+                pass
+            assert raised, "restore never ran"
+            assert signal.getsignal(signal.SIGTERM) is cli._interrupt_on_sigterm
+            assert signal.getsignal(signal.SIGINT) is saved[signal.SIGINT]
+        finally:
+            for num, handler in saved.items():
+                if handler is not None:
+                    signal.signal(num, handler)
+
 
 # -- _expand_env_vars ------------------------------------------------------
 
