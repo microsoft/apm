@@ -45,13 +45,8 @@ def render(g, srcs):
         return ""
 
     def frozen_verdict():
-        for r in ROWS:
-            if r["src"] == "final" and r["journey"] == "install-frozen-noop" and r["os"] == "linux" \
-                    and r["fixture"] == "tree-10" and r.get("new_wall") is not None:
-                w = r["new_wall"]
-                return (f" (tree-10 wall p50 {w:.2f} s: " + ("<= 1 s, closes #4770)" if w <= 1.0
-                        else "> 1 s, #4770 stays open)"))
-        return ""
+        return ("; the first --frozen after an install misses the fast path (argv-keyed attestation: every sample "
+                "traces 'attested miss: argv'), fix in v0.40")
 
     def rng(j):
         v = sorted(1 / r["ratio"] for r in ROWS if r["src"] == "final" and r["journey"] == j and r["tls"] == "default")
@@ -72,6 +67,10 @@ def render(g, srcs):
       "locked engine #4893) vs main `c0296fab`, 15 pairs, install only, **Windows on the OpenSSL TLS backend**. "
       + ("Charts 1-2 use (b) at tree-50 because all 3 OS are complete there; charts 3-5 use (a) at tree-10."
          if srcs["install"] != "final" else "All charts use (a); (b) appears only in the table (*i*).")) if any(r["src"] == "interim" for r in ROWS) else ""))
+    a("")
+    a("**Runner classes.** Ratios are the claim. Cold t50 cells on Linux and Windows drew no EPYC 9V74 runner "
+      "(5 pairs each on EPYC 7763, 9V45 and Xeon 8573C), so their seconds are pooled medians across classes."
+      if FAT else "")
     a("")
     a("**How to read.** CPU seconds incl. child processes, p50 of interleaved before/now pairs on the same CI runner "
       "(3 runners per OS, modeled RTT 30 ms). **Speedup = 1 / paired p50 ratio; the ratio is the claim.** Seconds "
@@ -94,7 +93,8 @@ def render(g, srcs):
       "of today at its previous head; the rerun at its final head is running)")
       + ". No-op installs, first re-install / repeat / --frozen no-op. First unchanged re-install (#2, footnote 1): " + ", ".join(f"{OSN[o]} {fin('install-noop', o, 'tree-50')}" for o in OSES)
       + "; repeat no-op (#3+): " + ", ".join(f"{OSN[o]} {fin('install-noop-replay', o, 'tree-50')}" for o in OSES)
-      + ("; --frozen no-op: Linux " + fin("install-frozen-noop", "linux", "tree-50") + frozen_verdict()
+      + ("; --frozen no-op: Linux " + fin("install-frozen-noop", "linux", "tree-10") + " (tree-10) / "
+         + fin("install-frozen-noop", "linux", "tree-50") + " (tree-50)" + frozen_verdict()
          if any(r["journey"] == "install-frozen-noop" for r in ROWS) else "")
       + (". **Windows default config now engages the in-process fetch** (footnote 2; #5376, merged: default cold 0.449 / 0.447, "
          "warm 0.868 of the main before it" + (f"; {WC}" if WC else "") + "), so Windows numbers above are the default setup. " if IN(5376) else

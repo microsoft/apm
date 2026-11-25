@@ -4,7 +4,7 @@
  "new_label": "the fat train head (#5406)",
  "harness": "danielmeppiel-perf-ceo-report",
  "reference_cpu_class": "EPYC 9V74",
- "collected": "2026-11-25T05:43",
+ "collected": "2026-11-25T05:44",
  "rows": [
   {
    "command": "install-cold",
@@ -41,11 +41,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 5,
-    "base_s": 4.1318,
-    "new_s": 1.9878
+    "n": 15,
+    "base_s": 3.2685,
+    "new_s": 1.5786
    },
    "requests": "41->21",
    "spawns": "123->14",
@@ -242,11 +242,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 4.9076,
-    "new_s": 3.8155
+    "n": 6,
+    "base_s": 4.27905,
+    "new_s": 3.0903
    },
    "requests": "41->51",
    "spawns": "134->47",
@@ -288,11 +288,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 4.19265,
-    "new_s": 3.00005
+    "n": 6,
+    "base_s": 4.17285,
+    "new_s": 2.99065
    },
    "requests": "41->51",
    "spawns": "132->43",
@@ -334,11 +334,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 2.8360000000000003,
-    "new_s": 0.87555
+    "n": 6,
+    "base_s": 2.83155,
+    "new_s": 0.87165
    },
    "requests": "0->0",
    "spawns": "8->2",
@@ -382,11 +382,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 3.47505,
-    "new_s": 2.4928999999999997
+    "n": 6,
+    "base_s": 3.46475,
+    "new_s": 2.4825
    },
    "requests": "11->21",
    "spawns": "34->35",
@@ -433,11 +433,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 5,
-    "base_s": 18.2664,
-    "new_s": 7.0137
+    "n": 15,
+    "base_s": 14.3346,
+    "new_s": 5.2248
    },
    "requests": "201->101",
    "spawns": "567->17",
@@ -634,11 +634,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 18.81215,
-    "new_s": 12.2229
+    "n": 6,
+    "base_s": 18.58345,
+    "new_s": 12.11955
    },
    "requests": "201->251",
    "spawns": "618->170",
@@ -680,11 +680,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 18.7462,
-    "new_s": 12.84645
+    "n": 6,
+    "base_s": 18.5994,
+    "new_s": 12.7447
    },
    "requests": "201->251",
    "spawns": "616->167",
@@ -726,11 +726,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 11.13085,
-    "new_s": 1.6086
+    "n": 6,
+    "base_s": 11.122800000000002,
+    "new_s": 1.6029
    },
    "requests": "0->0",
    "spawns": "8->2",
@@ -774,11 +774,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 4,
-    "base_s": 14.568249999999999,
-    "new_s": 9.93425
+    "n": 6,
+    "base_s": 14.54165,
+    "new_s": 9.7838
    },
    "requests": "51->101",
    "spawns": "118->116",
@@ -815,7 +815,7 @@
     }
    },
    "headline": {
-    "cpu_class": "Apple M1",
+    "cpu_class": "pooled",
     "reference_class": false,
     "n": 15,
     "base_s": 4.4969,
@@ -856,7 +856,7 @@
     }
    },
    "headline": {
-    "cpu_class": "Apple M1",
+    "cpu_class": "pooled",
     "reference_class": false,
     "n": 6,
     "base_s": 4.6314,
@@ -897,7 +897,7 @@
     }
    },
    "headline": {
-    "cpu_class": "Apple M1",
+    "cpu_class": "pooled",
     "reference_class": false,
     "n": 6,
     "base_s": 2.4298,
@@ -938,7 +938,7 @@
     }
    },
    "headline": {
-    "cpu_class": "Apple M1",
+    "cpu_class": "pooled",
     "reference_class": false,
     "n": 15,
     "base_s": 19.4776,
@@ -979,7 +979,7 @@
     }
    },
    "headline": {
-    "cpu_class": "Apple M1",
+    "cpu_class": "pooled",
     "reference_class": false,
     "n": 6,
     "base_s": 18.157400000000003,
@@ -1020,7 +1020,7 @@
     }
    },
    "headline": {
-    "cpu_class": "Apple M1",
+    "cpu_class": "pooled",
     "reference_class": false,
     "n": 6,
     "base_s": 11.8782,
@@ -1138,6 +1138,202 @@
    "conclusion": "success"
   },
   {
+   "command": "install-frozen",
+   "journey": "install-frozen",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.4673107692307692,
+   "band": [
+    0.45471670772351835,
+    0.4918775243525778
+   ],
+   "speedup": 2.1399036055729677,
+   "base_cpu_s": 7.3281,
+   "new_cpu_s": 3.5156,
+   "base_wall_s": 7.4755,
+   "new_wall_s": 4.7393,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 7.1875,
+     "new_s": 3.33595
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 8.125,
+     "new_s": 3.7812
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 7.1875,
+    "new_s": 3.33595
+   },
+   "requests": "31->21",
+   "spawns": "129->11",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.32293333333333335,
+   "band": [
+    0.3128097410482786,
+    0.3467228404193735
+   ],
+   "speedup": 3.096614368290669,
+   "base_cpu_s": 3.0469,
+   "new_cpu_s": 0.9688,
+   "base_wall_s": 3.0884,
+   "new_wall_s": 0.9976,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 2.97655,
+     "new_s": 0.9375
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 3.25,
+     "new_s": 1.1094
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 2.97655,
+    "new_s": 0.9375
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop-replay",
+   "journey": "install-noop-replay",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.10256326101939676,
+   "band": [
+    0.094223294464549,
+    0.11342042755344417
+   ],
+   "speedup": 9.75008,
+   "base_cpu_s": 3.0781,
+   "new_cpu_s": 0.3125,
+   "base_wall_s": 3.067,
+   "new_wall_s": 0.3272,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 3.0312,
+     "new_s": 0.30469999999999997
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 3.1875,
+     "new_s": 0.375
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 3.0312,
+    "new_s": 0.30469999999999997
+   },
+   "requests": "0->0",
+   "spawns": "8->0",
+   "replay_new": [
+    "hit"
+   ],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final; replay hit 15/15",
+   "replay_hit": "15/15",
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547697649",
+   "pairs": 15,
+   "paired_p50": 0.8351149240721201,
+   "band": [
+    0.8214349206349206,
+    0.8541777777777777
+   ],
+   "speedup": 1.19743998242048,
+   "base_cpu_s": 4.0312,
+   "new_cpu_s": 3.3125,
+   "base_wall_s": 4.3808,
+   "new_wall_s": 3.6241,
+   "by_class": {
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 3.9219,
+     "new_s": 3.21095
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 4.3594,
+     "new_s": 3.7031
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 3.9219,
+    "new_s": 3.21095
+   },
+   "requests": "11->11",
+   "spawns": "23->22",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
    "command": "install-warm-auth",
    "journey": "install-warm-auth",
    "os": "windows",
@@ -1225,11 +1421,11 @@
     }
    },
    "headline": {
-    "cpu_class": "EPYC 7763",
+    "cpu_class": "pooled",
     "reference_class": false,
-    "n": 5,
-    "base_s": 43.7344,
-    "new_s": 15.5312
+    "n": 15,
+    "base_s": 35.0156,
+    "new_s": 11.5625
    },
    "requests": "201->101",
    "spawns": "567->18",
@@ -1356,7 +1552,6 @@
   "macos tree-10,tree-50 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581221-f62001 in_progress",
   "macos tree-10,tree-50 update,uninstall,compile,audit,audit-ci,pack,install-bundle,outdated,prune,boot-version,boot-help perf-bench/42878803-1795581237-2af390 in_progress",
   "macos tree-10-ghe,tree-50-ghe install-cold,install-warm,install-noop,install-cold-auth perf-bench/42878803-1795581246-31261f in_progress",
-  "windows tree-10 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581252-262197 in_progress",
   "windows tree-50 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581262-079d50 in_progress",
   "windows tree-10,tree-50 update,uninstall,compile,audit,audit-ci,pack,install-bundle,outdated,prune,boot-version,boot-help perf-bench/42878803-1795581280-2c64c9 in_progress",
   "windows tree-10-ghe,tree-50-ghe install-cold,install-warm,install-noop,install-cold-auth perf-bench/42878803-1795581292-5b05e8 in_progress"

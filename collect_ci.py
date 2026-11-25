@@ -127,7 +127,10 @@ def row_from_pairs(fx, j, pairs, os_, rid):
         "base_wall_s": _med([p["base"].get("wall") for p in full]),
         "new_wall_s": _med([p["new"].get("wall") for p in full]),
         "by_class": by_class,
-        "headline": {"cpu_class": ref, "reference_class": ref == REFERENCE_CLASS, **by_class[ref]},
+        "headline": ({"cpu_class": ref, "reference_class": True, **by_class[ref]} if ref == REFERENCE_CLASS else
+                     {"cpu_class": "pooled", "reference_class": False, "n": len(full),
+                      "base_s": statistics.median(p["base"]["cpu"] for p in full),
+                      "new_s": statistics.median(p["new"]["cpu"] for p in full)}),
         "requests": f"{first['base']['req']}->{first['new']['req']}",
         "spawns": f"{first['base']['spawns']}->{first['new']['spawns']}",
         "replay_new": sorted({p["new"]["replay"] for p in full if p["new"].get("replay")}),
