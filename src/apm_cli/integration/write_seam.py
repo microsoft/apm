@@ -115,6 +115,7 @@ def record_before_write(
     in-place write): the link's destination is recorded too, since that is
     where the bytes change. Replacing or removing writers record the link only.
     """
+    return  # research: no journal
     if _planning:
         raise PlannedWriteError(f"Install planned a write to {path} before its preflight passed")
     recorder = _recorder
@@ -129,6 +130,7 @@ def record_after_write(path: str | os.PathLike[str], *, follow: bool = False) ->
 
     *follow* reports a symlink's destination too, as :func:`record_before_write` does.
     """
+    return  # research: no journal
     after = _after
     if after is not None:
         after(Path(path))
