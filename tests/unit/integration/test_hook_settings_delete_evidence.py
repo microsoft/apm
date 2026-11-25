@@ -67,3 +67,20 @@ def test_an_emptied_settings_file_is_deleted_only_when_apm_created_it(
         assert json.loads(settings.read_text(encoding="utf-8")) == {}
         assert len(stats["kept_paths"]) == 1
         assert stats["kept_paths"][0].endswith("settings.json")
+
+
+def test_uninstall_warns_only_for_a_kept_file_that_is_still_hook_free(tmp_path: Path) -> None:
+    from apm_cli.commands.uninstall.engine import _warn_emptied_hook_files_kept
+
+    bare = tmp_path / "bare.json"
+    bare.write_text("{}", encoding="utf-8")
+    rebuilt = tmp_path / "rebuilt.json"
+    rebuilt.write_text(json.dumps({"hooks": {"Stop": [{"hooks": []}]}}), encoding="utf-8")
+    messages: list[str] = []
+    logger = type("L", (), {"warning": staticmethod(messages.append)})
+
+    _warn_emptied_hook_files_kept(logger, [bare.as_posix(), rebuilt.as_posix()])
+
+    assert len(messages) == 1
+    assert messages[0].startswith(f"Kept {bare.as_posix()}:")
+    assert messages[0].isascii()

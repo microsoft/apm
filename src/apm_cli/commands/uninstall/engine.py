@@ -2,6 +2,7 @@
 
 import builtins
 import contextlib
+import json
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -16,6 +17,7 @@ from apm_cli.core.remediation import (
     MARKETPLACE_REF_UNRESOLVED,
     MCP_DEPENDENCY_DECLARED,
     REGISTRY_CANONICAL_UNRECORDED,
+    kept_note,
 )
 
 from ...bundle.local_bundle import looks_like_local_bundle
@@ -1634,11 +1636,6 @@ def _sync_integrations_after_uninstall(
             "containment validation. Inspect or repair symlinked parents before "
             "removing anything."
         )
-    for kept_path in sorted(result.get("kept_paths", [])):
-        logger.warning(
-            f"Kept {kept_path}: APM has no record that it created this file, "
-            "so it is left empty. Delete it manually if it is no longer needed."
-        )
     failed_hook_paths = sorted(set(result.get("failed_paths", [])).union(unsafe_hook_paths))
     for failed_path in failed_hook_paths:
         path = Path(failed_path)
@@ -1712,6 +1709,7 @@ def _sync_integrations_after_uninstall(
                     f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
                 )
 
+    _warn_emptied_hook_files_kept(logger, result.get("kept_paths", []))
     reintegration_diagnostics.render_summary()
     return IntegrationCleanupOutcome(
         counts=counts,
@@ -1721,6 +1719,23 @@ def _sync_integrations_after_uninstall(
         materialization_session=materialization_session,
         package_failures=reintegration_diagnostics.failed_package_count,
     )
+
+
+def _warn_emptied_hook_files_kept(logger, kept_paths) -> None:
+    """Name each emptied hook file kept without deletion evidence and still hook-free (#4962)."""
+    for kept_path in sorted(kept_paths):
+        try:
+            data = json.loads(Path(kept_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and not data.get("hooks"):
+            logger.warning(
+                kept_note(
+                    kept_path,
+                    "it holds no hooks, but APM cannot show it created this file",
+                    "Delete it manually if it is no longer needed.",
+                )
+            )
 
 
 def _restage_changed_local_survivors(
