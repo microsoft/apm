@@ -791,6 +791,10 @@ def try_apply(
             targets=targets,
         )
         outcomes = _outcomes(lock, files, records)
+        if not receipts and (files or packages):
+            # A fresh checkout (no receipts) deploys everything: staging and
+            # re-verifying a whole-project diff costs more than the full run.
+            raise Decline("fresh checkout: no receipts")
         _refuse_lifecycle_scripts(project_root)
         _refuse_unsilent_executables(lock)
         with quiet():
