@@ -292,6 +292,8 @@ class _Store:
         what it holds, theirs what the file holds now. A side that did not change the
         record takes the other's; when both changed it, the record that protects the file
         more is kept and reported, so another writer's record is never silently dropped.
+        The file as read becomes the base: a retry after a failed save applies only this
+        writer's own changes again, never a record it merely imported (#5444).
         """
         theirs = self._read_shard(shard) or {}
         keys = {key for key in (*self.files, *self.base) if _shard_id(key) == shard}
@@ -308,6 +310,7 @@ class _Store:
                     "kept the record that protects the file",
                     key,
                 )
+            self._set_base(key, other)
         self.loaded.add(shard)
 
     def _changed_shards(self) -> set[str]:
@@ -321,6 +324,17 @@ class _Store:
     def _rebase(self) -> None:
         """What this store saved is the base of its next save."""
         self.base = {key: copy.deepcopy(self._value(key)) for key in self.files}
+
+    def _set_base(self, key: str, value: tuple[dict[str, Any], Any] | None) -> None:
+        if value is None:
+            self.base.pop(key, None)
+        else:
+            self.base[key] = copy.deepcopy(value)
+
+    def _rebase_shard(self, shard: str) -> None:
+        """*shard*'s record file is published: what it holds is the base from now on."""
+        for key in [key for key in (*self.files, *self.base) if _shard_id(key) == shard]:
+            self._set_base(key, self._value(key))
 
     def _load_all(self) -> None:
         for path in self._shard_files():
@@ -474,13 +488,14 @@ class _Store:
         # is removed, so a kill never leaves a listed file missing (#5037).
         for shard in sorted(written):
             self._save_shard(shard, sorted(grouped[shard]))
+            self._rebase_shard(shard)
         if self.indexed:
             self._save_listing(removed, written)
         for shard in sorted(removed):
             self._save_shard(shard, [])
+            self._rebase_shard(shard)
         if self.indexed and not grouped and not self._shard_files():
             self._drop_index()  # like the other receipts: no records, no file
-        self._rebase()
 
     def _save_listing(self, removed: set[str], written: set[str]) -> None:
         """Rewrite the index only when the record files it lists change."""

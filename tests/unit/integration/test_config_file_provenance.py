@@ -1339,3 +1339,67 @@ def test_a_stale_writer_keeps_a_record_file_another_listed(tmp_path, apm_home) -
 
     assert _apm_empties(users, root=users.parent) is False
     assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_a_retried_save_never_resurrects_a_record_retired_after_a_failed_save(
+    tmp_path, apm_home
+) -> None:
+    """#5444 review: a save killed after its merge imported another writer's record does
+    not take that record for its own; when the other writer retires it before the retry,
+    it stays retired."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    project = tmp_path / "project"
+    _apm_writes(project / "apm.json", _WITH_ENTRY)
+    imported = project / ".mcp.json"
+    first, second = _writers(imported)
+    first.files[config_file_key(imported)] = {"origin": "created", "hash": "x"}
+    first.save()
+    second.files[config_file_key(project / "other.json")] = {"origin": "created", "hash": "y"}
+    with _killed_at_write(apm_home, after=0), pytest.raises(OSError, match="killed"):
+        second.save()  # merged the imported record in memory, then died
+
+    retirer = _Store.load()
+    retirer.lookup(imported)
+    retirer.files.pop(config_file_key(imported))
+    retirer.save()
+    second.save()
+
+    assert config_file_origin(imported) is None
+    assert config_file_origin(project / "other.json") is Origin.CREATED
+    assert config_file_origin(project / "apm.json") is Origin.CREATED
+
+
+def test_a_retried_save_keeps_a_retirement_of_a_record_it_already_published(
+    tmp_path, apm_home
+) -> None:
+    """#5444 review: a save killed after publishing one of its two record files; a record
+    it published and another writer then retired is not resurrected by the retry."""
+    from apm_cli.integration.config_file_provenance import _Store
+
+    _apm_writes(tmp_path / "seed" / ".mcp.json", _WITH_ENTRY)  # the index exists
+    first_dir, second_dir = sorted(
+        (tmp_path / name / ".mcp.json" for name in ("a", "b")),
+        key=lambda config: _shard_of(config),
+    )
+    (writer,) = _writers()[:1]
+    writer.files[config_file_key(first_dir)] = {"origin": "created", "hash": "x"}
+    writer.files[config_file_key(second_dir)] = {"origin": "created", "hash": "y"}
+    with _killed_at_write(apm_home, after=1), pytest.raises(OSError, match="killed"):
+        writer.save()  # the first record file landed, the second did not
+    assert config_file_origin(first_dir) is Origin.CREATED
+
+    retirer = _Store.load()
+    retirer.lookup(first_dir)
+    retirer.files.pop(config_file_key(first_dir))
+    retirer.save()
+    writer.save()
+
+    assert config_file_origin(first_dir) is None
+    assert config_file_origin(second_dir) is Origin.CREATED
+
+
+def _shard_of(config: Path) -> str:
+    from apm_cli.integration.config_file_provenance import _shard_id
+
+    return _shard_id(config_file_key(config))
