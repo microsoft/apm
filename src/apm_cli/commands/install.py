@@ -1818,6 +1818,7 @@ def _install_apm_packages(ctx, outcome):
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,
                 target=ctx.target or ctx.runtime,
+                install_mcp=ctx.install_mode != InstallMode.APM,
             ),
             allow_pending_mcp=ctx.install_mode != InstallMode.MCP,
         )
