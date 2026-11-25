@@ -221,24 +221,16 @@ def test_pin_treats_non_utf8_config_as_missing(tmp_path: Path) -> None:
     assert not _checkout_has_materialization_pins(checkout)
 
 
-def test_a_racing_checkout_landed_under_the_in_process_branch_is_checked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Lever C keeps the git branch's race contract: an untrusted landed checkout is refused."""
+def test_a_racing_checkout_landed_first_is_checked(tmp_path: Path) -> None:
+    """A checkout another process landed first is used only when it verifies.
+
+    The in-process checkout (lever C) and the git checkout share this contract;
+    whichever one runs here, an unverified winner is evicted and refused.
+    """
     from apm_cli.cache import git_cache as git_cache_module
-    from apm_cli.cache import pack_objects
 
     origin, sha = _lf_origin(tmp_path)
     cache = GitCache(tmp_path / "cache")
-    engaged: list[bool] = []
-    real_materialize = pack_objects.materialize_tree
-
-    def materialize(*args, **kwargs):
-        result = real_materialize(*args, **kwargs)
-        engaged.append(result is not None)
-        return result
-
-    monkeypatch.setattr(pack_objects, "materialize_tree", materialize)
     real_land = git_cache_module.atomic_land
     checkouts = cache._checkouts_root
 
@@ -255,6 +247,4 @@ def test_a_racing_checkout_landed_under_the_in_process_branch_is_checked(
         pytest.raises(RuntimeError, match=r"concurrent checkout failed integrity"),
     ):
         cache.get_checkout(str(origin), sha, locked_sha=sha)
-    if not engaged or not engaged[-1]:
-        pytest.skip("the in-process checkout did not engage on this host")
     evict.assert_called()
