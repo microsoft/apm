@@ -91,7 +91,6 @@ from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.outcome import frozen_verified_line
 from apm_cli.install.package_resolution import (
-    GIT_PARENT_USER_SCOPE_ERROR,
     apply_cli_skill_pin,
     borrow_cross_section_declarations,
     cli_skill_subset,
@@ -123,6 +122,7 @@ from apm_cli.install.phases.local_content import (
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
 from apm_cli.install.pipeline_entry import install_pipeline_options, pipeline_preview
+from apm_cli.install.reference_support import _reject, _scoped_lockfile
 from apm_cli.install.repository_access import probe_failure_reason
 
 # Re-export DI-seam helpers from the install services module so that test
@@ -207,53 +207,22 @@ dict = builtins.dict
 APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
-    from ..deps.apm_resolver import APMDependencyResolver
     from ..deps.lockfile import (
         LockFile,
         LockfileSymlinkError,
         get_lockfile_path,
         migrate_lockfile_if_needed,
     )
+    from ..install.scoped_resolver import _ScopedInstallDependencyResolver
     from ..integration.mcp_integrator import (
         MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
     )
     from ..models.apm_package import APMPackage, DependencyReference
 
-    class _ScopedInstallDependencyResolver(APMDependencyResolver):
-        """Install-time resolver; blocks ``git: parent`` expansion at user scope."""
-
-        def __init__(self, *args, install_scope=None, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._install_scope = install_scope
-
-        def expand_parent_repo_decl(self, parent_dep, child_dep):
-            from ..core.scope import InstallScope
-
-            if self._install_scope is InstallScope.USER:
-                raise ValueError(GIT_PARENT_USER_SCOPE_ERROR)
-            return super().expand_parent_repo_decl(parent_dep, child_dep)
-
     APM_DEPS_AVAILABLE = True
 except ImportError as e:
     _APM_IMPORT_ERROR = str(e)
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
-
-
-def _reject(invalid_outcomes, logger, package, reason) -> None:
-    """Record *package* as invalid for *reason* and report it."""
-    invalid_outcomes.append((package, reason))
-    if logger:
-        logger.validation_fail(package, reason)
-
-
-def _scoped_lockfile(scope):
-    """Read the lockfile the scope's marketplace entries were locked in (#3959)."""
-    from ..core.scope import InstallScope, get_apm_dir
-    from ..deps.lockfile import resolve_lockfile_path_for_read
-
-    # Read-only: a legacy apm.lock not yet migrated still carries the origin.
-    apm_dir = get_apm_dir(scope or InstallScope.PROJECT)
-    return LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True))
 
 
 def _resolve_package_references(
