@@ -640,6 +640,13 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
     - M 1.02-1.27 s (16-19%); W 1.53-1.72 s (19-27%).
     - A native layer still pays the syscalls (~0.15 s on L). So even moving ALL ~80k calls frees at most ~0.4-0.55 s L at 9V74, and that is a ~100-call-site rewrite, not one hot loop. Any SINGLE loop is <= ~0.25 s at 9V74.
   - **Lane N KILLED, WED 25 Nov 05:12 CET, inside its window:** one native fs loop cannot reach >= 0.5 s on L.
+- DELETION MAP of the remaining L cost (stacked + B 10720dee; profile [45544853504], time-boxed 60 min; engagement [45546229005]). Paired deletion, L cold t50, 6 pairs vs B, 18/18 valid (here the wrapper row IS the deletion, since head = stub and base = B):
+  - prompts+commands family deleted (c970dabc): 1.005 [45546098738];
+  - MCP/LSP services phase deleted (5c2a9967): 0.989 [45546121424];
+  - post-fetch route_agent_plugin_package + carry_licenses deleted (ac71b23b): 0.988 [45546139343].
+  - The best single owner is ~1.2% = ~0.05 s L at 9V74. Inclusive profile shares (e.g. prompt_integrator 11.8%) hosted shared per-package work and freed ~0 when deleted.
+  - What remains: the network floor (auth/ref listing ~17%), one write per file, imports (sized by fork: 0.807), and per-file Python spread over ~100 call sites.
+  - **No third bet: the honest end of v0.40 research.** L <= 3.5 s stays the North Star with no measured path; v0.41+ research.
   - Kept as a candidate, not a lane: on W the whole fs-primitive layer is ~1.2-1.6 s at 9V74 (Windows stat/exists cost 2-3x more). That is a possible future W-only many-call-site redesign. W is already at target, so it is not a v0.40 item.
 - **Lessons:**
   - attribution ranks, deletion sizes; 45% fs leaf-kind -> ~5% deletable. The 45% native-core gate counted fs-NAMED Python frames, not syscall CPU:

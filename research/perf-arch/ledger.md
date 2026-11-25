@@ -309,3 +309,7 @@
 04:57 | tick: main 1e4a208e; inbox silent; tick prompt refreshed (doc v3.6, combined miss, O-TIME + deletion map) | O-TIME kill; Bets B para | none
 04:58 | Bets B triage: free subset (format detect/plugin.json/nested skill dirs) folds into Car 1; 5 memos dead; doc section 7 updated | O-TIME | none
 05:03 | W B-alone 0.968 med [45542228941] (verified), doc updated | O-TIME | none
+05:09 | Lane N KILLED 05:12 (O-TIME [45543605433] verified: L whole-layer 0.48-0.50 s, single loop <=0.25 s at 9V74); doc v3.7 08e67134fb4cbabef94d8632e2297f61291cc29d | deletion map until 06:10 | none
+05:10 | regent closed Lane N KILLED; inbox: row 33 done, Lane N row dropped, deletion-map row opened (SoL, 06:10) | deletion map 06:10 | none
+05:19 | tick: main 1e4a208e; inbox silent; prompt refreshed (Lane N killed, deletion map) | deletion map 06:10; pulse ~05:48 | none
+05:30 | tick: main 1e4a208e; inbox silent; deletion map in flight (06:10) | pulse ~05:48 | none
