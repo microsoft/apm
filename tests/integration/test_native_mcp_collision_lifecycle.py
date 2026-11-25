@@ -885,6 +885,98 @@ def test_a_refused_deselection_never_keeps_a_baseline_with_another_native_key(
     assert scenario.lock().mcp_target_servers == {}
 
 
+def test_a_skipped_runtime_baseline_never_masks_a_native_key_change(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """Cursor is skipped but keeps its claim while codex writes a new native key (#4949).
+
+    The skipped runtime keeps the old registry declaration as its drift
+    baseline, which must not decide the refused claude retirement: the lock
+    records the declaration codex actually wrote, so a later removal retires
+    codex's ``io.example/registered`` entry instead of orphaning it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    if scenario.user_scope:
+        pytest.skip("the cursor project destination is the subject")
+    manifest = load_yaml(scenario.root / "apm.yml")
+    manifest["targets"] = ["claude", "codex", "cursor"]
+    dump_yaml(manifest, scenario.root / "apm.yml")
+    (scenario.project / ".cursor").mkdir()
+    every = "claude,codex,cursor"
+    with _registry(scenario) as registry:
+        scenario.declare([{"name": "io.example/registered", "registry": registry.url}])
+        _success(scenario.install(targets=every))
+    assert set(scenario.servers("codex")) == {"registered"}
+    edited = {**scenario.servers("claude")["registered"], "url": "http://127.0.0.1:9/personal"}
+    scenario.edit("claude", "registered", edited)
+    document = tomlkit.parse(scenario.path("codex").read_text(encoding="utf-8"))
+    document["mcp_servers"].pop("registered")
+    scenario.path("codex").write_text(tomlkit.dumps(document), encoding="utf-8")
+    scenario.declare(
+        [
+            {
+                **_http("http://127.0.0.1:8000/registered"),
+                "name": "io.example/registered",
+                "targets": ["codex", "cursor"],
+            }
+        ]
+    )
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s)" in output, output
+    assert set(scenario.servers("codex")) == {"io.example/registered"}
+    assert "codex" in scenario.lock().mcp_target_servers
+    assert scenario.lock().mcp_configs["io.example/registered"].get("registry") is False
+    assert "io.example/registered" not in scenario.lock().mcp_target_servers.get("cursor", [])
+    cursor_file = scenario.project / ".cursor" / "mcp.json"
+    cursor_before = cursor_file.read_bytes()
+    assert "registered" in cursor_before.decode("utf-8")
+
+    scenario.declare([])
+    _success(scenario.install(targets=every))
+    assert scenario.servers("codex") == {}
+    assert scenario.servers("claude")["registered"] == edited
+    assert "codex" not in scenario.lock().mcp_target_servers
+    assert cursor_file.read_bytes() == cursor_before
+
+
+def test_a_skipped_runtime_claim_still_guards_a_shared_file_entry_a_peer_retires(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """Copilot is skipped but still claims the .mcp.json entry claude retires (#4949)."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    if scenario.user_scope:
+        pytest.skip("the shared project .mcp.json is the subject")
+    manifest = load_yaml(scenario.root / "apm.yml")
+    manifest["targets"] = ["claude", "codex", "copilot"]
+    dump_yaml(manifest, scenario.root / "apm.yml")
+    every = "claude,codex,copilot"
+    with _registry(scenario) as registry:
+        scenario.declare([{"name": "io.example/registered", "registry": registry.url}])
+        _success(scenario.install(targets=every))
+    assert set(scenario.servers("claude")) == {"registered"}
+    scenario.declare(
+        [
+            {
+                **_http("http://127.0.0.1:8000/registered"),
+                "name": "io.example/registered",
+                "targets": ["codex", "copilot"],
+            }
+        ]
+    )
+
+    result = scenario.install()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert set(scenario.servers("claude")) == {"registered"}
+    assert "registered" in scenario.path("claude").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("foreign_target", ["claude", "codex"])
 def test_registry_partial_conflict_does_not_skip_managed_self_defined_update(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],

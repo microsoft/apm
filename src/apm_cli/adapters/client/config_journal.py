@@ -23,11 +23,16 @@ def journal_config_write(config_path: Path, text: str, *, lf: bool = False) -> N
     the writer turns CRLF into LF (a normalizing ``atomic_write_text``).
     """
     from ...integration.write_seam import mkdir, record_before_write
-    from ...utils.content_hash import text_write_hash
+    from ...utils.content_hash import text_write_hash, text_write_size
 
     mkdir(config_path.parent, parents=True, exist_ok=True)
     # *text* is what APM is about to write: replay keeps any other bytes (#4863).
-    record_before_write(config_path, follow=True, expected=text_write_hash(text, lf=lf))
+    record_before_write(
+        config_path,
+        follow=True,
+        expected=text_write_hash(text, lf=lf),
+        size=text_write_size(text, lf=lf),
+    )
 
 
 def journal_config_written(config_path: Path) -> None:

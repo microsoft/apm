@@ -558,8 +558,8 @@ def _inputs(
     verdict_inputs.key_startup(digest, root, notice, surfaces)
     for name in _GOVERNED_DIRS:
         base = os.path.join(root, name)
-        digest.put(f"target:{name}", b"%d" % os.path.isdir(base))
-        for rel, files, dirs in _tree(base):
+        digest.put(f"target:{name}", verdict_inputs._kind(base))
+        for rel, files, dirs in verdict_inputs.walk_governed(base):
             here = f"{name}/{rel}" if rel else name
             listing = [entry.name for entry in files] + ["/", *dirs]
             digest.put(f"listing:{here}", "\x00".join(listing).encode("utf-8", "surrogateescape"))
@@ -684,13 +684,16 @@ def _deployed_rels(lock: dict) -> frozenset[str]:
 
 def _deployed_intact(root: Path, lock: dict) -> bool:
     """Every deployed file and package copy, re-hashed no-follow (QL D5)."""
-    from apm_cli.install.verdict_inputs import hash_blind
+    from apm_cli.install.verdict_inputs import has_linked_parent, hash_blind
     from apm_cli.utils.content_hash import canonical_digest
 
     if not _provable(lock):
         return False
+    proven: set[str] = set()
     for dep in lock.get("dependencies") or []:
         for rel, expected in (dep.get("deployed_file_hashes") or {}).items():
+            if has_linked_parent(root, rel, proven):
+                return False  # the engine never deploys through a link (#5438)
             data = _read_nofollow(root / rel)
             # The engine's own judgment of a present deployed file (diff_apply._plan_files).
             if data is None or f"sha256:{canonical_digest(data)}" != expected:
@@ -749,6 +752,11 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
     raw = _read_nofollow(_record_path(root))
     if raw is None or not _location_trusted(root):
         raise _Miss("")
+    from apm_cli.core.agents_md_compile_record import may_carry
+
+    if not attested and may_carry(root):
+        # The full run decides Claude rules from it; a replay never does (#5434).
+        raise _Miss("a compiled AGENTS.md may carry a Claude rule")
     key = _key(create=False)
     if key is None:
         raise _Miss("no key")

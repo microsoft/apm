@@ -341,6 +341,65 @@ def locked_skill_sources(ctx: Any) -> LockedSkillSources | None:
     return LockedSkillSources(fetch, locked_commit)
 
 
+def reclaimed_members(
+    integrator: Any,
+    source: Path,
+    destination: Path,
+    *,
+    ignore: Callable[[str, list[str]], list[str]],
+    owner: str | None,
+) -> dict[Path, str]:
+    """Members a restored older lock no longer claims, still as *owner* wrote them (#5399).
+
+    Only this installation's own receipt for the deploying owner counts
+    (:mod:`apm_cli.core.deployment_reclaim`), and only when the bytes also equal
+    what this install renders there. A hand-made file has no such receipt, so it
+    keeps the unmanaged handling; nothing is reclaimed when no receipt qualifies.
+    Only the project's own writer (``.``) reclaims: remote packages are out of scope.
+    Each member qualifies on its own, so an unrelated sibling never blocks it.
+    """
+    from apm_cli.core.deployment_reclaim import has_unclaimed_receipts, own_unclaimed_receipt
+
+    session = integrator._materialization_session
+    if owner != "." or not has_unclaimed_receipts(session, owner):
+        return {}
+    found: dict[Path, str] = {}
+    expected = _rendered_members(
+        source, destination, walk_source=integrator.walk_source_tree, ignore=ignore
+    )
+    try:
+        for target, member in expected.items():
+            if target.is_symlink() or not target.is_file():
+                continue
+            receipted = own_unclaimed_receipt(session, target, owner)
+            if receipted is not None and target.read_bytes() == _expected_bytes(
+                integrator.resolve_links, member, target, source
+            ):
+                found[target] = receipted
+    except (OSError, UnicodeError):
+        return {}
+    return found
+
+
+def self_owned(prev_owner: str | None, parent_name: str, writer: Any, target: Path) -> bool:
+    """Whether the package writing a skill directory also wrote what is there (#5399).
+
+    The lock's owner map names a dependency by its key and the project's own
+    skills by ``PROJECT_SKILLS`` (``build_skill_ownership_maps``), the receipt
+    owner ``.``; either spelling of the current writer is a self-overwrite,
+    never "another package".
+    """
+    from apm_cli.integration.skill_support import PROJECT_SKILLS
+
+    # A package that already wrote this directory in this run is its owner now.
+    prev_owner = writer._native_skill_session_owners.get(target.resolve(), prev_owner)
+    if prev_owner is None:
+        return False
+    if prev_owner == PROJECT_SKILLS:
+        return getattr(writer, "_skill_current_owner", None) == "."
+    return prev_owner == parent_name
+
+
 def skill_tree_baselines(
     integrator: Any,
     source: Path,
@@ -378,8 +437,31 @@ def skill_tree_baselines(
     def trusted(path: Path) -> str | None:
         return session.baseline(path, targets)
 
+    reclaimed = reclaimed_members(integrator, source, destination, ignore=ignore, owner=owner)
     if all_files_receipted(destination, session.receipt_held):
-        return {}
+        return reclaimed
+    return {
+        **_render_baselines(
+            integrator, source, destination, ignore, owned, owner, commit, plan, targets, trusted
+        ),
+        **reclaimed,
+    }
+
+
+def _render_baselines(
+    integrator: Any,
+    source: Path,
+    destination: Path,
+    ignore: Callable[[str, list[str]], list[str]],
+    owned: Callable[[Path], bool],
+    owner: str | None,
+    commit: str | None,
+    plan: DeployableSourcePlan | None,
+    targets: Sequence[Any],
+    trusted: Callable[[Path], str | None],
+) -> dict[Path, str]:
+    """Whole-tree adoption against the current render, then the locked source's."""
+    session = integrator._materialization_session
     compare = partial(
         adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned, trusted=trusted
     )

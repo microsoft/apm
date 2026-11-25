@@ -1,0 +1,15 @@
+{
+  "issue": 5411,
+  "fixed_in": "Unreleased",
+  "summary": "Crash recovery forgave any orphaned apm-atomic- staging file beside an unsealed write, so a user who edited a complete staging file after the crash lost it when replay rolled the skill back. A complete staging file is now forgiven only when it holds the pending write's expected hash.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_staging_file_a_user_edits_after_the_kill_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_complete_staging_file_is_forgiven_only_when_it_holds_the_pending_bytes"
+  ]
+}

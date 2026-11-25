@@ -17,10 +17,11 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -1812,6 +1813,22 @@ def _legacy_approvals_path() -> Path:
     return get_apm_home() / "approvals.yml"
 
 
+# A speculative decision (the install fast path, #5428) reads personal consent and
+# never migrates it: it runs before its journal, so a later decline could not undo
+# the write. The full install (and apm approve) keep migrating.
+_SPECULATIVE_CONSENT: list[bool] = []
+
+
+@contextlib.contextmanager
+def speculative_consent() -> Iterator[None]:
+    """Read legacy ``approvals.yml`` without migrating it, for the enclosed decision."""
+    _SPECULATIVE_CONSENT.append(True)
+    try:
+        yield
+    finally:
+        _SPECULATIVE_CONSENT.pop()
+
+
 def _migrate_legacy_approvals(
     allow: dict[str, dict[str, bool]],
     *,
@@ -1822,8 +1839,7 @@ def _migrate_legacy_approvals(
     The legacy file stored a bare ``{package_key: {exec_type: bool}}`` map of
     grants. Existing config entries win over legacy entries on conflict.
     """
-    import contextlib
-
+    persist = persist and not _SPECULATIVE_CONSENT
     legacy = _legacy_approvals_path()
     if not legacy.is_file():
         return allow
@@ -1864,6 +1880,7 @@ def load_user_executables(
     allow = dict(section.get("allow") or {})
     deny = dict(section.get("deny") or {})
 
+    migrate_legacy = migrate_legacy and not _SPECULATIVE_CONSENT
     original_allow = {key: dict(value) for key, value in allow.items()}
     migrated = _migrate_legacy_approvals(allow, persist=migrate_legacy)
     if migrate_legacy and (migrated != original_allow or (allow and "executables" not in cfg)):

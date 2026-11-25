@@ -87,8 +87,11 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
         disposition = InstallService.frozen_disposition(SimpleNamespace(frozen=frozen))
         options = {"frozen": disposition.replay}
         decide = _decide_only()
+        from apm_cli.security.executables import speculative_consent
+
         # Deciding only reads: no lifecycle lock (it writes lock state) and no cache upkeep.
-        with read_only_caches() if decide else lifecycle_operation():
+        # The fast path never migrates personal consent; the full install does (#5428).
+        with read_only_caches() if decide else lifecycle_operation(), speculative_consent():
             try:
                 done = diff_apply.try_apply(
                     options, argv, root, frozen_disposition=disposition, decide_only=decide

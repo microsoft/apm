@@ -31,6 +31,22 @@ def read_record(root: Path) -> dict:
     return files if isinstance(files, dict) else {}
 
 
+ROOT_CARRIERS = ("AGENTS.md", "CLAUDE.md")
+
+
+def may_carry(root: Path) -> bool:
+    """Whether a compiled ``AGENTS.md`` may stand in for a Claude rule at *root* (#5343).
+
+    The one decision behind ``compiled_agents_md_may_carry`` (the engine fast
+    path's decline) and the no-op replay's (#5434): this record exists, or a
+    root carrier does. Kept here, light, so a replay asks it without importing
+    the compiler: two lstat and one read of the record.
+    """
+    if read_record(root):
+        return True
+    return any(os.path.lexists(root / name) for name in ROOT_CARRIERS)
+
+
 def write_record(root: Path, files: dict) -> None:
     """Replace the record for *root*; a failed write only costs a reminder."""
     from apm_cli.integration.write_seam import atomic_write_text, mkdir

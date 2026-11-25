@@ -15,6 +15,7 @@ import errno
 import functools
 import os
 import stat
+import sys
 import weakref
 from pathlib import Path
 from typing import Any
@@ -183,6 +184,66 @@ def _windows_acl(path: Path) -> bool:
         kernel32.LocalFree(descriptor)
 
 
+# macOS: acl_get_link_np reads the extended (NFSv4-style) ACL without following a link.
+_ACL_TYPE_EXTENDED = 0x100
+_ACL_FIRST_ENTRY = 0
+
+
+@functools.cache
+def _macos_acl_api() -> Any:
+    """``libc`` with the signatures :func:`_macos_acl` calls."""
+    import ctypes
+    import ctypes.util
+
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.acl_get_link_np.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    libc.acl_get_link_np.restype = ctypes.c_void_p
+    libc.acl_get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    libc.acl_get_entry.restype = ctypes.c_int
+    libc.acl_free.argtypes = [ctypes.c_void_p]
+    libc.acl_free.restype = ctypes.c_int
+    return libc
+
+
+def _macos_acl(path: Path) -> bool:
+    """Whether *path* itself (never a link's target) has an extended ACL entry (#5178).
+
+    ``OSError`` when the ACL cannot be read, including any failure of the libc
+    binding itself, so the caller keeps the unit; none, unsupported or nothing
+    there is False.
+    """
+    try:
+        return _read_macos_acl(path)
+    except OSError:
+        raise
+    except Exception as exc:  # a broken binding is an unreadable ACL, never a crash
+        raise OSError(errno.EIO, f"cannot read the ACL: {exc}", str(path)) from exc
+
+
+def _read_macos_acl(path: Path) -> bool:
+    import ctypes
+
+    libc = _macos_acl_api()
+    ctypes.set_errno(0)
+    acl = libc.acl_get_link_np(os.fsencode(path), _ACL_TYPE_EXTENDED)
+    if not acl:
+        error = ctypes.get_errno()
+        if error in _NO_XATTRS:
+            return False
+        raise OSError(error, os.strerror(error), str(path))
+    try:
+        entry = ctypes.c_void_p()
+        ctypes.set_errno(0)
+        if libc.acl_get_entry(acl, _ACL_FIRST_ENTRY, ctypes.byref(entry)) == 0:
+            return True
+        error = ctypes.get_errno()
+        if error == errno.EINVAL:
+            return False  # an ACL without entries
+        raise OSError(error, os.strerror(error), str(path))
+    finally:
+        libc.acl_free(acl)
+
+
 def _is_junction(path: Path) -> bool:
     isjunction = getattr(os.path, "isjunction", None)  # Python 3.12+
     return bool(isjunction and isjunction(path))
@@ -201,13 +262,15 @@ def _posix_acl(path: Path) -> bool:
 def carries_acl(*paths: Path) -> bool:
     """Whether any of *paths* (or an entry below one) carries an ACL.
 
-    A POSIX ACL on Linux; on Windows, a DACL with an ACE it did not inherit or
-    protected from inheritance (#5178). Restored bytes are staged with
+    A POSIX ACL on Linux; on macOS, an extended ACL entry; on Windows, a DACL
+    with an ACE it did not inherit or protected from inheritance (#5178). Restored bytes are staged with
     permission bits only, so an ACL would be lost. A path whose ACL cannot be
     checked is never assumed to have none.
     """
     if os.name == "nt":
         has_acl = _windows_acl
+    elif sys.platform == "darwin":
+        has_acl = _macos_acl
     elif hasattr(os, "listxattr"):
         has_acl = _posix_acl
     else:

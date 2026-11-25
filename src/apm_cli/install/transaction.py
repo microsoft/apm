@@ -57,8 +57,10 @@ def journaled_apply(contain: Path) -> Iterator[DeployJournal]:
     # *contain* (the project) bounds the rollback only; nothing is persisted for replay.
     journal.contain = Path(os.path.abspath(contain))
 
-    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
-        journal.record(path, contents=contents, expected=expected)
+    def seam(
+        path: Path, contents: bool, expected: str | None = None, size: int | None = None
+    ) -> None:
+        journal.record(path, contents=contents, expected=expected, size=size)
 
     write_seam.listen(seam, journal.after_write, journal=journal.token)
     try:
@@ -114,8 +116,10 @@ def _local_bundle_journal(*, user_scope: bool) -> Iterator[None]:
         workspace=workspace,
     )
 
-    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
-        journal.record(path, contents=contents, expected=expected)
+    def seam(
+        path: Path, contents: bool, expected: str | None = None, size: int | None = None
+    ) -> None:
+        journal.record(path, contents=contents, expected=expected, size=size)
 
     def mark() -> None:
         text = staged_lockfile_text(get_lockfile_path(workspace))
@@ -580,11 +584,13 @@ class InstallTransaction:
         if journal is not None and text is not None:
             journal.mark_commit(lockfile_identity(text))
 
-    def _record_deploy_write(self, path: Path, contents: bool, expected: str | None = None) -> None:
+    def _record_deploy_write(
+        self, path: Path, contents: bool, expected: str | None = None, size: int | None = None
+    ) -> None:
         """Keep *path*'s prior state the first time this attempt touches it."""
         journal = self._deploy_journal
         if journal is not None:
-            journal.record(path, contents=contents, expected=expected)
+            journal.record(path, contents=contents, expected=expected, size=size)
 
     def _seal_deploy_write(self, path: Path) -> None:
         """Seal what this attempt just wrote at *path* (#4863)."""
