@@ -161,6 +161,7 @@ FROZEN_OWNERS: dict[str, tuple[str, str]] = {
     "service:enforce_frozen_hook_pins": ("implied", "hook bytes A7; approvals MAC'd"),
     "service:reject_frozen_mutation": ("implied", "only bare install argv is served"),
     "service:reject_missing_frozen_root": ("implied", "only bare install argv is served"),
+    "frozen_mcp_drift": ("live", "inside enforce_frozen (_frozen_mcp_reasons)"),
     "frozen_selection": ("implied", "manifest, lock and targets MAC'd"),
     "frozen_withdrawal": ("implied", "the hit deploys nothing"),
     "frozen_retirement": ("implied", "exec gate live; deployed bytes re-hashed (A7)"),

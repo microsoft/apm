@@ -112,6 +112,7 @@ class InstallRequest:
         trust_transitive_mcp: bool = False,
         no_policy: bool = False,
         target: str | list[str] | None = None,
+        install_mcp: bool = True,
         logger: InstallLogger | None = None,
         speculative: bool = False,
     ) -> InstallRequest:
@@ -130,5 +131,6 @@ class InstallRequest:
             trust_transitive_mcp=trust_transitive_mcp,
             no_policy=no_policy,
             target=target,
+            install_mcp=install_mcp,
             logger=logger,
         )
