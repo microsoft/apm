@@ -407,6 +407,14 @@ _parsed_files: OrderedDict[bytes, Any] = OrderedDict()
 _parsed_files_lock = threading.Lock()
 
 
+class _NamedBytes(BytesIO):
+    """The read buffer, named as the file it holds: error marks cite its path."""
+
+    def __init__(self, data: bytes, name: str | Path) -> None:
+        super().__init__(data)
+        self.name = name
+
+
 def load_yaml_memoized(path: str | Path) -> dict[str, Any] | None:
     """:func:`load_yaml`, memoized per process by the exact bytes of *path*.
 
@@ -421,7 +429,7 @@ def load_yaml_memoized(path: str | Path) -> dict[str, Any] | None:
         if parsed is not _parsed_files:
             _parsed_files.move_to_end(key)
     if parsed is _parsed_files:
-        parsed = _bounded_load(TextIOWrapper(BytesIO(data), encoding="utf-8"))
+        parsed = _bounded_load(TextIOWrapper(_NamedBytes(data, path), encoding="utf-8"))
         with _parsed_files_lock:
             _parsed_files[key] = parsed
             while len(_parsed_files) > _PARSED_FILES_LIMIT:

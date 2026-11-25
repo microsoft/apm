@@ -495,9 +495,14 @@ def test_the_manifest_parse_memo_keys_on_exact_bytes(tmp_path: Path) -> None:
     assert load_yaml_memoized(path) == {"name": "bbbb"}
 
     path.write_text("name: [unclosed\n", encoding="utf-8")
+    from apm_cli.utils.yaml_io import load_yaml
+
+    with pytest.raises(yaml.YAMLError) as fresh:
+        load_yaml(path)
     for _ in range(2):
-        with pytest.raises(yaml.YAMLError):
+        with pytest.raises(yaml.YAMLError) as memoized:
             load_yaml_memoized(path)
+        assert str(memoized.value) == str(fresh.value)  # the same error, path included
     path.write_text("name: aaaa\n", encoding="utf-8")
     assert load_yaml_memoized(path) == {"name": "aaaa"}
 
