@@ -22,16 +22,19 @@ req() { # os fixtures journeys pairs
 # FROZEN_NOOP=1/0 forces it on/off; default = detect in the harness journeys.py.
 if [ -z "${FROZEN_NOOP:-}" ]; then
   gh api "repos/microsoft/apm/contents/tests/benchmarks/journeys.py?ref=$PERF_BENCH_HARNESS_REF" -q .content 2>/dev/null \
-    | base64 -d 2>/dev/null | grep -q '"install-frozen-noop"' && FROZEN_NOOP=1 || FROZEN_NOOP=0
+    | base64 -d 2>/dev/null | grep -c '"install-frozen-noop"' >/dev/null && FROZEN_NOOP=1 || FROZEN_NOOP=0
 fi
 echo "install-frozen-noop in Linux request: $FROZEN_NOOP"
+# Priority first (PERF VP 05:32: #4939 cold t50 ratios + frozen-noop t10 by 06:15): small cold-only requests.
 for os in linux macos windows; do
-  if [ "$os" = windows ]; then   # Windows tree-50 x 15 pairs is long: one request per fixture
-    req $os tree-10 $INST 5; req $os tree-50 $INST 5
-  else
-    if [ "$os" = linux ] && [ "$FROZEN_NOOP" = 1 ]; then req $os tree-10,tree-50 "$INST,install-frozen-noop" 5
-    else req $os tree-10,tree-50 $INST 5; fi
-  fi
+  if [ "$os" = linux ] && [ "$FROZEN_NOOP" = 1 ]; then req $os tree-10,tree-50 install-cold,install-frozen-noop 5
+  elif [ "$os" = windows ]; then req $os tree-50 install-cold 5; req $os tree-10 install-cold 5
+  else req $os tree-10,tree-50 install-cold 5; fi
+done
+REST_INST=install-warm,install-noop,install-noop-replay,install-frozen
+for os in linux macos windows; do
+  if [ "$os" = windows ]; then req $os tree-10 $REST_INST 5; req $os tree-50 $REST_INST 5
+  else req $os tree-10,tree-50 $REST_INST 5; fi
   req $os tree-10,tree-50 $AUTH 2
   req $os tree-10,tree-50 $REST 2
   req $os tree-10-ghe,tree-50-ghe $ENT 2
