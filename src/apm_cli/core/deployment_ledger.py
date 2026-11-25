@@ -144,6 +144,26 @@ def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) 
     return removed
 
 
+# RESEARCH STUB (per-root memo): a deployed path's physical key is its parent
+# directory resolved once per process plus its own name; only a final symlink
+# component is resolved in full. Not safe against a mid-install directory swap.
+_RESOLVED_DIRS: dict[str, str] = {}
+
+
+def _physical_key(path: Path) -> str:
+    import os
+
+    from apm_cli.utils.realpath import resolve_path
+
+    parent = str(path.parent)
+    resolved = _RESOLVED_DIRS.get(parent)
+    if resolved is None:
+        resolved = _RESOLVED_DIRS[parent] = resolve_path(path.parent).as_posix()
+    if os.path.islink(path):
+        return path.resolve().as_posix()
+    return f"{resolved.rstrip('/')}/{path.name}"
+
+
 @dataclass(frozen=True)
 class DeploymentOwnerViolation:
     """One canonical deployment row with invalid owner references."""
@@ -374,7 +394,7 @@ class DeploymentMaterializationSession:
 
     def receipt_held(self, path: Path) -> bool:
         """Return whether *path* still holds the bytes this installation receipted there."""
-        record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
+        record = self._records.get(self._physical_keys.get(_physical_key(path), ""))
         return record is not None and self._holds(path, record)
 
     def adopt_root_receipts(
@@ -484,7 +504,7 @@ class DeploymentMaterializationSession:
         locator = locate(path, targets)
         if locator is None:
             return None
-        key = self._physical_keys.get(path.resolve().as_posix())
+        key = self._physical_keys.get(_physical_key(path))
         record = self._records.get(key)
         if record is None:
             return None
@@ -546,7 +566,7 @@ class DeploymentMaterializationSession:
     ) -> bool:
         """Require a real guarded write when a valid same-writer receipt changes target."""
         locator = self._locator(path, targets)
-        key = self._physical_keys.get(path.resolve().as_posix())
+        key = self._physical_keys.get(_physical_key(path))
         record = self._records.get(key)
         return (
             locator is not None
@@ -683,7 +703,7 @@ class DeploymentMaterializationSession:
 
     def retire(self, deleted: Sequence[Path]) -> None:
         """Forget successfully removed physical outputs without granting cleanup authority."""
-        removed = {path.resolve().as_posix() for path in deleted}
+        removed = {_physical_key(path) for path in deleted}
         keys = {
             key
             for key, value in self._destinations.items()
@@ -766,7 +786,7 @@ class OverwriteGate:
             return False
         self.session.kept_overwrites.append((self.owner, path))
         if edit is not None:
-            self.session.kept_edit_kinds[path.resolve().as_posix()] = edit
+            self.session.kept_edit_kinds[_physical_key(path)] = edit
             # Keep the pre-0.37 proof across the lock upgrade (RA-012).
             legacy = self.session.legacy_recorded_hash(claim)
             if legacy is not None:
