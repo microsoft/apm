@@ -30,6 +30,9 @@ class BundleHookResult:
     written: list[str] = field(default_factory=list)
     hook_files: int = 0
     skipped: int = 0
+    # Hook configs and ownership sidecars the run writes beside the scripts; a
+    # dry run lists them (#4956).
+    configs: list[str] = field(default_factory=list)
 
 
 def integrate_local_bundle_hooks(
@@ -117,6 +120,16 @@ def integrate_local_bundle_hooks(
     if dry_run:
         if logger is not None:
             logger.verbose_detail(f"[dry-run] would register hooks from {len(hook_paths)} file(s)")
+        _preview_hook_claims(
+            result,
+            project_root,
+            bundle_info,
+            verified_files,
+            hook_targets,
+            slug,
+            approval_key,
+            scope,
+        )
         return result
 
     from ..core.scope import InstallScope
@@ -163,6 +176,69 @@ def integrate_local_bundle_hooks(
     if result.hook_files and logger is not None:
         logger.verbose_detail(f"Registered {result.hook_files} hook file(s) from bundle '{slug}'")
     return result
+
+
+def _preview_hook_claims(
+    result: BundleHookResult,
+    project_root: Path,
+    bundle_info: Any,
+    verified_files: dict[str, str],
+    hook_targets: Any,
+    slug: str,
+    approval_key: str | None,
+    scope: Any,
+) -> None:
+    """List what a forced hook install writes, by running it in a scratch project (#4956).
+
+    The project and its lockfile are untouched, so every script is a claim and
+    every other file written is a hook config or ownership sidecar. A user-scope
+    install writes under HOME, which a scratch project cannot stand in for.
+    """
+    from ..core.scope import InstallScope
+    from ..integration.config_file_provenance import replay_render
+    from ..integration.hook_integrator import HookIntegrator
+    from ..utils.content_hash import compute_file_hash
+    from ..utils.paths import portable_relpath
+
+    if scope == InstallScope.USER:
+        return
+    with tempfile.TemporaryDirectory(prefix="apm-bundle-hook-preview-") as tmp:
+        scratch = Path(tmp) / "project"
+        scratch.mkdir()
+        for target in hook_targets:
+            # Opt-in targets (Kiro) write only into a directory that already exists.
+            if (project_root / target.root_dir).is_dir():
+                (scratch / target.root_dir).mkdir(exist_ok=True)
+        try:
+            package_info = _bundle_hook_package(
+                bundle_info, verified_files, Path(tmp) / "stage" / slug, slug
+            )
+        except ValueError:
+            return  # the real install refuses the same bytes
+        package_info.local_bundle_approval = approval_key
+        integrator = HookIntegrator()
+        scripts: set[str] = set()
+        for target in hook_targets:
+            with replay_render():  # a preview records no receipts
+                outcome = integrator.integrate_hooks_for_target(
+                    target, package_info, scratch, force=True, managed_files=set(), scope=scope
+                )
+                _record_per_file_approval(
+                    target, scratch, slug, approval_key, outcome.target_paths, False
+                )
+            for target_path in outcome.target_paths:
+                record = portable_relpath(Path(target_path), scratch)
+                scripts.add(record)
+                if record not in result.script_hashes:
+                    result.scripts.append(record)
+                    result.script_hashes[record] = compute_file_hash(Path(target_path))
+        integrator.take_rendered_writes()
+        written = (path for path in sorted(scratch.rglob("*")) if path.is_file())
+        result.configs = [
+            rel
+            for rel in (portable_relpath(path, scratch) for path in written)
+            if rel not in scripts
+        ]
 
 
 def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage: Path, slug: str):

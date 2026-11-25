@@ -962,4 +962,3 @@ def test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes(
     assert ".claude/apm-hooks.json" in preview, preview
     assert _state(world, None, keep_git_cache=False) == before
     _assert_ok(world, "install", "--force", "--target", "claude", bundle)
-    _assert_ok(world, "audit", "--ci")

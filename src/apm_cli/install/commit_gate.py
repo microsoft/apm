@@ -360,11 +360,19 @@ def refuse_denied_install_entry(scope: Any, *, no_policy: bool, dry_run: bool, l
     )
 
 
-def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run: bool) -> None:
+def judge_mcp_install_files(
+    scope: Any,
+    *,
+    no_policy: bool,
+    logger: Any,
+    dry_run: bool,
+    mcp_entry: tuple[Any, Any, Any] | None = None,
+) -> None:
     """Judge the files a direct ``--mcp`` install leaves, after its policy preflight (#4826).
 
     ``--mcp`` records no file claims, so the governed directories the
-    policy names are judged against the scope's current lockfile. A
+    policy names are judged against the scope's current lockfile, with the
+    MCP config files the *mcp_entry* (runtime, exclude, target decision) would write (#4956). A
     blocking real install refused a denied ``scripts:`` block at entry;
     ``warn`` warns on both verdicts and ``--dry-run`` previews them (#4957).
     """
@@ -378,6 +386,10 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
     from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from apm_cli.policy.install_preflight import enforced_entry_policy
     from apm_cli.policy.policy_checks import _check_unmanaged_files
+
+    from .config_writes import mcp_entry_writer
+
+    projected_writes = mcp_entry_writer(scope, *mcp_entry) if mcp_entry else tuple
 
     # scripts: is judged with the source manifest's policy; unmanaged files with
     # the policy of the root the install writes to, as the MCP preflight reads it.
@@ -398,7 +410,12 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
         path = resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True)
         root, lockfile = get_deploy_root(scope), LockFile.read(path)
         checks[roots["files"]].append(
-            _check_unmanaged_files(root, lockfile, files_policy.unmanaged_files)
+            _check_unmanaged_files(
+                root,
+                lockfile,
+                files_policy.unmanaged_files,
+                projected_writes=projected_writes(),
+            )
         )
     for policy_root, found in checks.items():
         if found:
@@ -537,7 +554,12 @@ def _check_manifest_policy(ctx: InstallContext) -> None:
         from apm_cli.policy.policy_checks import _check_unmanaged_files
 
         checks.append(
-            _check_unmanaged_files(ctx.project_root, ctx.existing_lockfile, policy.unmanaged_files)
+            _check_unmanaged_files(
+                ctx.project_root,
+                ctx.existing_lockfile,
+                policy.unmanaged_files,
+                projected_writes=_projected_config_writes(ctx, policy),
+            )
         )
     _enforce_install_policy_checks(ctx, policy, checks)
 
@@ -763,14 +785,25 @@ def check_before_release(ctx: InstallContext, lockfile: LockFile | None) -> None
     unmanaged. A refusal fails the install, and the transaction restores
     every file it deployed and discards the staged lockfile.
     """
+    policy = _enforced_install_policy(ctx)
     refuse_unmanaged_files(
         ctx.logger,
-        _enforced_install_policy(ctx),
+        policy,
         ctx.project_root,
         lockfile,
         dry_run=ctx.dry_run,
         source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
+        projected_writes=_projected_config_writes(ctx, policy),
     )
+
+
+def _projected_config_writes(ctx: InstallContext, policy: Any) -> tuple[str, ...]:
+    """MCP config files the install's MCP stage will write after this gate (#4956)."""
+    if policy is None or policy.unmanaged_files.effective_action != "deny":
+        return ()
+    from apm_cli.install.config_writes import pipeline_config_files
+
+    return pipeline_config_files(ctx)
 
 
 def refuse_unmanaged_files(
@@ -781,8 +814,13 @@ def refuse_unmanaged_files(
     *,
     dry_run: bool,
     source: str | None = None,
+    projected_writes: Sequence[str] = (),
 ) -> None:
-    """Refuse a governed file no row of *lockfile* claims under ``unmanaged_files: deny``."""
+    """Refuse a governed file no row of *lockfile* claims under ``unmanaged_files: deny``.
+
+    *projected_writes* are the config files the install is about to write through
+    server ownership; they are judged with the files already on disk (#4956).
+    """
     if policy is None or policy.unmanaged_files.effective_action != "deny":
         return
     from apm_cli.policy.policy_checks import _check_unmanaged_files
@@ -790,7 +828,14 @@ def refuse_unmanaged_files(
     _report_install_policy_checks(
         logger,
         policy,
-        [_check_unmanaged_files(project_root, lockfile, policy.unmanaged_files)],
+        [
+            _check_unmanaged_files(
+                project_root,
+                lockfile,
+                policy.unmanaged_files,
+                projected_writes=projected_writes,
+            )
+        ],
         dry_run=dry_run,
         source=source,
     )

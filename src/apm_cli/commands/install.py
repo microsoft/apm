@@ -809,7 +809,10 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     from ..install.commit_gate import judge_mcp_install_files
 
-    judge_mcp_install_files(scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run)
+    entry = (runtime, exclude, target_decision)
+    judge_mcp_install_files(
+        scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run, mcp_entry=entry
+    )
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,

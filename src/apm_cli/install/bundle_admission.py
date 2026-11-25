@@ -86,6 +86,7 @@ def refuse_unmanaged_bundle_files(
     user_scope: bool,
     logger: Any,
     dry_run: bool,
+    mcp_runtimes: Sequence[str] = (),
 ) -> None:
     """Judge ``unmanaged_files.action: deny`` on the claims a bundle install leaves (#4826).
 
@@ -102,6 +103,7 @@ def refuse_unmanaged_bundle_files(
     from ..core.scope import InstallScope
     from ..deps.lockfile import LockFile
     from .commit_gate import refuse_unmanaged_files
+    from .config_writes import mcp_config_files
     from .local_bundle_handler import _bundle_lock_root, _home_relative_claims
 
     project_root = deploy.args[1]
@@ -109,6 +111,8 @@ def refuse_unmanaged_bundle_files(
     result = deploy(dry_run=True, logger=None, create_config=False)
     digests = result.get("deployed_file_hashes", {})
     hashes = {record: digests[record] for record in result.get("deployed_files", [])}
+    hook_claims, projected = _hook_config_claims(result.get("hook_config_files", []), project_root)
+    hashes.update(hook_claims)
     files = sorted(hashes)
     if user_scope:
         files, hashes = _home_relative_claims(files, hashes, project_root)
@@ -117,7 +121,36 @@ def refuse_unmanaged_bundle_files(
     DeploymentLedgerCodec.record_local_bundle_files(lockfile, files, hashes, scope=scope)
     # The project's own entry carries those claims, as it does once read back.
     lockfile.dependencies["."] = lockfile.project_self_entry()
-    refuse_unmanaged_files(logger, policy, project_root, lockfile, dry_run=dry_run)
+    projected += mcp_config_files(
+        mcp_runtimes, project_root=Path(project_root), user_scope=user_scope
+    )
+    refuse_unmanaged_files(
+        logger, policy, project_root, lockfile, dry_run=dry_run, projected_writes=projected
+    )
+
+
+def _hook_config_claims(configs: Sequence[str], project_root: Any) -> tuple[dict[str, str], list]:
+    """Split the hook files a bundle install writes into claims and files still judged (#4956).
+
+    A merged hook config and its sidecar stay managed once their ownership
+    verifies, as the audit counts them (#5277), so they are claims here. Any
+    other hook config (Kiro's sidecar) carries no claim and is judged.
+    """
+    from ..integration.targets import KNOWN_TARGETS
+    from ..utils.content_hash import compute_file_hash
+    from .manifest_reconcile import merge_hook_config_projection_specs
+
+    specs = merge_hook_config_projection_specs(list(KNOWN_TARGETS.values()))
+    verifiable = {*specs, *(sidecar for sidecar, _key in specs.values())}
+    claims: dict[str, str] = {}
+    projected = []
+    for rel in configs:
+        if rel not in verifiable:
+            projected.append(rel)
+            continue
+        path = Path(project_root) / rel
+        claims[rel] = compute_file_hash(path) if path.is_file() else "sha256:" + "0" * 64
+    return claims, projected
 
 
 def bundle_policy_subjects(bundle_info: Any) -> LocalBundleSubjects:

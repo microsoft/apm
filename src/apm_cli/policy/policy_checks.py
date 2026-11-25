@@ -1206,6 +1206,29 @@ def _format_unmanaged_detail(
     return f"{label} -- {'; '.join(reasons)}"
 
 
+def _unclaimed_projected_writes(
+    projected_writes: Iterable[str],
+    dirs: Iterable[str],
+    exclude: Iterable[str],
+    deployed: set[str],
+    deployed_prefixes: tuple[str, ...],
+    flagged: set[str],
+) -> list[str]:
+    """Projected config writes in a governed directory that nothing claims or excludes."""
+    from .matcher import first_matching_pattern
+
+    governed = tuple(d.strip("/") for d in dirs)
+    unclaimed = []
+    for rel in sorted({path.rstrip("/") for path in projected_writes}):
+        if rel in flagged or rel in deployed or rel.startswith(deployed_prefixes):
+            continue
+        if not any(rel == d or rel.startswith(d + "/") for d in governed):
+            continue
+        if first_matching_pattern(rel, exclude) is None:
+            unclaimed.append(rel)
+    return unclaimed
+
+
 def _symlink_escapes_workspace(path: Path, project_root: Path) -> bool:
     """Return True if *path* is a symlink resolving outside *project_root*.
 
@@ -1228,6 +1251,7 @@ def _check_unmanaged_files(
     *,
     dependency_deny: tuple[str, ...] | None = None,
     mcp_deny: tuple[str, ...] | None = None,
+    projected_writes: Iterable[str] = (),
 ) -> CheckResult:
     """Check 16: surface files in governance dirs not tracked in apm.lock.yaml.
 
@@ -1237,6 +1261,11 @@ def _check_unmanaged_files(
     ``dependencies.deny`` / ``mcp.deny`` -- a deny-conflict note for a human to
     resolve. Paths matching ``policy.exclude`` are suppressed. This is drift /
     divergence visibility, not supply-chain-attack prevention.
+
+    *projected_writes* are project-relative files an install is about to
+    create or edit through server ownership (MCP, LSP and hook configs, #4956):
+    they carry no ``deployed_files`` claim, so each is judged here with the
+    files already on disk, whether or not it exists yet.
     """
     from ..integration.hook_ownership import verified_apm_hook_files
     from .matcher import first_matching_pattern
@@ -1267,6 +1296,7 @@ def _check_unmanaged_files(
     unmanaged_count = 0
     files_scanned = 0
     cap_hit = False
+    flagged: set[str] = set()
     for gov_dir in dirs:
         dir_path = project_root / gov_dir
         if not dir_path.exists() or not dir_path.is_dir():
@@ -1295,11 +1325,19 @@ def _check_unmanaged_files(
                 primitive_type = _classify_primitive_type(rel)
                 deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
                 details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
+                flagged.add(rel)
                 unmanaged_count += 1
             if cap_hit:
                 break
         if cap_hit:
             break
+
+    for rel in _unclaimed_projected_writes(
+        projected_writes, dirs, exclude, deployed, dir_prefix_tuple, flagged
+    ):
+        deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+        details.append(_format_unmanaged_detail(rel, _classify_primitive_type(rel), deny_hit))
+        unmanaged_count += 1
 
     if cap_hit:
         return CheckResult(
