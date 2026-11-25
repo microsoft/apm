@@ -12,23 +12,21 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
 - **Main today (1e4a208e):** Linux 6.1 s, Windows 13.2 s. The physics floor is ~0.7 s Linux / ~1.2 s Windows, so the gap is 8.7x Linux / 11x Windows.
 - **Where the gap is** (measured by paired deletion and a per-phase CPU probe on main):
   - integrate is ~45% Linux / ~50% Windows;
-  - resolve + fetch is ~33%, of which the second copy + re-verify alone is 15-20% on every OS.
+  - resolve + fetch is ~33%. The second copy + re-verify is only ~3-6% (faithful M2 / c2-copyfile 0.965 L; E1's budget ~6% CPU). The earlier 15-20% came from the invalid c2 bound.
 - **Architecture: one manifest-driven deploy.**
   - The in-process fetch emits a per-package manifest (path, mode, content hash, primitive class).
-  - Materialization writes each file once (M2), and integrate consumes the manifest, with no re-walk, re-hash or re-classify.
+  - Integrate consumes the manifest, with no re-walk, re-hash or re-classify. (Materialize-once, M2, was dropped: ~3-6% at most.)
   - Containment is proved by construction for APM-created trees.
-- **Result** (stacked measured ceiling, ONE head = integrate ceiling ea0ec45e + M2 bound c2, unsafe upper bounds):
-  - **ON HOLD (07:11 CET):** Car 2 (M2) was killed: the faithful M2 step 2 removes all copy+verify CPU but reads only W 0.979 / L 0.965 / M 0.891 [45556952859 / 45556969927 / 45556988005], while the c2 bound read W 0.802 / L 0.817 / M 0.856. c2 therefore deleted more than copy+verify. The numbers below include c2 and are restated once the stack is re-measured without c2 (or c2's extra effect is named and made reachable).
-  - L 0.701 (~4.3 s on 9V74 vs 3.5; miss ~0.8 s) [45530064444].
-  - M 0.663 [45530082924].
-  - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~6.0 s on 9V74: AT TARGET (7.5 s).
-    - Calibration: default-schannel world, main+#5374, cold t50, direct per-VM runs [45534359514]: 9V74 base 10.53 s x 0.568 = 5.98 s.
-    - Per runner class: 9V45 4.5 s, 9V74 6.0 s, Xeon 8573C 6.4 s, EPYC 7763 8.3-8.6 s. So the target holds on 3 of 4 classes; on the slowest (7763) it is ~1 s over.
-    - Base = CPU p50 (cpu_p50_s), not wall (wall p50 on 9V74 is 12.26 s), from artifact calib-windows-2025-vm4/direct/*.json. CPU base x paired CPU ratio keeps the units consistent.
+- **Result** (stacked measured ceiling WITHOUT c2, one head per OS, unsafe upper bounds; PENDING the deployed-output audit of the same heads):
+  - **Correction, stated plainly:** the earlier headline (W ~6.0 s "at target", L ~4.3 s) was INFLATED by an invalid bound. c2 (hardlink materialize) was fast because it skipped deploys: find_files_by_glob (base_integrator.py:1636-1639) skips files with st_nlink > 1, so every globbed primitive went undeployed. Found by E1 07:30 CET; c2 is struck, and so is every head that stacked it.
+  - **W ~7.4 s on 9V74, AT the target line with no margin; 2 of 4 runner classes over (8573C, 7763).** W 288927c8 vs main+#5374 cc5aac78: 0.702, 18/18 [45558776176]. 10.53 s CPU base x 0.702 = 7.4 s. Per class: 9V45 ~5.6, 9V74 ~7.4, Xeon 8573C ~8.0, EPYC 7763 ~10.2-10.6.
+    - Calibration: default-schannel world, main+#5374, cold t50, direct per-VM runs [45534359514]; base = CPU p50 (cpu_p50_s), not wall (wall p50 on 9V74 is 12.26 s). CPU base x paired CPU ratio keeps the units consistent.
     - Caveats: n = 1 VM per class (3 for 7763), 3 runs each; the paired ratio was measured on the bench's VM mix and is applied to one VM's base.
-  - The levers stack slightly better than paper (0.701 vs 0.716-0.734).
+  - **L ~5.3 s vs the 3.5 s North Star.** L ea0ec45e vs main 1e4a208e: 0.875 [45558797634]; 6.1 s x 0.875.
+  - M 0.717 [45558819800].
+  - Materialize-once (Car 2, M2) is KILLED on the merits: a faithful single write reads W 0.979 / L 0.965 / M 0.891, and c2 with real copies (no hardlink) reads L 0.965 [45558963877]. So the hardlink skip was the whole c2 gain.
 - **Native-core gate on Linux:** read as MET (walk+stat+hash+copy = 45% of L CPU [45520769932 / 45530101839]) but SUPERSEDED: that attribution counted fs-named Python frames, not syscall CPU. Zero-cost oracles free ~5%, and Lane N was KILLED (section 8).
-- **Linux bar (REGENT RULING):** L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured ~4.3 s L milestone. A native fs-op core was a 48 h research lane (Lane N), KILLED WED 05:12 (section 8). No measured Python path reaches 3.5 s (section 7-8).
+- **Linux bar (REGENT RULING):** L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured L milestone, ruled at ~4.3 s on the c2-inflated stack; the output-verified stack reads ~5.3 s (restatement requested from the regent). A native fs-op core was a 48 h research lane (Lane N), KILLED WED 05:12 (section 8). No measured Python path reaches 3.5 s (section 7-8).
 
 ## 1. Physics floor per phase on main (PERF-SOL)
 
@@ -338,7 +336,7 @@ Ceiling head ea0ec45e, cProfile, about 2x real. 684 deployed files. `integrate.r
   - `monorepo-4`: several `apm.yml` roots;
   - `tree-10-mcp`: a stdio MCP server per package;
   - `tree-10-multi`: GitHub, GHE Cloud, GitLab and ADO hosts.
-- Extend with `-policy` variants for discovery/enforcement and a Windows run for CRLF/`core.autocrlf` paths.
+- Extend with `-policy` variants for discovery/enforcement and a Windows run for CRLF/`core.autocrlf` paths. Note: `-policy` fixtures need the harness POLICY_DOCUMENT fix (mcp `trust_transitive: True`); without it every MCP-bearing tree is blocked on the base CLI (tests/fixtures/perf/offline.py:49).
 - **Cells (the product PR's tests).**
   1. Differential over the fixture list above on L, W and M.
   2. A primitive whose frontmatter one integrator would mutate is rendered identically for a second target (copy-on-write view).
@@ -603,6 +601,7 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
 - Native shape: returns DATA only; policy stays in the Python owners. Proved by a side-by-side differential build. W3d ruling before any code.
 
 ### Replacement North Star research: interpreter + import deletion (FINDING, 04:49 CET; VP-verified)
+- **PENDING CLEAN RE-MEASURE (07:40 CET):** every row in this subsection (A3 fork, B, COMBINED) and the deletion map below ran on c2 heads (d3881480 / 6d67f5aa), which skip globbed primitives (nlink guard). Fork == sub digests compared two c2 runs, not base. A3's absolute import deletion (-0.55..-0.82 s L) should transfer; its RATIO and the B/COMBINED/deletion-map rows are suspect. Re-measure on the no-c2 head ea0ec45e (B cherry-pick b50d8097), gated on ea0ec45e passing the output audit.
 - Fork-server oracle (a parent pre-imports all apm_cli + deps, then forks one child per cold install; only the child's wait4 CPU is measured), stacked L/M head d3881480, tree-50, 6 pairs per shard, 3 shards. Rows are `| ORACLE |` lines in the "Lane-N replacement probe (research)" step (harness perf-research/arch-lanen-probe3 @ 3655346e):
   - L [45541271380]: 0.826 (4.561 -> 3.744 s) / 0.807 (3.152 -> 2.551) / 0.806 (2.894 -> 2.346); median 0.807; per-shard absolute -0.55..-0.82 s.
   - M [45541286025]: 0.862 / 0.897 / 0.883; median 0.883.
@@ -648,6 +647,8 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
   - **No third bet: the honest end of v0.40 research.** L <= 3.5 s stays the North Star with no measured path; v0.41+ research.
   - Kept as a candidate, not a lane: on W the whole fs-primitive layer is ~1.2-1.6 s at 9V74 (Windows stat/exists cost 2-3x more). That is a possible future W-only many-call-site redesign. W is already at target, so it is not a v0.40 item.
 - **Lessons:**
+  - "a ceiling stub must produce byte-identical deployed output; c2 was fast because it skipped deploys (nlink guard)" (VP 07:32).
+  - Every ceiling/oracle head must pass a deployed-file digest equality check vs its base (path + mode + bytes). c2 (hardlink materialize) silently skipped globbed primitives (st_nlink > 1 guard) and overstated the stacked ceiling; it was never digest-checked. The A3 fork probe was (identical digests), which is why its rows stand.
   - attribution ranks, deletion sizes; 45% fs leaf-kind -> ~5% deletable. The 45% native-core gate counted fs-NAMED Python frames, not syscall CPU:
     - kinds are mapped by frame-name substring (":resolve", ":read", ":stat", ":walk"...), which catches abspath (the ceiling's own lexical replacement), click's resolve, read_manifest_text, etc.;
     - a leaf is the innermost Python frame including its own bytecode (pathlib wrappers inside per-file caller loops that a native walk does not remove);

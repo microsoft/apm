@@ -329,3 +329,19 @@
 06:53 | tick: main 1e4a208e; inbox silent; GODSPEED ends 07:00 + research closed -> my tick spaced to 30 min (messages still wake me) | E2 diff; SoL re-check by 11:30 | none
 07:08 | E2 Car 1 render diff VERIFIED identical (tree-50/10-mcp/10-multi, L/W/M 45555261181/45555296987/45555328454); -mcp-policy blocked by design (POLICY_DOCUMENT lacks mcp.allow, offline.py:49) -> E2 uses tree-50-policy + tree-10-multi-policy | E2 final diff runs | none
 07:11 | VP: Car 2 M2 KILLED (faithful W 0.979/L 0.965/M 0.891 verified); c2 overstated -> doc W headline ON HOLD; SoL: c2 attribution + stack re-measure without c2; summary gate line updated | SoL ~07:55 | W headline hold
+07:11 | VP approved (a)/(b); L milestone also restated from no-c2 row, summary-level if it moves; regent told ETA 08:05; doc v3.9 pushed 30736045 | SoL no-c2 stack ~08:05 | W+L headline hold
+07:14 | SoL c2 attribution: os.link vs copy2 + no require_verified_copy; no inode consumer; suspects: M2 fallback (_FRESH_USES lacks materialize) vs zero-byte link; base mismatch (#5410). E1 asked for per-path counts; VP told: hold doc, possible Car 2 reopen | c2-copyfile + no-c2 stack ~08:00 | W+L hold
+07:15 | VP: 3rd explanation base mismatch -> SoL benches c2 on 8f0e5d6b (W+L); reopen rule (i proven + fixed <=0.90 on 2 OS + count gate) | combined read ~08:05 | W+L hold
+07:22 | Bets pulse no change (#5406 waits admin); told Bets: change-only pulses | combined read ~08:05 | W+L hold
+07:24 | tick: main 1e4a208e; inbox silent; prompt refreshed (c2 hold, 3 explanations, reopen rule) | combined read ~08:05 | W+L hold
+07:26 | SoL: c2-on-8f0e5d6b c98de5a7 queued L/W; same-window faithful M2 6-pair control (E1 rows were PAIRS=2); VP told | read ~08:05 | W+L hold
+07:26 | VP rule: M2 kill stands unless 6-pair faithful row <=0.90 cold on 2 OS; 0.90-0.97 = doc finding, not a car | read ~08:05 | W+L hold
+07:30 | E1: c2 INVALID (nlink>1 skip, base_integrator.py:1636-1639, verified); stacked headline struck; deletion-map prompts row invalid -> SoL re-runs on no-c2 head; digest-equality rule proposed; doc updated | no-c2 stack ~08:05 | W+L restate
+07:31 | VP orders: audit ALL ceiling stubs for output equality (render-diff), doc states only verified ceilings, lesson verbatim; Bets+SoL dispatched; publish slips rather than unverified | audit reads ~08:15 | W+L restate
+07:31 | VP: no-c2 heads must pass output oracle before restate (in audit); deletion stub diff must be limited to its family; Atlas rule forwarded to regent | audit ~08:15 | W+L restate
+07:35 | Car 1 render diff VERIFIED (monorepo-4 only, #5418 class) -> E2 opens PR; policy cell via POLICY_DOCUMENT trust_transitive on harness fork before H8; harness defect flagged to VP | audit ~08:15 | W+L restate
+07:36 | VP: POLICY_DOCUMENT fix -> E1 harness PR now; doc has no -policy measured rows (note added) | audit ~08:15 | W+L restate
+07:37 | Bets audit 17 requests out (harness audit-render-diff d41b6247); told: judge on 4 non-policy fixtures, tree-50-policy base-blocked = harness defect; c2 heads expected to differ | audit ~08:15 | W+L restate
+07:38 | Bets: A3 ratio/B/combined on c2 heads -> doc marked pending; clean re-measure on ea0ec45e (B b50d8097) gated on audit | audit+clean ~08:20 | W+L restate
+07:40 | no-c2 stack VERIFIED (provisional pending audit): W 0.702 [45558776176] ~7.4 s at line; L 0.875 [45558797634] ~5.3 s; M 0.717; c2-copyfile 0.965 = M2 -> nlink was whole c2 gain; Lane N oracles re-run on no-c2 heads; mode added to final audit | audit ~08:15, clean ~08:20 | W+L restate
+07:41 | doc v4.0 summary rewritten (no-c2, correction stated plainly, W 2/4 classes over, L ~5.3 s, M2 killed, regent L milestone restatement requested); pending audit | audit ~08:15 | none
