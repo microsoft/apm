@@ -123,8 +123,13 @@ L/M: perf-research/arch-stack-ceiling-L d3881480 vs main 1e4a208e. W: perf-resea
 | OS | paired ratio | base -> new (bench runner) | ~s at 9V74 | target | run |
 |---|---|---|---|---|---|
 | L | 0.701 | 7.18 -> 5.03 s | 6.1 x 0.701 = **4.3 s** | 3.5 s (miss by ~0.8 s) | 45530064444 |
-| W | 0.719 (vs main+#5374) | 11.32 -> 7.97 s | 13.2 x r(#5374) x 0.719 = **~8.5-9.5 s** (r(#5374) ~0.9-1.0) | 7.5 s (miss by ~1-2 s) | 45530047000 |
+| W | **0.568** (vs main+#5374; head W2 6d67f5aa) | 15.09 -> 8.44 s | 13.2 x 0.95 (#5374, its changelog) x 0.568 = **~7.1 s** | 7.5 s (MET by ~0.4 s, see caveat) | 45532025700 |
 | M | 0.663 | 8.18 -> 5.37 s | n/a (no 9V74 class) | - | 45530082924 |
+W correction: the first W head (2a69add2, 0.719) lacked the lexical-resolve ceiling on Windows, because
+realpath.py redefines resolve_path inside `if sys.platform == "win32":` and the L ceiling's stub sat in
+the generic function. W2 6d67f5aa = Bets' W ceiling 8efedece (lexical override at end of file) + c2 +
+parse-once + skill tree. Caveat: the 13.2 s W reference is the OpenSSL-world calibration (F16); the default
+schannel world may run higher, so read W as ~7-8 s against 7.5.
 Overlap vs paper (L): c2 alone 0.817, ceiling alone 0.899 (Bets 45528038721). Paper additive = 0.716,
 multiplicative = 0.734; measured 0.701. They stack slightly better than the paper (removing the copy also
 removes integrate-side walks of the copied tree). Per-shard ratios within +-1.5%.

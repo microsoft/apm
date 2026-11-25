@@ -177,3 +177,4 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 
 ## F30 (03:20, 25 Nov) Stacked ceiling (Bets integrate ceiling + M2 bound): L 0.701 [45530064444] -> ~4.3 s @9V74 (target 3.5); W 0.719 vs main+#5374 [45530047000] -> ~8.5-9.5 s (target 7.5); M 0.663 [45530082924]. Paper 0.716-0.734 L.
 ## F31 (03:20) Native-core gate MET: walk+stat+hash+copy = 45.5% (main) / 45.2% (stacked) of L process CPU; 54-65% incl. realpath; hash 0.2% [45520769932, 45530101839].
+## F32 (03:50) W stacked ceiling corrected: 0.568 vs main+#5374 [45532025700] -> ~7.1 s @9V74 (target 7.5). The first W head missed the lexical resolve on Windows (platform redefinition of resolve_path).
