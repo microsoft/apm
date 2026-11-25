@@ -23,6 +23,9 @@ class PrimitiveMix:
     hook_every: int = 3
     # One stdio MCP server on every ``mcp_every``-th package (0: none).
     mcp_every: int = 8
+    # The first instruction of every ``always_on_every``-th package is applyTo '**'
+    # (0: none), so Claude may route it to a compiled AGENTS.md (#5434).
+    always_on_every: int = 0
 
     def per_package(self) -> int:
         return self.instructions + self.agents + self.skills + self.prompts
@@ -107,6 +110,12 @@ TREE_RECIPES: dict[str, TreeRecipe] = {
         replace(base, name=f"{base.name}-mcp", primitives=_MCP_HEAVY),
         # Rule-dir and command targets render instructions and prompts (#4940).
         replace(base, name=f"{base.name}-claude", targets=("claude",)),
+        replace(
+            base,
+            name=f"{base.name}-claude-routed",
+            targets=("claude",),
+            primitives=PrimitiveMix(always_on_every=1),
+        ),
         replace(base, name=f"{base.name}-tip", pin="tip"),
         replace(base, name=f"{base.name}-sha", pin="sha"),
     )

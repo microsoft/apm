@@ -64,6 +64,8 @@ jobs:
       runner: ${{ steps.req.outputs.runner }}
       venv_apm: ${{ steps.req.outputs.venv_apm }}
       profile: ${{ steps.req.outputs.profile }}
+      oracle: ${{ steps.req.outputs.oracle }}
+      oracle_matrix: ${{ steps.req.outputs.oracle_matrix }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -84,6 +86,7 @@ jobs:
         JOURNEYS="${IN_JOURNEYS:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
         RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"; OS="${IN_OS:-linux}"
         PROFILE="${IN_PROFILE:-0}"
+        ORACLE=""; MODES="replay,attested,attested-frozen"
         if [ "${GITHUB_EVENT_NAME}" = push ]; then
           # KEY=VALUE lines only; never sourced, so the file cannot run code.
           while IFS='=' read -r key value; do
@@ -91,6 +94,7 @@ jobs:
               BASE) BASE="$value" ;; NEW) NEW="$value" ;; FIXTURES) FIXTURES="$value" ;;
               JOURNEYS) JOURNEYS="$value" ;; RTT) RTT="$value" ;; PAIRS) PAIRS="$value" ;;
               OS) OS="$value" ;; PROFILE) PROFILE="$value" ;;
+              ORACLE) ORACLE="$value" ;; MODES) MODES="$value" ;;
             esac
           done < <(grep -E '^[A-Z]+=' bench-request.env)
         fi
@@ -104,6 +108,9 @@ jobs:
         [ "$DISTINCT" -eq "$(tr ',' '\n' <<< "$RTT" | wc -l)" ] || { echo "::error::RTT values must be distinct"; exit 1; }
         [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
         [[ "$PROFILE" =~ ^[01]$ ]] || { echo "::error::PROFILE must be 0 or 1"; exit 1; }
+        [[ "$ORACLE" =~ ^[a-z0-9,+-]*$ ]] || { echo "::error::bad ORACLE"; exit 1; }
+        [[ "$MODES" =~ ^[a-z,-]+$ ]] || { echo "::error::bad MODES"; exit 1; }
+        MATRIX=$(python3 -c 'import json,sys; f,m=sys.argv[1],sys.argv[2]; print(json.dumps([{"fixture":a,"mode":b} for a in f.split(",") if a for b in m.split(",") if b]))' "$ORACLE" "$MODES")
         case "$OS" in
           linux) RUNNER=ubuntu-24.04 ;;
           macos) RUNNER=macos-15 ;;
@@ -119,11 +126,62 @@ jobs:
           echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"; echo "runner=$RUNNER"
           echo "venv_apm=$VENV_APM"
           echo "profile=$PROFILE"
+          echo "oracle=$ORACLE"; echo "oracle_matrix=$MATRIX"
         } >> "$GITHUB_OUTPUT"
+
+  oracle:
+    # S93 input-mutation oracle (research): one job per fixture x mode, on NEW only.
+    name: Oracle ${{ matrix.fixture }} ${{ matrix.mode }}
+    needs: request
+    if: needs.request.outputs.oracle != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.request.outputs.oracle_matrix) }}
+    env:
+      NEW: ${{ needs.request.outputs.new }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: harness
+        persist-credentials: false
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - name: Install new CLI and harness
+      run: |
+        set -euo pipefail
+        git -C harness fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$NEW"
+        git -C harness worktree add --quiet --detach ../new FETCH_HEAD
+        (cd new && uv sync --frozen --no-editable --quiet)
+        echo "new: $(git -C new rev-parse HEAD) $(new/.venv/bin/apm --version)"
+        (cd harness && uv sync --frozen --extra dev --quiet)
+    - name: Input-mutation oracle
+      working-directory: harness
+      env:
+        NEW_APM: ${{ github.workspace }}/new/.venv/bin/apm
+        ORACLE_FIXTURE: ${{ matrix.fixture }}
+        ORACLE_MODE: ${{ matrix.mode }}
+      run: |
+        set +e
+        uv run --frozen python .github/probe/mutation_oracle.py 2>&1 | tee oracle.log | grep -E "^ORACLE" | grep -v "^ORACLE same" | tail -300
+        { echo "### Oracle $ORACLE_FIXTURE $ORACLE_MODE @ $NEW"; echo '```'; grep -E "^ORACLE (FINDING|positive|RESULT|ROW)|counts|baseline|NO BASELINE|reconverge" oracle.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+    - if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: oracle-${{ strategy.job-index }}
+        path: harness/oracle.log
+        if-no-files-found: warn
 
   bench:
     name: ABAB shard ${{ matrix.shard }}
     needs: request
+    if: needs.request.outputs.oracle == ''
     runs-on: ${{ needs.request.outputs.runner }}
     timeout-minutes: 40
     strategy:
@@ -197,7 +255,7 @@ jobs:
   report:
     name: Report
     needs: [request, bench]
-    if: always() && needs.request.result == 'success'
+    if: always() && needs.request.result == 'success' && needs.request.outputs.oracle == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
