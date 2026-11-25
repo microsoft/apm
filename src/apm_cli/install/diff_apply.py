@@ -784,7 +784,10 @@ def try_apply(
         _root, user_scope, targets = resolve_audit_scope(project_root, lock)
         if user_scope or not targets:
             raise Decline("scope")
-        _refuse_claude_carried_rules(project_root, targets, lock)
+        if not attested:
+            # An attested record keys every Claude routing input (#5451): its hit
+            # proves the routing the full run decided; any other run declines.
+            _refuse_claude_carried_rules(project_root, targets, lock)
         if frozen_disposition.replay:  # the frozen preflight owner, before any decision
             verdict_attest.refuse_frozen_drift(project_root)
         from apm_cli.cache.deploy_store import DeployStore

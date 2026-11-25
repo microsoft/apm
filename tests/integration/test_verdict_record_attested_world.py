@@ -115,16 +115,31 @@ def test_a_deployed_file_edited_after_the_attested_install_is_proved(world_insta
 
 
 @pytest.mark.parametrize("world_install", ["tree-10-claude"], indirect=True)
-def test_a_valid_attestation_never_skips_the_claude_carried_rules_refusal(world_install) -> None:
-    """#5394: with claude targeted and a root AGENTS.md that may carry its rules, the
-    fast path declines; an attestation install #1 wrote must not take precedence."""
+def test_an_attestation_keys_the_claude_carriers_it_proved(world_install) -> None:
+    """#5394, #5451: with claude targeted and a root AGENTS.md, the attestation keys
+    every Claude routing input. Unchanged, its hit prints what the full pipeline prints
+    and moves no byte, and the next run replays. An edited AGENTS.md is no hit of
+    either kind, and the run answers as the full pipeline does."""
     install, project, _world = world_install
     (project / "AGENTS.md").write_text("# Project notes\n", encoding="utf-8")
     _assert_attested(install())
+    before = _tree_bytes(project)
 
-    second = install()
+    hit, full = install(), install(fast="0")
 
-    _assert_full_pipeline_ran(second)
+    _assert_attested_hit(hit)
+    assert full[0] == 0 and not _traces(full[2]), full[1] + full[2]
+    assert _normalized(hit[1]) == _normalized(full[1])
+    assert _tree_bytes(project) == before
+    replayed = install()
+    assert "hit" in _traces(replayed[2]), replayed[2]  # the served hit recorded its output
+    assert _normalized(replayed[1]) == _normalized(full[1])
+    (project / "AGENTS.md").write_text("# Project notes, edited\n", encoding="utf-8")
+
+    edited, full = install(), install(fast="0")
+
+    assert not {"hit", "attested hit"} & set(_traces(edited[2])), edited[2]
+    assert _normalized(edited[1]) == _normalized(full[1])
 
 
 @pytest.mark.parametrize("world_install", ["tree-10-claude"], indirect=True)
