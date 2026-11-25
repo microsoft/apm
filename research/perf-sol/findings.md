@@ -164,3 +164,7 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 - Differential fast vs full on main [45518143217]: lockfile + 1,441 project files byte-identical; only the random installation identity + bound receipts differ.
 - LESSON: re-measure a deletion upper bound on CURRENT main before building the car.
 ## F24 Warm cache-hit remainder (main + #5410): W schannel warm 0.960 / auth 0.957 / update 0.952 [45515035586]; OpenSSL 0.961 / 0.966 / 0.958 [45515126517]; spawns 66 -> 16. Lead ruling: no car, design doc.
+
+## F25 (02:20, 25 Nov) Phase map re-grounded on main 1e4a208e -> files/main-phase-map.md
+- integrate W 0.499 / L 0.551 (stack 0.415 / 0.402); skills 0.854/0.871; instr 0.927/0.947; prompts 0.944/0.956; agents 0.962/0.973; shared remainder ~19% (stack 27-33%); lockfile+ledger+journal 0.789/0.770; policy 0.961/0.980.
+## F26 (02:29) no-op lead refuted (bench no-op = first unchanged install after full install; proof run) [45523138212]; frozen-warm kept-mcp decline = trace-harness sequencing artifact; deletion 0.995 L [45524432672].

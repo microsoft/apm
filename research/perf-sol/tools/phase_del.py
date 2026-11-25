@@ -32,7 +32,7 @@ for run in sys.argv[1:]:
             if pr:
                 ratios += pr
                 rows.append(f"s{s} base {statistics.median(b.values()):.2f} new {statistics.median(n.values()):.2f} r {statistics.median(pr):.3f}")
-        print(f"  {fx} {j}: paired {statistics.median(ratios):.3f} | " + " | ".join(rows))
+        print(f"  {fx} {j}: paired {statistics.median(ratios):.3f} | " + " | ".join(rows) if ratios else f"  {fx} {j}: NO PAIRS")
     for k, v in data.items():
         if k[0] == "ERR":
             print("  ERRORS", k, len(v), v[:1])
