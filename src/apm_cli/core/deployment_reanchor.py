@@ -214,6 +214,65 @@ def rename_ledger_owners(lockfile, renames: dict[str, str], writers=None) -> Non
     lockfile.deployment_ledger = DeploymentLedger(records=records)
 
 
+def rekey_rows(lockfile: Any, renames: Mapping[str, str]) -> None:
+    """Re-key lock rows by *renames*, with every parent reference to a renamed key.
+
+    Each row's key, its ``declaring_parent`` and its ``resolved_by`` (a lock
+    key in a replacement-enabled lock) follow the map; order is kept. The one
+    rewrite the uninstall re-anchor (#4889) and the #5418 re-key share.
+    """
+    rows = list(lockfile.dependencies.items())
+    lockfile.dependencies.clear()
+    for key, row in rows:
+        if row.declaring_parent in renames:
+            row.declaring_parent = renames[row.declaring_parent]
+        if row.resolved_by in renames:
+            row.resolved_by = renames[row.resolved_by]
+        lockfile.dependencies[renames.get(key, key)] = row
+
+
+def rekey_requests(
+    binding: Any,
+    renames: dict[str, str],
+    dev: dict[str, bool] | None = None,
+    visit_order: dict[str, int] | None = None,
+) -> bool:
+    """Name each replacement request's parent by its re-anchored key (req-rpl-003).
+
+    A re-anchored parent's request also takes the parent's new dev status,
+    as install records the edge. Requests follow the post-uninstall resolver
+    order (*visit_order*, keyed by the old parent keys): a root request first,
+    then each parent as install visits it (#4999). Without *visit_order* (the
+    #5418 re-key, which changes no graph) the order is kept.
+    """
+    if binding is None or not binding.requests:
+        return False
+    dev = dev or {}
+    rank = visit_order or {}
+    ordered = (
+        list(binding.requests)
+        if visit_order is None
+        else sorted(
+            binding.requests,
+            key=lambda request: (
+                -1 if request.parent is None else rank.get(request.parent, len(rank))
+            ),
+        )
+    )
+    rekeyed = {
+        replace(
+            request,
+            parent=renames.get(request.parent, request.parent),
+            dev=dev.get(request.parent, request.dev),
+        ): None
+        for request in ordered
+    }
+    if list(rekeyed) == list(binding.requests):
+        return False
+    binding.requests = rekeyed
+    return True
+
+
 def move_materializations(
     moves: tuple[tuple[Path, Path], ...], modules_dir: Path
 ) -> tuple[tuple[Path, Path, tuple[Path, ...]], ...]:

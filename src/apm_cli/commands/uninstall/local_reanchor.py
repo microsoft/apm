@@ -39,6 +39,8 @@ from typing import Any
 from ...core.deployment_reanchor import (
     modules_path,
     move_materializations,
+    rekey_requests,
+    rekey_rows,
     rename_ledger_owners,
     restore_materializations,
 )
@@ -626,40 +628,6 @@ def _unhashed_source_files(source: Path) -> dict[str, Path]:
     return found
 
 
-def _rekey_requests(
-    binding: Any,
-    renames: dict[str, str],
-    dev: dict[str, bool],
-    visit_order: dict[str, int] | None = None,
-) -> bool:
-    """Name each replacement request's parent by its re-anchored key (req-rpl-003).
-
-    A re-anchored parent's request also takes the parent's new dev status,
-    as install records the edge. Requests follow the post-uninstall resolver
-    order (*visit_order*, keyed by the old parent keys): a root request first,
-    then each parent as install visits it (#4999).
-    """
-    if binding is None or not binding.requests:
-        return False
-    rank = visit_order or {}
-    ordered = sorted(
-        binding.requests,
-        key=lambda request: -1 if request.parent is None else rank.get(request.parent, len(rank)),
-    )
-    rekeyed = {
-        replace(
-            request,
-            parent=renames.get(request.parent, request.parent),
-            dev=dev.get(request.parent, request.dev),
-        ): None
-        for request in ordered
-    }
-    if list(rekeyed) == list(binding.requests):
-        return False
-    binding.requests = rekeyed
-    return True
-
-
 def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = None) -> bool:
     """Apply *plan* to the in-memory lock; the caller persists it once.
 
@@ -693,17 +661,10 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
             lockfile.dependencies[key].resolved_by = parent
     if renames:
         rename_ledger_owners(lockfile, renames, plan.writers)
-        rows = list(lockfile.dependencies.items())
-        lockfile.dependencies.clear()
-        for key, row in rows:
-            if row.declaring_parent in renames:
-                row.declaring_parent = renames[row.declaring_parent]
-            if row.resolved_by in renames:
-                row.resolved_by = renames[row.resolved_by]
-            lockfile.dependencies[renames.get(key, key)] = row
+        rekey_rows(lockfile, renames)
     _reidentify_children(lockfile, old_identity, renames, replacements, plan.children)
     for row in lockfile.dependencies.values():
-        _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
+        rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
 
 

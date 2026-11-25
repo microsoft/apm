@@ -10,7 +10,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -21,6 +21,7 @@ def rekey_legacy_local_identities(
     project_root: Path,
     modules_dir: Path | None = None,
     journal: Callable[[tuple], None] | None = None,
+    before_rename: Callable[[LockFile, dict[str, str]], None] | None = None,
 ) -> dict[str, str]:
     """Re-key pre-#5418 absolute local identities in place; return old -> new keys.
 
@@ -33,10 +34,18 @@ def rekey_legacy_local_identities(
     receives the moves (the install transaction puts them back on rollback
     or a declined update). The owner stays the same row; nothing is deleted.
     A new key another row already holds refuses before any change.
+    *before_rename* sees the lock, still under its legacy keys, and the
+    rename map once nothing can refuse any more (the install proves the
+    legacy receipts there).
     """
     if lockfile is None or not lockfile.dependencies:
         return {}
-    from apm_cli.core.deployment_reanchor import move_materializations, rename_ledger_owners
+    from apm_cli.core.deployment_reanchor import (
+        move_materializations,
+        rekey_requests,
+        rekey_rows,
+        rename_ledger_owners,
+    )
     from apm_cli.core.remediation import LOCAL_IDENTITY_DUPLICATE
     from apm_cli.deps.local_identity import legacy_local_renames
     from apm_cli.integration.mcp_config_view import rebind_rekeyed_omissions
@@ -55,6 +64,8 @@ def rekey_legacy_local_identities(
                 f"{label}. " + LOCAL_IDENTITY_DUPLICATE.sentence()
             )
         owners[new] = old
+    if before_rename is not None:
+        before_rename(lockfile, renames)
     moves = []
     rekeyed = []
     for old, anchor in found.items():
@@ -71,12 +82,9 @@ def rekey_legacy_local_identities(
         journal(move_materializations(tuple(moves), modules_dir))
     rename_ledger_owners(lockfile, renames)
     rebind_rekeyed_omissions(lockfile, rekeyed)
-    rows = list(lockfile.dependencies.items())
-    lockfile.dependencies.clear()
-    for key, row in rows:
-        if row.declaring_parent in renames:
-            row.declaring_parent = renames[row.declaring_parent]
-        lockfile.dependencies[renames.get(key, key)] = row
+    rekey_rows(lockfile, renames)
+    for row in lockfile.dependencies.values():
+        rekey_requests(row.replacement, renames)
     return renames
 
 
@@ -84,3 +92,38 @@ def with_portable_local_keys(lockfile: LockFile | None, project_root: Path) -> L
     """*lockfile* with its legacy absolute local identities re-keyed (no apm_modules move)."""
     rekey_legacy_local_identities(lockfile, project_root)
     return lockfile
+
+
+class LegacyReceiptCarry:
+    """Carry deployment receipts across the #5418 re-key, as uninstall does (#4889).
+
+    :meth:`prove` runs before the rows change: only when every renamed owner's
+    receipt is proven does the carry happen. :meth:`carry_after_commit`, once
+    the lock is staged, rebinds them to the committed lock with their hash
+    history, before this run binds its own writes; a lock that never commits
+    leaves every receipt as it was.
+    """
+
+    def __init__(self, project_root: Path, scope: Any) -> None:
+        self.project_root, self.scope = project_root, scope
+        self.renames: dict[str, str] = {}
+
+    def prove(self, legacy: LockFile, renames: dict[str, str]) -> None:
+        from apm_cli.core.deployment_reanchor import reanchor_receipt_problems
+
+        if not reanchor_receipt_problems(self.project_root, self.scope, legacy, renames):
+            self.renames = dict(renames)
+
+    def carry_after_commit(self, apm_dir: Path) -> None:
+        if not self.renames:
+            return
+        from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
+
+        after_lockfile_commit(lambda: self._carry(apm_dir))
+
+    def _carry(self, apm_dir: Path) -> None:
+        from apm_cli.core.deployment_reanchor import rename_receipt_owners
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        committed = LockFile.read(get_lockfile_path(apm_dir))
+        rename_receipt_owners(self.project_root, self.scope, committed, self.renames)

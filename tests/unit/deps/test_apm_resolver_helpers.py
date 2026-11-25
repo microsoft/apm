@@ -967,6 +967,33 @@ class TestRepositoryRelativeAnchorIdentity:
         assert portable_anchor_identity(home, app) == home.resolve().as_posix()
         assert portable_anchor_identity(above, app) == above.resolve().as_posix()
 
+    def test_a_case_variant_home_spelling_is_home_where_the_volume_folds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N4: the HOME bound holds for ``~/Work`` spelled ``~/work`` on a folding volume."""
+        from apm_cli.utils.executable_exclusion import is_home_or_above as home_or_above
+        from apm_cli.utils.paths import spelling_key
+
+        home = self._home(monkeypatch, tmp_path / "Users" / "Me")
+        variant = tmp_path / "users" / "me"
+        app, lib = variant / "app", variant / "lib"
+        for path in (app, lib):
+            path.mkdir(parents=True)
+        real_samefile = os.path.samefile
+
+        def folding(first, second) -> bool:
+            if spelling_key(os.fspath(first)) == spelling_key(os.fspath(second)):
+                return True
+            return real_samefile(first, second)
+
+        monkeypatch.setattr(os.path, "samefile", folding)
+        assert home_or_above(variant, home.resolve())
+        assert home_or_above(tmp_path / "users", home.resolve())
+        assert portable_anchor_identity(lib, app) == lib.resolve().as_posix()
+        monkeypatch.setattr(os.path, "samefile", real_samefile)
+        assert not home_or_above(variant, home.resolve())
+        assert portable_anchor_identity(lib, app) == "../lib"
+
     def test_no_repository_filesystem_root_common_ancestor_stays_absolute(
         self, tmp_path: Path
     ) -> None:

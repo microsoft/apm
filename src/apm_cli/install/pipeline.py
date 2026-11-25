@@ -476,16 +476,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # local content exists (e.g. .apm/ was deleted but old files remain).
     _old_local_deployed: builtins.list = []
     _early_lockfile = LockFile.read(get_lockfile_path(apm_dir)) if apm_dir else None
+    _receipts = None
     if _early_lockfile and not frozen and not dry_run:
         from ..core.scope import get_modules_dir
-        from .phases.lockfile_rekey import rekey_legacy_local_identities
+        from .phases.lockfile_rekey import LegacyReceiptCarry, rekey_legacy_local_identities
 
         # A writable install re-keys pre-#5418 absolute local identities once.
+        _receipts = LegacyReceiptCarry(project_root, scope)
         rekey_legacy_local_identities(
             _early_lockfile,
             source_root,
             None if lockfile_only else get_modules_dir(scope),
             journal=transaction.journal_materialization_moves,
+            before_rename=_receipts.prove,
         )
     if _early_lockfile:
         _old_local_deployed = builtins.list(_early_lockfile.local_deployed_files)
@@ -902,6 +905,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # checks it before that scope commits it (install/commit_gate.py).
         LockfileBuilder(ctx).build_and_save()
         check_before_lockfile(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
+        if _receipts is not None:
+            _receipts.carry_after_commit(ctx.apm_dir)
 
         # ------------------------------------------------------------------
         # Phase: Post-deps local .apm/ content.

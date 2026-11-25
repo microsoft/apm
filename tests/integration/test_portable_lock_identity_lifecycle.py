@@ -17,6 +17,7 @@ is a byte no-op.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -326,3 +327,67 @@ def test_failed_install_after_rekey_restores_the_moved_slot(
     assert "missing" in failed.stdout + failed.stderr
     assert (app / "apm.lock.yaml").read_bytes() == lock
     assert _modules_state(app) == modules
+
+
+def _lib_b_receipt(world: ReplayWorld) -> tuple[dict, list, list]:
+    """lib-b's skill receipt: (record, binding, history) from APM_HOME."""
+    directory = Path(world.env["APM_HOME"]) / "deployment-receipts"
+    (receipts,) = [
+        json.loads(path.read_text(encoding="utf-8")) for path in directory.glob("*.json")
+    ]
+    key = next(k for k in receipts["bindings"] if k.endswith("lib-b-skill/SKILL.md"))
+    record = next(r for r in receipts["records"] if r["value"].endswith("lib-b-skill/SKILL.md"))
+    return record, receipts["bindings"][key], receipts["history"].get(key, [])
+
+
+def test_rekey_carries_receipts_with_their_history(tmp_path: Path, apm_binary_path: Path) -> None:
+    """Copilot #5485: receipts follow the re-keyed owner; earlier hashes stay."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    app = _monorepo(world, repo)
+    _install_before_5418(world, repo, app)
+    skill = repo / "packages" / "lib-b" / ".apm/skills/lib-b-skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "v2\n", encoding="utf-8")
+    _install_before_5418(world, repo, app)
+    record, binding, history = _lib_b_receipt(world)
+    legacy = record["active_owner"]
+    assert Path(legacy.removeprefix("local:")).is_absolute() and history, (record, history)
+    world.git(repo, "init", "-q", "--initial-branch=main")
+
+    world.apm("install", cwd=app)
+
+    record, binding, after = _lib_b_receipt(world)
+    assert record["active_owner"] == "local:../../packages/lib-b"
+    assert record["owners"] == ["local:../../packages/lib-b"]
+    assert binding[0] == "local:../../packages/lib-b"
+    assert after == history
+    assert "local:../../packages/lib-b" in (app / "apm.lock.yaml").read_text(encoding="utf-8")
+    world.audit_clean(cwd=app)
+
+
+def test_partial_install_on_a_replacement_lock_saves_a_valid_graph(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Copilot #5485: resolved_by follows the re-key, so the kept subtree is a valid graph."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    app = _monorepo(world, repo)
+    _skill_package(repo / "packages" / "lib-x", "lib-x")
+    write(
+        app / "apm.yml",
+        "$schema: https://microsoft.github.io/apm/specs/schemas/"
+        "manifest-source-replacements-v1.schema.json\n"
+        "name: app\nversion: 1.0.0\ntargets: [claude]\nreplace: []\n"
+        "dependencies:\n  apm:\n    - ../../packages/lib-a\n    - ../../packages/lib-x\n",
+    )
+    _install_before_5418(world, repo, app)
+    world.git(repo, "init", "-q", "--initial-branch=main")
+
+    installed = world.apm("install", "../../packages/lib-x", cwd=app)
+
+    assert "absent from the lockfile" not in installed.stdout + installed.stderr
+    text = (app / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert "resolved_by: local:../../packages/lib-b" in text
+    assert str(repo.resolve().as_posix()) not in text
+    world.apm("install", "--frozen", cwd=app)
+    world.audit_clean(cwd=app)
