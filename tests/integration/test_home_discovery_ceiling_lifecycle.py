@@ -48,7 +48,7 @@ def _run(engine: tuple[str, ...], args: tuple[str, ...], cwd: Path, env: dict[st
 def test_a_project_install_under_home_ignores_a_stray_home_manifest(
     tmp_path: Path, apm_engine_command: tuple[str, ...]
 ) -> None:
-    isolated, environment, package = _world(tmp_path)
+    isolated, environment, _ = _world(tmp_path)
     home_manifest = isolated.home / "apm.yml"
     home_manifest.write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
     before = home_manifest.read_bytes()

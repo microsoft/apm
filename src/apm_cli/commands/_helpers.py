@@ -557,12 +557,25 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     ``safe.directory`` class, #4545): ``/tmp/work`` must not run another
     user's ``/tmp/apm.yml``. It is skipped with a warning naming it, and the
     walk continues. Windows ownership (SIDs) is not checked.
+
+    ``$HOME`` is a ceiling (#5448): a walk that starts in a strict subdirectory
+    of the home directory never adopts an ``apm.yml`` in ``$HOME`` itself or
+    above it, so a stray ``~/apm.yml`` cannot capture a project folder and
+    deploy into the user scope. A project rooted at ``start`` still works, and
+    a walk starting outside ``$HOME`` is unchanged.
     """
     import stat
 
     cwd = (start or Path.cwd()).resolve()
     geteuid = getattr(os, "geteuid", None)
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        home = None
+    below_home = home is not None and cwd != home and home in cwd.parents
     for candidate in (cwd, *cwd.parents):
+        if below_home and candidate == home:
+            break
         manifest = manifest_file(candidate)
         try:
             info = manifest.lstat()
