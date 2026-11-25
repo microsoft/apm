@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -170,6 +171,14 @@ def _kill(pid: int) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
+def _state(pid: int) -> str:
+    """First letter of ``ps`` state for *pid* (``Z`` for a zombie); empty once gone."""
+    result = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return result.stdout.strip()[:1]
+
+
 @posix_only
 def test_guard_fails_the_session_that_leaves_a_credential_helper(tmp_path: Path) -> None:
     """A helper this pytest run started that outlives it fails the session and is stopped."""
@@ -209,7 +218,10 @@ def test_exited_unreaped_helper_is_not_listed_as_running(tmp_path: Path) -> None
     try:
         assert helper.pid in credential_helpers.credential_helper_processes(os.getpgid(0))
         os.kill(helper.pid, signal.SIGKILL)
-        os.waitid(os.P_PID, helper.pid, os.WEXITED | os.WNOWAIT)
+        deadline = time.monotonic() + 30
+        while _state(helper.pid) != "Z" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _state(helper.pid) == "Z", "the killed helper never became a zombie"
 
         assert helper.pid not in credential_helpers.credential_helper_processes(os.getpgid(0))
     finally:
