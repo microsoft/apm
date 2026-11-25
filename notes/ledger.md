@@ -51,3 +51,4 @@
 02:20 | shapes interim sent (notes ab3d2eca); plan-once W 0.970 L 0.976; bulk ceiling ea46241b benching | ~25 min | none
 02:30 | integrate ceiling: A+B W 0.688 (clears), L 0.901 (misses); W win = containment; reported | next: lead | none
 02:38 | W on main+#5374 full 0.718 (-4.45s clears); L parse-once 0.914 (-0.82 misses); differential parse-once == A/A noise only; sec2 drafted | W3d review | none
+02:49 | #5382 9be8e258 W3d ACCEPT (T1/T2); lockfile delta -> #5418 filed; L skill-tree 0.899 (no gain); L ceiling profile running | ~20 min | none

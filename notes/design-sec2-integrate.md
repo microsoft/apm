@@ -1,6 +1,6 @@
 # Section 2: Integrate redesign (v0.40 headline)
 
-Owner: PERF-BETS. Status: DRAFT for W3d co-sign. All numbers are cold tree-50, paired CPU incl. children, against the base named in each row.
+Owner: PERF-BETS. Status: W3d CO-SIGNED section 2.1 with IR1-IR9 (row `w3d:ruling:integrate-2.1`). All numbers are cold tree-50, paired CPU incl. children, against the base named in each row.
 
 ## 2.0 Goal and bar
 
@@ -35,6 +35,27 @@ The redesign must be NO WEAKER than today's per-path containment. In W3d's `cont
 | `resolve_for_containment` (ledger locators) | 3618 + 2734 | `deployment_ledger.locator_for_path`, `deployed_paths._resolved_candidate` | Locator = the plan's lexical rel under a proven root (I4); full resolve when unproven. | K6 |
 | `resolve_path` via `portable_relpath(s)` | 5652 | receipts, lockfile `deployed_files` | Same as above (I4). | K6 |
 | `resolve_path` in link resolver / skill roots / globbing | ~3000 | `init_link_resolver`, `_inactive_skill_roots`, `find_files_by_glob` | Computed once per package in the plan (Shape A). | K1 |
+
+| `_trusted_hash` lstat chain (ledger) | ~3,300 lstat; W 0.91 s | `core/deployment_ledger` | Root proof plus leaf lstat (I2/I3). E2 is measuring the overlap; it is counted once, inside the containment family, and not double-counted in the W ceiling. | K1, I2 |
+
+### W3d co-sign: row `w3d:ruling:integrate-2.1`, REQUIRED IR1-IR9
+
+Without IR1/2/4/5 the design is weaker than today.
+
+- **IR1.** I1 covers only trees APM itself wrote with no-follow exclusive creates (the in-process / lever-C landing). A git checkout materializes symlinks, so it takes the I2 walk.
+- **IR2.** The plan's link-free set has the invocation-memo lifetime. It is dropped on user code and on `release_held` (clear-all, generation-guarded as in #5382 9be8e258).
+- **IR3.** Every source READ stays no-follow, plus an `fstat` S_ISREG check.
+- **IR4.** On nt, refuse ANY reparse point (junctions fail S_ISLNK).
+- **IR5.** One component validator runs before any lexical join: `..`, ADS `:`, trailing dot/space, device names, 8.3 `~N`.
+- **IR6.** Shape B builds the stage per regular file from the plan set (never a clonefile/copytree of the directory), C8-seals it, and moves an existing directory aside through the journal.
+- **IR7.** Locators are computed against the single resolved root. K9 includes case-variant and 8.3 roots.
+- **IR8.** The same per-file outcome and diagnostic when a link is found.
+- **IR9.** The K8 guard plus a MutationCase. K9 adds:
+  - a planted link in an old `apm_modules` tree;
+  - a `.claude` junction;
+  - a script planting a link between plan and deploy;
+  - a git checkout containing a symlink.
+- cost: O(1) per file or per root; the ceiling is unchanged.
 
 ### Receipts and ownership (unchanged contracts)
 
@@ -80,6 +101,7 @@ Base main 1e4a208e:
 | A + lexical resolve / no link scan (893b7b89) | 0.752 [45525667777] | 0.947 [45525650620] |
 | A + both (ea46241b) | 0.688, -5.8 s [45524926467] | 0.901, -0.54 s [45524908282] |
 | A + both + parse-once (4c98c85e) | - | 0.914, 6.96 -> 6.14 s, -0.82 s [45526633274]; same-window rerun of A + both: 0.920, -0.45 s [45526647663] |
+| A + both + parse-once + skill tree as one op (ea0ec45e; copytree, which IR6 forbids in product, so this is an upper bound) | - | 0.899, 4.68 -> 4.22 s [45528038721]; same-window parse-once 0.903 [45528060785]: the skill tree adds ~0 |
 
 Base main + #5374 (cc5aac78; the W claim requires this row, per VP):
 
@@ -91,7 +113,7 @@ Base main + #5374 (cc5aac78; the W claim requires this row, per VP):
 
 Reading:
 - W on main + #5374 still clears the bar: -4.45 s vs -3.3 s. #5374 does not remove the containment share; containment by construction is the W lever.
-- L misses the bar even with parse-once: best -0.82 s vs -1.35 s (about 30% of L integrate). L <= 50% needs B (skill trees as one op) plus cheaper copies/writes, measured next.
+- L misses the bar even with parse-once and skill trees: the L ceiling is stuck near 0.90 of cold (bar ~0.775). A profile of the ceiling head is running to find the residual. Previously: best -0.82 s vs -1.35 s (about 30% of L integrate). L <= 50% needs B (skill trees as one op) plus cheaper copies/writes, measured next.
 - On W, the containment family carries the win (0.970 -> 0.752). The journal is ~0 on W.
 - On L, the journal (-4%) and resolve (-3%) are both small. L's remainder is content transforms: frontmatter re-parse, `write_text_lf` and copies, about 0.8 s real.
 
@@ -122,6 +144,7 @@ Reading:
   2. A primitive whose frontmatter one integrator would mutate is rendered identically for a second target (copy-on-write view).
   3. A source file changed by user code mid-install (lifecycle script) is re-parsed (memo dropped).
   4. Hostile frontmatter (alias bomb, `<<` merge) still refuses through the bounded loader, parsed once.
+- **Product finding #5418.** A monorepo lockfile embeds absolute checkout paths for sibling local packages (`anchored_local_path`, `declaring_parent: local:/...`, ledger `owners`), from `deps/local_identity.py:portable_anchor_identity`'s absolute fallback. Its delta stays visible in the differential until the fix lands.
 - **Results:**
   - A/A (main vs main, run 45526809921): `.apm-local/installation` (a per-install id) differs in every fixture, and the 4 monorepo app lockfiles differ (side-dependent content). These are harness noise; the harness must exclude them.
   - Parse-once upper bound vs main (run 45526789209): EXACTLY the same diff set as A/A and nothing else. Every deployed primitive, MCP config, hook and receipt is byte-identical, as are the tree-50/mcp/multi lockfiles.
