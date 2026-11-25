@@ -38,7 +38,7 @@ its ``--dry-run`` preview.
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -924,45 +924,46 @@ def _retain_recorded_parents(
 ) -> None:
     """Keep the parent chain of a kept row the declared walk cannot re-parent (#5238).
 
-    A remote row kept by the remote transitive policy, not reached from a
-    declaration, still records its parent in ``resolved_by``; removing that
-    parent would leave it recorded under a row no longer in the lock. The
-    chain stays, named, with every pending row it still declares.
+    A row kept but not reached from a declaration (a remote row under the
+    remote transitive policy, or a package such a kept chain declares) still
+    records its parent in ``resolved_by``; removing that parent would leave it
+    recorded under a row no longer in the lock. The chain stays, named, and is
+    walked from its root-declared top so what it still declares stays too;
+    rows that walk keeps have their own parents kept in turn (#5449).
     """
+    reached = walk.reachable if walk is not None and walk.complete else frozenset()
+    kept: dict[str, str] = {}
+    while found := _unreparented_parents(lockfile, candidates - retained, retained, reached):
+        kept.update(found)
+        anchored.update(found)
+        retained |= set(found)
+        _retain_from_chain_tops(
+            lockfile, project_root, apm_modules_dir, kept, candidates, retained, reasons
+        )
+
+
+def _unreparented_parents(
+    lockfile: LockFile, pending: set[str], retained: set[str], reached: frozenset[str]
+) -> dict[str, str]:
+    """The pending rows a kept, unreached row records as its parent chain, with why."""
     from apm_cli.deps.lockfile import lockfile_parent_identity
 
-    pending = candidates - retained
-    if not pending:
-        return
     by_identity = {
         lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
         for key in pending
         if key in lockfile.dependencies
     }
-    reached = walk.reachable if walk is not None and walk.complete else frozenset()
-    kept: dict[str, str] = {}
+    found: dict[str, str] = {}
     for key in sorted(retained):
         row = lockfile.dependencies.get(key)
-        # Replaced rows have their own parent rule; only the remote policy's keeps count.
-        if row is None or key in reached or row.replacement is not None or row.source == "local":
+        # Replaced rows have their own parent rule; a reached row is re-parented.
+        if row is None or key in reached or row.replacement is not None:
             continue
         parent = by_identity.get(row.resolved_by)
-        while parent is not None and parent not in kept:
-            kept[parent] = f"{row.repo_url} is still recorded under it"
+        while parent is not None and parent not in found:
+            found[parent] = f"{row.repo_url} is still recorded under it"
             parent = by_identity.get(lockfile.dependencies[parent].resolved_by)
-    if not kept:
-        return
-    anchored.update(kept)
-    retained |= set(kept)
-    _retain_reached_from(
-        lockfile,
-        project_root,
-        apm_modules_dir,
-        [lockfile.dependencies[key].to_dependency_ref() for key in sorted(kept)],
-        candidates,
-        retained,
-        reasons,
-    )
+    return found
 
 
 def _retain_reached_from(
@@ -1011,25 +1012,47 @@ def _retain_alias_anchors(
     declares stays; when any chain's top is not root-declared, every pending
     row is kept (fail closed).
     """
-    from apm_cli.deps.lockfile import lockfile_parent_identity
-
     anchors = _alias_anchors(lockfile, candidates - retained, walk)
     if not anchors:
         return
     anchored.update(anchors)
     retained |= set(anchors)
-    rows = [lockfile.dependencies[key] for key in anchors]
+    _retain_from_chain_tops(
+        lockfile, project_root, apm_modules_dir, anchors, candidates, retained, reasons
+    )
+
+
+def _retain_from_chain_tops(
+    lockfile: LockFile,
+    project_root: Path,
+    apm_modules_dir: Path,
+    chain: Collection[str],
+    candidates: set[str],
+    retained: set[str],
+    reasons: dict[str, str],
+) -> None:
+    """Retain what the kept *chain* rows still declare, walked from their root-declared tops.
+
+    A chain row's local path is relative to its recorded parent, so only a top
+    apm.yml declared is walked from the project root; when a top is not, or the
+    walk no longer reaches a kept row below it, every pending row is kept.
+    """
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    rows = [lockfile.dependencies[key] for key in chain]
     anchor_ids = {lockfile_parent_identity(row, lockfile.replacements) for row in rows}
     ends = [row for row in rows if row.resolved_by not in anchor_ids]
     tops = [row for row in ends if row.resolved_by is None]
     pending = candidates - retained
+    if not pending:
+        return
     if len(tops) < len(ends):
         retained |= pending
         reasons.update(dict.fromkeys(pending, "an anchored package has no root-declared top"))
         return
     # The tops' walk must still reach every kept anchor below them; one an
     # edited manifest no longer declares has children this walk cannot see.
-    below = {key for key in anchors if lockfile.dependencies[key].resolved_by is not None}
+    below = {key for key in chain if lockfile.dependencies[key].resolved_by is not None}
     reach = compute_forward_reachable_keys(
         lockfile,
         project_root,
