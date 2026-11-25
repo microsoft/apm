@@ -1846,7 +1846,7 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                if not remove_emptied_hook_file(json_path, data, defaults or {}, root):
+                if not remove_emptied_hook_file(json_path, data, defaults or {}, root, stats):
                     with provenance.recorded_config_write(json_path, skeleton=defaults or {}):
                         write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
@@ -2084,7 +2084,7 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root):
+            if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root, stats):
                 stats["files_removed"] += 1
             elif modified:
                 with provenance.recorded_config_write(json_path, skeleton=defaults or {}):

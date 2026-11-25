@@ -1,0 +1,17 @@
+{
+  "issue": 5424,
+  "fixed_in": "Unreleased",
+  "summary": "On a case- or normalization-folding volume (macOS, Windows), two spellings of one local package directory (E-Pkg and e-pkg, or NFC and NFD names) became two lock rows, so apm uninstall refused to re-anchor the survivor and apm prune kept an orphan. The anchored directory now takes the spelling the volume stores, so the directory is one lock row.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_with_a_case_variant_parent_spelling",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_one_lock_row_for_a_case_variant_parent_spelling_and_a_clean_reanchor",
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_install_and_prune_keep_one_row_per_folded_directory",
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryIsOneDependency::test_spellings_of_one_directory_are_one_node_only_where_the_volume_folds"
+  ]
+}

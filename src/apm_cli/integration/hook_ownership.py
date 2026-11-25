@@ -944,12 +944,21 @@ def remove_hook_sidecar(path: Path) -> None:
 
 
 def remove_emptied_hook_file(
-    json_path: Path, data: dict, defaults: dict[str, Any], root: Path | None
+    json_path: Path, data: dict, defaults: dict[str, Any], root: Path | None, stats: Any = None
 ) -> bool:
-    """Offer a cleaned hook file to the provenance owner; return whether it was deleted (#4867)."""
+    """Offer a cleaned hook file to the provenance owner; return whether it was deleted (#4867).
+
+    Only a record that APM created the file deletes it; an emptied file kept for
+    lack of one is named in ``stats["kept_paths"]`` (#4962).
+    """
     from apm_cli.integration.config_file_provenance import delete_emptied_config
 
-    return delete_emptied_config(json_path, root=root, empty=hook_file_emptied(data, defaults))
+    emptied = hook_file_emptied(data, defaults)
+    if delete_emptied_config(json_path, root=root, empty=emptied, require_created=True):
+        return True
+    if emptied and stats is not None:
+        stats.setdefault("kept_paths", []).append(json_path.as_posix())
+    return False
 
 
 def hook_file_emptied(data: dict, defaults: dict[str, Any]) -> bool:

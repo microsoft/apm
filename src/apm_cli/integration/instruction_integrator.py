@@ -734,14 +734,20 @@ class InstructionIntegrator(BaseIntegrator):
         )
         if live_root.resolve() == get_deploy_root(InstallScope.USER).resolve():
             return instruction_files
+        apply_tos = {
+            source: self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo")
+            for source in instruction_files
+        }
+        if any(routes_to_agents_md(apply_to) for apply_to in apply_tos.values()):
+            # Routing reads carriers anywhere (a directory routes once it and its
+            # carrier exist); a no-op replay never re-decides it, so record none (#5434).
+            from apm_cli.install import verdict_record
+
+            verdict_record.unknown("claude routing")
         routed = {
             source
             for source in instruction_files
-            if routes_to_agents_md(
-                self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo"),
-                live_root,
-                cache=self._routing_cache,
-            )
+            if routes_to_agents_md(apply_tos[source], live_root, cache=self._routing_cache)
         }
         if not routed:
             return instruction_files

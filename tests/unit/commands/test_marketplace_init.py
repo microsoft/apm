@@ -226,6 +226,47 @@ class TestInitNameOwnerFlags:
         data = yaml.safe_load((tmp_path / "apm.yml").read_text(encoding="utf-8"))
         assert data["name"] == "cool-tools"
 
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            (["--name", "cool-tools"], "cool-tools"),
+            (["--name", "my-app"], None),
+            ([], None),
+        ],
+        ids=["differs", "equals-project", "absent"],
+    )
+    def test_name_with_existing_apm_yml_names_the_marketplace(
+        self, runner, tmp_path, monkeypatch, flags, expected
+    ):
+        """#5405: --name lands in the marketplace block, never the project name."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: my-app\nversion: 1.0.0\ndescription: x\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(marketplace, ["init", *flags])
+
+        assert result.exit_code == 0, result.output
+        data = yaml.safe_load((tmp_path / "apm.yml").read_text(encoding="utf-8"))
+        assert data["name"] == "my-app"
+        assert data["marketplace"].get("name") == expected
+
+    def test_name_applies_when_force_replaces_an_existing_block(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: my-app\nversion: 1.0.0\ndescription: x\n"
+            "marketplace:\n  name: old-tools\n  owner:\n    name: o\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(marketplace, ["init", "--force", "--name", "cool-tools"])
+
+        assert result.exit_code == 0, result.output
+        data = yaml.safe_load((tmp_path / "apm.yml").read_text(encoding="utf-8"))
+        assert (data["name"], data["marketplace"]["name"]) == ("my-app", "cool-tools")
+
     def test_custom_owner(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(marketplace, ["init", "--owner", "my-org"])

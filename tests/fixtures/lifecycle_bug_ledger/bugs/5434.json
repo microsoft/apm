@@ -1,0 +1,18 @@
+{
+  "issue": 5434,
+  "fixed_in": "Unreleased",
+  "summary": "The install no-op replay printed 'up to date' after a root AGENTS.md / CLAUDE.md, the compile record or a directory AGENTS.md carrier changed, while the full run would write or retire a .claude/rules file; the replay now declines while a carrier may stand in, a run that decided Claude routing records nothing, and the engine fast path declines for a routable instruction.",
+  "failure_modes": [
+    "cache",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_verdict_record.py::test_a_root_carrier_appearing_after_the_record_misses",
+    "tests/integration/test_verdict_record.py::test_a_run_that_decided_claude_routing_records_nothing",
+    "tests/integration/test_verdict_record.py::test_the_engine_fast_path_declines_for_a_routable_instruction",
+    "tests/integration/test_verdict_record_attested_world.py::test_a_root_agents_md_after_a_replay_record_misses_and_the_full_run_decides"
+  ]
+}

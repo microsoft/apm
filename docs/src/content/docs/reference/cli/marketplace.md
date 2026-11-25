@@ -323,7 +323,7 @@ scaffolding `apm.yml` if it does not exist.
 | Flag | Description |
 |---|---|
 | `--force` | Overwrite an existing `marketplace:` block. |
-| `--name` | Marketplace/package name. Default: `my-marketplace`. |
+| `--name` | Marketplace name. A scaffolded `apm.yml` uses it as the package name (default: `my-marketplace`); with an existing `apm.yml`, a different name is written as `marketplace.name`. |
 | `--owner` | Owner name for the marketplace. |
 | `--no-gitignore-check` | Skip the `.gitignore` staleness check. |
 

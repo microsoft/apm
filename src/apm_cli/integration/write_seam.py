@@ -28,10 +28,10 @@ from typing import IO, Any
 from apm_cli.utils import atomic_io
 from apm_cli.utils.realpath_win import release_held
 
-# (path, contents, expected): contents=False records only an absent path
+# (path, contents, expected[, size=]): contents=False records only an absent path
 # (mkdir); expected is the content hash the write will leave there, or
 # "absent" / "dir", or None when the writer cannot know it (#4863).
-Recorder = Callable[[Path, bool, "str | None"], None]
+Recorder = Callable[..., None]
 _ABSENT, _DIR = "absent", "dir"
 
 _recorder: Recorder | None = None
@@ -108,21 +108,27 @@ def private_scratch() -> Iterator[None]:
 
 
 def record_before_write(
-    path: str | os.PathLike[str], *, follow: bool = False, expected: str | None = None
+    path: str | os.PathLike[str],
+    *,
+    follow: bool = False,
+    expected: str | None = None,
+    size: int | None = None,
 ) -> None:
     """Record *path* before it is created, replaced or removed.
 
     *follow* marks a writer that writes through a symlink (an append or an
     in-place write): the link's destination is recorded too, since that is
     where the bytes change. Replacing or removing writers record the link only.
+    *size* is the byte length of the content *expected* hashes, when the writer knows it (#5411).
     """
     if _planning:
         raise PlannedWriteError(f"Install planned a write to {path} before its preflight passed")
     recorder = _recorder
     if recorder is not None:
-        recorder(Path(path), True, expected)
+        extra = {} if size is None else {"size": size}
+        recorder(Path(path), True, expected, **extra)
         if follow and os.path.islink(path):
-            recorder(Path(os.path.realpath(path)), True, expected)
+            recorder(Path(os.path.realpath(path)), True, expected, **extra)
 
 
 def record_after_write(path: str | os.PathLike[str], *, follow: bool = False) -> None:
@@ -170,7 +176,7 @@ def _is_real_dir(path: Path) -> bool:
 
 def write_text_lf(path: Path, data: str) -> None:
     """:func:`apm_cli.utils.atomic_io.write_text_lf` through the seam."""
-    record_before_write(path, expected=_text_hash(data, lf=True))
+    record_before_write(path, expected=_text_hash(data, lf=True), size=_text_size(data, lf=True))
     atomic_io.write_text_lf(path, data)
     record_after_write(path)
 
@@ -178,7 +184,7 @@ def write_text_lf(path: Path, data: str) -> None:
 def atomic_write_text(path: Path, data: str, **kwargs: Any) -> None:
     """:func:`apm_cli.utils.atomic_io.atomic_write_text` through the seam."""
     lf = kwargs.get("normalize_line_endings", True)
-    record_before_write(path, expected=_text_hash(data, lf=lf))
+    record_before_write(path, expected=_text_hash(data, lf=lf), size=_text_size(data, lf=lf))
     atomic_io.atomic_write_text(path, data, **kwargs)
     record_after_write(path)
 
@@ -201,7 +207,7 @@ def write_json_config(path: Path, data: Any, **kwargs: Any) -> bool:
     text = json_config_text(
         path, data, default_trailing_newline=kwargs.get("default_trailing_newline", True)
     )
-    record_before_write(path, expected=_text_hash(text))
+    record_before_write(path, expected=_text_hash(text), size=_text_size(text, lf=False))
     written = _write(path, data, **kwargs)
     record_after_write(path)
     return written
@@ -215,7 +221,9 @@ def open_for_write(path: Path, mode: str = "w", **kwargs: Any) -> IO[Any]:
 
 def copy2(source: Path, destination: Path) -> Path:
     """``shutil.copy2`` through the seam, replacing the destination atomically (#4691)."""
-    record_before_write(destination, follow=True, expected=_file_hash(source))
+    record_before_write(
+        destination, follow=True, expected=_file_hash(source), size=_file_size(source)
+    )
     copied = atomic_io.atomic_copy(source, destination, metadata=True)
     record_after_write(destination, follow=True)
     return copied
@@ -223,7 +231,9 @@ def copy2(source: Path, destination: Path) -> Path:
 
 def copyfile(source: Path, destination: Path) -> Path:
     """``shutil.copyfile`` through the seam, replacing the destination atomically (#4691)."""
-    record_before_write(destination, follow=True, expected=_file_hash(source))
+    record_before_write(
+        destination, follow=True, expected=_file_hash(source), size=_file_size(source)
+    )
     copied = atomic_io.atomic_copy(source, destination, metadata=False)
     record_after_write(destination, follow=True)
     return copied
@@ -274,6 +284,19 @@ def _text_hash(data: str, **kwargs: Any) -> str:
     from apm_cli.utils.content_hash import text_write_hash
 
     return text_write_hash(data, **kwargs)
+
+
+def _text_size(data: str, *, lf: bool) -> int:
+    from apm_cli.utils.content_hash import text_write_size
+
+    return text_write_size(data, lf=lf)
+
+
+def _file_size(source: Path) -> int | None:
+    try:
+        return os.stat(source).st_size if os.path.isfile(source) else None
+    except OSError:
+        return None
 
 
 def _file_hash(source: Path) -> str:
