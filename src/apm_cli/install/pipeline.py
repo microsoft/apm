@@ -136,7 +136,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     session = (
         None
         if ctx.lockfile_only or ctx.dry_run
-        else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
+        else None  # RESEARCH: deployment ledger deleted
     )
     locked = locked_skill_sources(ctx) if session is not None else None
     if session is not None:
