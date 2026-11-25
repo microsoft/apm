@@ -547,3 +547,21 @@ def test_a_selected_symlink_keeps_its_own_name_when_rebased(tmp_path: Path) -> N
     assert resolve_cli_packages_for_project_root(("./sel.prompt.md",), sub, root) == (
         "./sub/sel.prompt.md",
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_an_intermediate_symlink_followed_by_dotdot_lands_where_the_filesystem_does(
+    tmp_path: Path,
+) -> None:
+    """``./link/../pkg`` with ``link -> ../other/inner`` names other/pkg (#4545)."""
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+
+    root = tmp_path / "project"
+    sub = root / "sub"
+    (root / "other" / "inner").mkdir(parents=True)
+    (root / "other" / "pkg").mkdir()
+    sub.mkdir()
+    (sub / "pkg").mkdir()
+    (sub / "link").symlink_to("../other/inner")
+
+    assert resolve_cli_packages_for_project_root(("./link/../pkg",), sub, root) == ("./other/pkg",)
