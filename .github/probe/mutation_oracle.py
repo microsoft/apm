@@ -149,6 +149,7 @@ def seed(world, root):
     agents = Path(root) / "AGENTS.md"
     if agents.exists() and not (Path(root) / "CLAUDE.md").exists():
         (Path(root) / "CLAUDE.md").write_text("@AGENTS.md\n")
+    print("ORACLE seed out: " + " | ".join((r.stdout + r.stderr).strip().splitlines()[-6:]), flush=True)
     print(f"ORACLE seed: compile rc={r.returncode} AGENTS.md={agents.exists()} "
           f"CLAUDE.md={(Path(root) / 'CLAUDE.md').exists()} .github={(Path(root) / '.github').is_dir()}", flush=True)
 for name in FIXTURES:
@@ -174,13 +175,17 @@ for name in FIXTURES:
         cands = [(k, p) for k, p in reads if any(p.startswith(r) for r in roots)
                  and "/verdicts/" not in p and not p.endswith((".pyc", ".py")) and "/.venv/" not in p]
         proj = [(k, p) for k, p in cands if p.startswith(str(root)) and "/apm_modules/" not in p]
-        extra = [("delete", p) for k, p in proj if k == "file"]
-        extra += [("link-swap", p) for k, p in proj if k == "dir" and p != str(root)]
-        extra += [(k, str(Path(root) / n)) for n in ("AGENTS.md", "CLAUDE.md") for k in ("file", "delete")]
+        extra = [(k, str(Path(root) / n)) for n in ("AGENTS.md", "CLAUDE.md") for k in ("file", "delete")]
         extra += [("link-swap", str(Path(root) / ".github"))]
+        extra += [("delete", p) for k, p in proj if k == "file"]
+        extra += [("link-swap", p) for k, p in proj if k == "dir" and p != str(root)]
         extra += [("absent-dir", p) for k, p in cands if k == "absent" and "." not in os.path.basename(p)]
         rank = lambda c: (0 if c[1].startswith(str(root)) else 1 if c[1].startswith(str(world.apm_home)) is False else 2, c)
-        cands = sorted(set(cands) | set(extra), key=rank)[:LIMIT]
+        live = [c for c in set(cands) if c[0] != "absent" or Path(c[1]).parent.is_dir()]
+        first = list(dict.fromkeys(extra[:5] + [c for c in extra if c[0] == "link-swap"]))
+        cands = first + [c for c in sorted(set(live) | set(extra), key=rank) if c not in first]
+        cands = cands[:LIMIT]
+        print(f"ORACLE {name}: {len(live)} live, first tried: {first[:8]}", flush=True)
         counts = {"hit": 0, "miss": 0}
         skips: dict[str, int] = {}
         print(f"ORACLE {name}: {len(reads)} reads, {len(cands)} candidates", flush=True)
