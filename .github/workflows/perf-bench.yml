@@ -169,7 +169,7 @@ jobs:
         HARNESS_DIR: ${{ github.workspace }}/harness
         PYTHONUNBUFFERED: '1'
       run: |
-        "$GITHUB_WORKSPACE/new/.venv/Scripts/python.exe" harness/.github/probe/schannel_probe.py 2>&1 | tee probe.log
+        "$GITHUB_WORKSPACE/new/.venv/Scripts/python.exe" harness/.github/probe/real_probe.py 2>&1 | tee probe.log
     - name: Interleaved runs
       working-directory: harness
       env:
