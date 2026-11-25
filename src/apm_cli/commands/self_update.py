@@ -19,6 +19,7 @@ from apm_cli.core.remediation import (
     CLI_BINARY_OUTDATED,
     CLI_INSTALLER_UNREACHABLE,
 )
+from apm_cli.utils import executable_exclusion as _exclusion
 from apm_cli.utils import git_env
 
 from ..bootstrap_mirror import (
@@ -153,7 +154,11 @@ def _get_installer_run_command(script_path: str) -> list[str]:
             "pwsh"
         )
         if not powershell_path:
-            raise FileNotFoundError("PowerShell executable not found in PATH")
+            raise FileNotFoundError(
+                _exclusion.not_found_message(
+                    "PowerShell executable not found in PATH", "powershell", "pwsh"
+                )
+            )
         return [powershell_path, "-ExecutionPolicy", "Bypass", "-File", script_path]
 
     shell_path = git_env.trusted_executable("bash")
@@ -161,7 +166,11 @@ def _get_installer_run_command(script_path: str) -> list[str]:
         if os.path.exists("/bin/bash"):
             shell_path = "/bin/bash"
         else:
-            raise FileNotFoundError("bash executable not found; cannot run installer script")
+            raise FileNotFoundError(
+                _exclusion.not_found_message(
+                    "bash executable not found; cannot run installer script", "bash"
+                )
+            )
     return [shell_path, script_path]
 
 

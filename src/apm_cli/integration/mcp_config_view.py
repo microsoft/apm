@@ -49,6 +49,10 @@ if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
+# What a lock-admitted server's refusal says when org policy now withholds it.
+POLICY_WITHHELD = "org policy now withholds it"
+
+
 class _McpViewLogger(Protocol):
     """Output methods used while deriving the current MCP view."""
 
@@ -354,7 +358,7 @@ class CurrentMcpConfigView:
             if reason == REASON_POLICY_TRANSITIVE:
                 # An approval cannot lift org mcp.trust_transitive: name the policy fields.
                 problems[name] = (
-                    "admitted in apm.lock.yaml but org policy now withholds it "
+                    f"admitted in apm.lock.yaml but {POLICY_WITHHELD} "
                     "(mcp.trust_transitive is false and mcp.allow does not list it); "
                     "ask the policy owner to add it to mcp.allow or set "
                     "mcp.trust_transitive: true"
@@ -501,6 +505,16 @@ class McpConfigDiff:
 # Trust notices already shown in this process (#4256): one install collects
 # the locked MCP view in several passes, but the user needs one notice per server.
 _TRUST_NOTICES_SHOWN: set[str] = set()
+
+
+def trust_notices_shown() -> frozenset[str]:
+    """The once-per-command trust notices this process has shown."""
+    return frozenset(_TRUST_NOTICES_SHOWN)
+
+
+def forget_trust_notices_since(shown: frozenset[str]) -> None:
+    """Forget notices shown since *shown*: their output was dropped, never printed."""
+    _TRUST_NOTICES_SHOWN.intersection_update(shown)
 
 
 def _progress_trust_once(logger: Any, message: str) -> None:

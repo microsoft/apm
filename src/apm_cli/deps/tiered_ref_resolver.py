@@ -55,6 +55,7 @@ from ..models.apm_package import (
     ResolvedReference,
 )
 from ..utils.github_host import default_host
+from .git_remote_ops import ABBREVIATED_SHA_RE
 
 if TYPE_CHECKING:
     from ..cache.git_cache import GitCache
@@ -210,7 +211,7 @@ class L0PerRunCache:
 # ---------------------------------------------------------------------------
 
 
-_ABBREVIATED_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,39}$")
+_ABBREVIATED_COMMIT_RE = ABBREVIATED_SHA_RE
 
 
 _UNSAFE_REF_RE = re.compile(r"\.\.|@\{|[\x00-\x20\x7f%~^:?*\[\\]")

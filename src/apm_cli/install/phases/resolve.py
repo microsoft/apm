@@ -395,6 +395,7 @@ def _resolve_dependencies(
     )
     from apm_cli.install.package_selection import selected_dependency_keys
     from apm_cli.install.phases.local_content import copy_local_dependency
+    from apm_cli.install.source_helpers import record_local_copy_digests
 
     # 3b. Dedicated registry resolver (design §3.1, §8)
     # Built when:
@@ -600,6 +601,7 @@ def _resolve_dependencies(
                 dep_key = dep_ref.get_unique_key()
                 with callback_lock:
                     if failure is None:
+                        record_local_copy_digests(ctx, dep_key, replacement_path)
                         pending_callback_downloads[replacement_path] = (dep_key, None)
                         return replacement_path
                     callback_failures.add(dep_key)  # the barrier stops (#3874)

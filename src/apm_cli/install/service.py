@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from apm_cli.core import remediation
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
+from apm_cli.install import verdict_record
 from apm_cli.install.frozen_selection import (
     _changed_selections,
     _outermost,  # noqa: F401 -- re-exported for install.frozen_withdrawal and tests
@@ -152,7 +153,7 @@ class InstallService:
     @staticmethod
     def frozen_disposition(source: Any) -> FrozenDisposition:
         """The single reader of an install context's ``frozen`` flag."""
-        return FrozenDisposition(replay=source.frozen is True)
+        return FrozenDisposition(replay=verdict_record.note_frozen(source.frozen is True))
 
     @staticmethod
     def frozen_replay_lockfile(source: Any) -> LockFile | None:
@@ -617,6 +618,7 @@ class InstallService:
             user_scope=is_user_scope(request.scope),
             one_off=request.trust_transitive_mcp,
             no_policy=request.no_policy,
+            migrate_user_legacy=not request.dry_run,  # a speculative preflight never migrates
         )
         reasons.extend(
             InstallService._frozen_mcp_reasons(
@@ -633,8 +635,10 @@ class InstallService:
 
         satisfied = satisfied and not reasons
         if not satisfied:
+            from apm_cli.install.frozen_mcp_drift import frozen_drift_headline
+
             raise FrozenInstallError(
-                "--frozen: apm.lock.yaml is out of sync with apm.yml.",
+                frozen_drift_headline(reasons),
                 reasons=reasons,
             )
         # A deny of a local bundle refuses before its LSP server is retired (RA-041).
@@ -825,8 +829,12 @@ class InstallService:
             include_dependency_mcp=include_dependency_mcp,
         )
         if reasons:
+            from apm_cli.install.frozen_mcp_drift import frozen_drift_headline
+
             raise FrozenInstallError(
-                "--frozen: restored MCP declarations differ from apm.lock.yaml.",
+                frozen_drift_headline(
+                    reasons, "--frozen: restored MCP declarations differ from apm.lock.yaml."
+                ),
                 reasons=reasons,
                 tip=(
                     "Tip: review the restored sources and lockfile before running "

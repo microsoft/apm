@@ -140,6 +140,9 @@ class InstallContext:
     ref_freshness_policy: RefFreshnessPolicy | None = None  # resolve
     callback_downloaded: dict[str, Any] = field(default_factory=dict)  # resolve
     callback_failures: set[str] = field(default_factory=set)  # resolve
+    # Digests of each local copy an update resolved, taken before validation
+    # normalizes it: the content install would lock (#5463).
+    local_copy_digests: dict[str, Any] = field(default_factory=dict)  # resolve
     transitive_failures: list[tuple[str, str]] = field(default_factory=list)  # resolve
 
     # ------------------------------------------------------------------

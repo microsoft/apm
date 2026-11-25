@@ -102,3 +102,35 @@ class InstallRequest:
         """
         if self.transaction is not None:
             self.transaction.hold_deploy_evidence()
+
+    @classmethod
+    def frozen_preflight(
+        cls,
+        apm_package: APMPackage,
+        *,
+        scope: InstallScope | None,
+        trust_transitive_mcp: bool = False,
+        no_policy: bool = False,
+        target: str | list[str] | None = None,
+        install_mcp: bool = True,
+        logger: InstallLogger | None = None,
+        speculative: bool = False,
+    ) -> InstallRequest:
+        """The one request a frozen preflight judges (InstallService.enforce_frozen).
+
+        Built here for the full install and for the fast path's frozen hit, so a
+        field either needs is never set on one side only (W3d R1). A *speculative*
+        preflight (the fast path's) is a preview: it reads personal consent and
+        never migrates it, leaving that write to the full install.
+        """
+        return cls(
+            apm_package=apm_package,
+            frozen=True,
+            dry_run=speculative,
+            scope=scope,
+            trust_transitive_mcp=trust_transitive_mcp,
+            no_policy=no_policy,
+            target=target,
+            install_mcp=install_mcp,
+            logger=logger,
+        )

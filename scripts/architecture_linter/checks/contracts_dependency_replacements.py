@@ -124,7 +124,8 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
             "plan = build_resolved_update_plan(ctx, lockfile)",
             "from apm_cli.install.plan import build_update_plan",
             "from apm_cli.install.source_helpers import package_digests, record_package_digests",
-            "dependency.replacement is not None and dependency.is_local",
+            "digests = ctx.local_copy_digests.get(key)",
+            "digests is None and dependency.replacement is not None",
             "resolved_content_hashes=ctx.package_hashes",
         ),
         RESOLUTION_REPORT: (

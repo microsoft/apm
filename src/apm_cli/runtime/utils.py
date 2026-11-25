@@ -71,5 +71,7 @@ def require_runtime_binary(name: str) -> str:
     """Return :func:`find_runtime_binary` for *name*, raising when it is not installed."""
     path = find_runtime_binary(name)
     if path is None:
-        raise FileNotFoundError(f"{name} executable not found on PATH")
+        from apm_cli.utils.executable_exclusion import not_found_message
+
+        raise FileNotFoundError(not_found_message(f"{name} executable not found on PATH", name))
     return path

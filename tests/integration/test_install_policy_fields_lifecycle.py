@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -831,3 +832,277 @@ def test_unmanaged_files_deny_still_flags_a_user_file_beside_verified_hook_files
     assert ".claude/notes.md -- not tracked in apm.lock.yaml" in text, _evidence(audit)
     assert ".claude/settings.json" not in text, _evidence(audit)
     assert ".claude/apm-hooks.json" not in text, _evidence(audit)
+
+
+# #4956: the files an install writes through server ownership (MCP configs) and the
+# hook ownership sidecars carry no deployed_files claim, yet unmanaged_files judges them.
+_KIRO_MCP = ".kiro/settings/mcp.json"
+_KIRO_HOOKS = ".kiro/apm-hooks.json"
+_CONFIG_ENTRIES = ["pipeline", "mcp", "bundle"]
+
+
+def _kiro_workspace(world: World, variant: str) -> None:
+    """A policy-governed project that opted into Kiro and already holds a lockfile."""
+    use_policy(world, variant)
+    _seed(world)
+    (world.project / ".kiro").mkdir(exist_ok=True)
+
+
+def _park_and_approve_exec_bundle(world: World, target: str) -> str:
+    bundle = world.packages["p-exec:bundle"].spec
+    parked = _assert_ok(world, "install", "--target", target, bundle)
+    key = re.search(r"apm approve '([^']+)'", _text(parked))
+    assert key is not None, _evidence(parked)
+    _assert_ok(world, "approve", key.group(1))
+    return bundle
+
+
+def _config_entry_args(world: World, entry: str) -> tuple[str, ...]:
+    """The Kiro install arguments of one entry; the bundle is approved first."""
+    if entry == "mcp":
+        return (*_MCP_ENTRY, "--target", "kiro")
+    if entry == "bundle":
+        return ("--target", "kiro", _park_and_approve_exec_bundle(world, "kiro"))
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data.setdefault("dependencies", {})["mcp"] = [
+        {
+            "name": "srv",
+            "registry": False,
+            "transport": "http",
+            "url": "https://mcp.example.com/mcp",
+        }
+    ]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return ("--target", "kiro")
+
+
+@pytest.mark.parametrize("entry", _CONFIG_ENTRIES)
+def test_unmanaged_files_deny_counts_the_mcp_config_an_install_creates(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    world = lifecycle_world
+    _kiro_workspace(world, "unmanaged-deny")
+    args = _config_entry_args(world, entry)
+
+    text = _assert_refused(world, _UNMANAGED, *args)
+
+    assert _KIRO_MCP in text, text
+    assert "unmanaged_files.exclude" in text, text
+    assert not (world.project / _KIRO_MCP).exists()
+    if entry == "bundle":
+        assert _KIRO_HOOKS in text, text
+
+
+@pytest.mark.parametrize("entry", _CONFIG_ENTRIES)
+def test_unmanaged_files_warn_counts_the_mcp_config_an_install_creates(
+    lifecycle_world: World,  # noqa: F811
+    entry: str,
+) -> None:
+    world = lifecycle_world
+    _kiro_workspace(world, "fields-warn")
+    args = _config_entry_args(world, entry)
+
+    text = _text(_assert_ok(world, "install", *args))
+
+    assert _UNMANAGED[0] in text, text
+    assert _KIRO_MCP in text, text
+    assert (world.project / _KIRO_MCP).is_file()
+
+
+def _symlink_config(world: World, path: Path) -> object:
+    outside = world.root / "outside-mcp.json"
+    outside.write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    path.symlink_to(outside)
+    return outside
+
+
+def _fifo_config(world: World, path: Path) -> object:
+    os.mkfifo(path)
+    return None
+
+
+@pytest.mark.parametrize("make", [_symlink_config, _fifo_config], ids=["symlink", "fifo"])
+def test_unmanaged_files_deny_refuses_a_config_file_that_is_a_link_or_a_fifo(
+    lifecycle_world: World,  # noqa: F811
+    make: object,
+) -> None:
+    world = lifecycle_world
+    _kiro_workspace(world, "unmanaged-deny")
+    config = world.project / _KIRO_MCP
+    config.parent.mkdir()
+    outside = make(world, config)
+    before = outside.read_bytes() if outside is not None else None
+
+    text = _assert_refused(world, _UNMANAGED, *_config_entry_args(world, "mcp"))
+
+    assert _KIRO_MCP in text, text
+    assert config.is_symlink() == (outside is not None)
+    assert outside is None or outside.read_bytes() == before
+
+
+def test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """The lock is lost, so every hook file the forced reinstall rewrites is a claim."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _park_and_approve_exec_bundle(world, "claude")
+    _assert_ok(world, "install", "--target", "claude", bundle)
+    (world.project / "apm.lock.yaml").unlink()
+    before = _state(world, None, keep_git_cache=False)
+
+    preview = _text(
+        _assert_ok(world, "install", "--force", "--dry-run", "--target", "claude", bundle)
+    )
+
+    assert "Would be blocked by policy" not in preview, preview
+    assert ".claude/settings.json" in preview, preview
+    assert ".claude/apm-hooks.json" in preview, preview
+    assert _state(world, None, keep_git_cache=False) == before
+    _assert_ok(world, "install", "--force", "--target", "claude", bundle)
+
+
+def _approve_parked_exec_bundle(world: World, target: str) -> str:
+    return _park_and_approve_exec_bundle(world, target)
+
+
+def test_unmanaged_files_deny_refuses_a_merged_config_beside_user_hooks(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#4956: a merge that keeps user-authored hooks leaves the shared config unmanaged."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, "claude")
+    claude = world.project / ".claude"
+    claude.mkdir(exist_ok=True)
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [_USER_HOOK]}}) + "\n", encoding="utf-8"
+    )
+
+    text = _assert_refused(world, _UNMANAGED, "--target", "claude", bundle)
+
+    assert ".claude/settings.json" in text, text
+
+
+def test_unmanaged_files_deny_refuses_a_hook_file_the_install_skips(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#4956: without --force the install keeps an edited, unclaimed hook file."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, "copilot")
+    _assert_ok(world, "install", "--target", "copilot", bundle)
+    hook = world.project / ".github" / "hooks" / "p-exec-hooks.json"
+    hook.write_text(hook.read_text(encoding="utf-8").replace("echo p-exec", "echo mine"))
+    (world.project / "apm.lock.yaml").unlink()
+
+    text = _assert_refused(world, _UNMANAGED, "--target", "copilot", bundle)
+
+    assert ".github/hooks/p-exec-hooks.json" in text, text
+
+
+@pytest.mark.parametrize(
+    ("target", "link"),
+    [("copilot", ".github/hooks/p-exec-hooks.json"), ("claude", ".claude/settings.json")],
+)
+def test_bundle_dry_run_never_writes_through_a_linked_hook_destination(
+    lifecycle_world: World,  # noqa: F811
+    target: str,
+    link: str,
+) -> None:
+    """#4956: the preview seeds regular files only, so a link never reaches its writer."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, target)
+    outside = world.root / "outside-hook.json"
+    outside.write_text('{"hooks": {}}\n', encoding="utf-8")
+    destination = world.project / link
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks cannot be created here")
+
+    result = _apm(world, "install", "--force", "--dry-run", "--target", target, bundle)
+
+    assert "Traceback" not in _text(result), _evidence(result)
+    assert outside.read_bytes() == b'{"hooks": {}}\n'
+    assert destination.is_symlink()
+
+
+def _packed_exec_upgrade(world: World) -> Path:
+    """Pack p-exec again with a changed session hook: a new bundle version and approval key."""
+    source = world.root / "exec-v2-src"
+    shutil.copytree(Path(world.packages["p-exec"].spec), source)
+    for hook in source.rglob("*.json"):
+        text = hook.read_text(encoding="utf-8")
+        if "echo p-exec" in text:
+            hook.write_text(text.replace("echo p-exec", "echo p-exec-v2"), encoding="utf-8")
+    manifest = source / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("version: 1.0.0", "version: 2.0.0"),
+        encoding="utf-8",
+    )
+    return _pack_bundle(source, world.root / "exec-v2-bundle", world.env)
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+def test_unmanaged_files_deny_passes_an_approved_bundle_upgrade(
+    lifecycle_world: World,  # noqa: F811
+    target: str,
+) -> None:
+    """#4956: the preview retires the previous version's hooks, as the real run does."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approve_parked_exec_bundle(world, target)
+    _assert_ok(world, "install", "--target", target, world.packages["p-exec:bundle"].spec)
+    upgrade = _packed_exec_upgrade(world)
+    parked = _apm(world, "install", "--target", target, str(upgrade))
+    key = re.search(r"apm approve '([^']+)'", _text(parked))
+    assert key is not None, _evidence(parked)
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["executables"] = {"allow": {key.group(1): {"hooks": True}}}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    _assert_ok(world, "install", "--target", target, str(upgrade))
+
+    deployed = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (world.project / f".{'github' if target == 'copilot' else 'claude'}").rglob(
+            "*.json"
+        )
+    )
+    assert "echo p-exec-v2" in deployed, deployed
+
+
+@pytest.mark.parametrize("flags", [("--force", "--dry-run"), ()], ids=["dry-run", "refused"])
+def test_bundle_preview_leaves_the_provenance_store_unchanged(
+    lifecycle_world: World,  # noqa: F811
+    flags: tuple[str, ...],
+) -> None:
+    """#4956: the preview retires and rewrites hooks in a scratch tree, recording no receipts."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, "claude")
+    _assert_ok(world, "install", "--target", "claude", bundle)
+    settings = world.project / ".claude" / "settings.json"
+    document = json.loads(settings.read_text(encoding="utf-8"))
+    document["hooks"].setdefault("PreToolUse", []).append(_USER_HOOK)
+    settings.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    before = _state(world, None, keep_git_cache=False)
+
+    result = _apm(world, "install", *flags, "--target", "claude", bundle)
+
+    assert (result.returncode != 0) == (not flags or "--dry-run" not in flags), _evidence(result)
+    after = _state(world, None, keep_git_cache=False)
+    assert after == before
+    assert not [key for key, data in after.items() if b"apm-bundle-hook-preview" in data]

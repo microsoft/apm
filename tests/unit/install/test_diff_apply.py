@@ -791,7 +791,7 @@ def test_an_abandoned_journal_declines_and_the_full_run_recovers_it(
     _assert_declines_with(project, monkeypatch, capsys, before, "interrupted install journal")
     assert contents() == untouched, "a decline reads; it never changes the project or the journal"
 
-    replay_abandoned_deploys(project / APM_MODULES_DIR, None)
+    replay_abandoned_deploys(project / APM_MODULES_DIR, None, project / "apm.yml")
 
     assert not killed.exists()
     assert not store.exists()

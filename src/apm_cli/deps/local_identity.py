@@ -236,7 +236,37 @@ def transitive_local_identity(
     )
 
 
-def recorded_declaring_edge(first: _T, ranked: _T, local_path: Callable[[_T], str | None]) -> _T:
+def declared_dir(base: Path, local_path: str) -> Path:
+    """The directory a local edge declares: *local_path* (``~`` expanded) under *base*."""
+    return base / Path(local_path).expanduser()
+
+
+def same_stored_leaf(first: Path, ranked: Path) -> bool:
+    """Whether two declared spellings of a package directory are one directory entry.
+
+    On a case-folding or normalizing volume ``shared/F-Pkg`` and ``shared/f-pkg``
+    are one stored entry; on a case-sensitive volume ``vendor/f``, a symlink to
+    ``vendor/F``, is its own entry (an alias, #5386). The two containing
+    directories must be one directory, so ``alias/F`` (a link) is never the
+    entry ``shared/F`` is. An exact entry always wins
+    (:func:`apm_cli.utils.paths.stored_spelling`), so only a folded spelling
+    maps to another one's entry.
+    """
+    try:
+        if not os.path.samefile(first.parent, ranked.parent):
+            return False
+    except OSError:
+        return False
+    stored = stored_spelling(first.parent, first.name)
+    return stored is not None and stored == stored_spelling(ranked.parent, ranked.name)
+
+
+def recorded_declaring_edge(
+    first: _T,
+    ranked: _T,
+    local_path: Callable[[_T], str | None],
+    same_entry: Callable[[_T, _T], bool] | None = None,
+) -> _T:
     """The declaring edge a local diamond node records: the one rule (#5386).
 
     *first* is the shallowest edge the walk met, *ranked* the recorded parent's
@@ -246,26 +276,67 @@ def recorded_declaring_edge(first: _T, ranked: _T, local_path: Callable[[_T], st
     directory than the first edge (an alias spelling) keeps the first edge:
     install has already copied the package to the first edge's slot. Install,
     ``apm prune`` and ``apm uninstall`` all record a diamond through this rule.
+    A leaf that differs only in case or Unicode normalization is no alias when
+    *same_entry* confirms the volume stores both spellings as one entry (#5457);
+    without *same_entry* the leaves must match exactly.
     """
     first_path, ranked_path = local_path(first), local_path(ranked)
-    if first_path and ranked_path and Path(first_path).name == Path(ranked_path).name:
+    if not first_path or not ranked_path:
+        return first
+    first_leaf, ranked_leaf = Path(first_path).name, Path(ranked_path).name
+    if first_leaf == ranked_leaf:
+        return ranked
+    if (
+        same_entry is not None
+        and spelling_key(first_leaf) == spelling_key(ranked_leaf)
+        and same_entry(first, ranked)
+    ):
         return ranked
     return first
 
 
+def _edges_one_entry(
+    first_parent: Any, ranked_parent: Any
+) -> Callable[[DependencyReference, DependencyReference], bool] | None:
+    """:func:`same_stored_leaf` on two edges, each anchored at its parent's source dir."""
+    bases = [
+        getattr(getattr(p, "package", None), "source_path", None)
+        for p in (first_parent, ranked_parent)
+    ]
+    if None in bases:
+        return None
+    first_base, ranked_base = bases
+
+    def one_entry(first: DependencyReference, ranked: DependencyReference) -> bool:
+        return same_stored_leaf(
+            declared_dir(first_base, first.local_path or ""),
+            declared_dir(ranked_base, ranked.local_path or ""),
+        )
+
+    return one_entry
+
+
 def with_declaring_edge(
-    node_ref: DependencyReference, edge_ref: DependencyReference
+    node_ref: DependencyReference,
+    edge_ref: DependencyReference,
+    first_parent: Any = None,
+    ranked_parent: Any = None,
 ) -> DependencyReference:
     """*node_ref* (its first edge) carrying *edge_ref*, its recorded parent's edge,
     when :func:`recorded_declaring_edge` picks that edge.
 
     The anchored directory, and so the node identity, is the same for every such edge.
+    *first_parent* and *ranked_parent* are the declaring nodes; their package
+    source directories let a case- or normalization-only respelling count as one
+    entry (#5457). Without them the leaves must match exactly.
     """
+    same_entry = _edges_one_entry(first_parent, ranked_parent)
     if (
         not node_ref.is_local
         or not edge_ref.declaring_parent
         or node_ref.anchored_local_path != edge_ref.anchored_local_path
-        or recorded_declaring_edge(node_ref, edge_ref, lambda ref: ref.local_path) is node_ref
+        or recorded_declaring_edge(node_ref, edge_ref, lambda ref: ref.local_path, same_entry)
+        is node_ref
     ):
         return node_ref
     reparented = replace(
