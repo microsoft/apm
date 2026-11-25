@@ -208,3 +208,26 @@ def test_update_keeps_an_unchanged_legacy_plugin_and_refreshes_a_transitive_loca
     assert "Use u v1.1.0." in _deployed(world, "u"), _text(changed)
     assert "Updated 1 APM dependency." in _text(changed), _text(changed)
     _ok(driver.run(world, ["install", "--frozen"]), "install --frozen after update")
+
+
+@pytest.mark.parametrize("named", [False, True], ids=["all", "named-parent"])
+def test_update_with_deleted_transitive_local_names_the_fix(
+    lifecycle_world: World, named: bool
+) -> None:
+    """A deleted local dependency of an unchanged local package fails the update."""
+    world = lifecycle_world
+    factory = LocalPackageFactory(world.project / "vendor")
+    factory.add_skill(factory.create("u", version="1.0.0"), "u", _body("u"))
+    parent = factory.create("t", version="1.0.0", dependencies=["../u"])
+    factory.add_skill(parent, "t", _body("t"))
+    _ok(driver.run(world, ["install", "./vendor/t"]), "install")
+    shutil.rmtree(world.project / "vendor" / "u")
+    before = _snapshot(world)
+
+    result = driver.run(world, ["update", "-y", *(["./vendor/t"] if named else [])])
+
+    assert result.returncode == 1, _text(result)
+    assert _NO_OP not in _text(result), _text(result)
+    assert "Local package path does not exist: ../u" in _text(result), _text(result)
+    assert "'apm install'" in _text(result), _text(result)
+    assert _snapshot(world) == before

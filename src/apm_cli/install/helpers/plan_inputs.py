@@ -26,18 +26,18 @@ def confirm_update_plan(
     new targets), so an update refuses regardless of its plan. An install
     refuses when it adds or removes a dependency; an unchanged install still
     reads through it. Returns ``False`` when the caller
-    declined the plan. A direct dependency that failed to resolve (a deleted
-    local path) fails the update here, as install's apply barrier does, rather
-    than being reported as already current (#5463).
+    declined the plan. A dependency of the selected graph, direct or
+    transitive, that failed to resolve (a deleted local path) fails the update
+    here, as install does, rather than being reported as current (#5463).
     """
     if plan_callback is not None:
         from apm_cli.install.outcome import (
-            direct_dependency_failed,
-            raise_direct_dependency_failure,
+            raise_selected_dependency_failure,
+            selected_dependency_failed,
         )
 
-        if direct_dependency_failed(ctx):
-            raise_direct_dependency_failure(ctx)
+        if selected_dependency_failed(ctx):
+            raise_selected_dependency_failure(ctx)
         plan = build_resolved_update_plan(ctx, lockfile)
         if not plan_callback(plan):
             return False

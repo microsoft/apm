@@ -286,12 +286,23 @@ class TestRunInstallPipelinePlanCallback:
         mock_ctx = MagicMock()
         dep = MagicMock()
         dep.replacement = None
+        # A plain local dependency: the plan compares the digest resolve took
+        # of its copy, not the locked one (#5463).
+        dep.is_local = True
+        dep.get_unique_key.return_value = "selected"
+        copy_digests = MagicMock()
+        copy_digests.select.return_value = "sha256:" + "a" * 64
+        copy_digests.framed = "sha256:" + "b" * 64
         mock_ctx.deps_to_install = [dep]
         mock_ctx.root_has_local_primitives = False
         mock_ctx.tui = MagicMock()
         mock_ctx.only_packages = ["selected"]
         mock_ctx.update_plan_complete_dep_keys = {"selected", "unselected"}
         mock_ctx.package_hashes = {}
+        mock_ctx.package_framed_hashes = {}
+        mock_ctx.local_copy_digests = {"selected": copy_digests}
+        mock_ctx.callback_failures = set()
+        mock_ctx.transitive_failures = []
 
         plan_callback = MagicMock(return_value=False)  # user says "no"
 
@@ -324,8 +335,9 @@ class TestRunInstallPipelinePlanCallback:
             None,
             [dep],
             complete_resolved_dep_keys={"selected", "unselected"},
-            resolved_content_hashes={},
+            resolved_content_hashes={"selected": "sha256:" + "a" * 64},
         )
+        assert mock_ctx.package_framed_hashes == {"selected": "sha256:" + "b" * 64}
 
     def test_plan_callback_true_continues_without_only_packages(self, tmp_path):
         import contextlib
