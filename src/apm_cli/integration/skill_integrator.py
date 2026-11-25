@@ -346,6 +346,8 @@ def copy_skill_to_target(
     return deployed
 
 
+from apm_cli.utils.research_passmemo import passmemo as _passmemo
+
 class SkillIntegrator(BaseIntegrator):
     """Handles integration of native SKILL.md files for Claude Code, Cursor, and VS Code.
 
@@ -743,6 +745,7 @@ class SkillIntegrator(BaseIntegrator):
         return links_resolved
 
     @staticmethod
+    @_passmemo("skill_names")
     def _skill_names_in_directory(skills_dir: Path) -> frozenset[str]:
         """Return deployable skill names from a directory that may be absent."""
         if not skills_dir.is_dir():
