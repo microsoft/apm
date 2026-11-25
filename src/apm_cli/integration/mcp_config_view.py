@@ -500,6 +500,16 @@ class McpConfigDiff:
 _TRUST_NOTICES_SHOWN: set[str] = set()
 
 
+def trust_notices_shown() -> frozenset[str]:
+    """The once-per-command trust notices this process has shown."""
+    return frozenset(_TRUST_NOTICES_SHOWN)
+
+
+def forget_trust_notices_since(shown: frozenset[str]) -> None:
+    """Forget notices shown since *shown*: their output was dropped, never printed."""
+    _TRUST_NOTICES_SHOWN.intersection_update(shown)
+
+
 def _progress_trust_once(logger: Any, message: str) -> None:
     if message in _TRUST_NOTICES_SHOWN:
         return

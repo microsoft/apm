@@ -102,3 +102,29 @@ class InstallRequest:
         """
         if self.transaction is not None:
             self.transaction.hold_deploy_evidence()
+
+    @classmethod
+    def frozen_preflight(
+        cls,
+        apm_package: APMPackage,
+        *,
+        scope: InstallScope | None,
+        trust_transitive_mcp: bool = False,
+        no_policy: bool = False,
+        target: str | list[str] | None = None,
+        logger: InstallLogger | None = None,
+    ) -> InstallRequest:
+        """The one request a frozen preflight judges (InstallService.enforce_frozen).
+
+        Built here for the full install and for the fast path's frozen hit, so a
+        field either needs is never set on one side only (W3d R1).
+        """
+        return cls(
+            apm_package=apm_package,
+            frozen=True,
+            scope=scope,
+            trust_transitive_mcp=trust_transitive_mcp,
+            no_policy=no_policy,
+            target=target,
+            logger=logger,
+        )

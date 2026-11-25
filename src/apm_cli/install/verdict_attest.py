@@ -89,8 +89,9 @@ def attested_gates(project_root: Path, lock: Any, fetch: Any, disposition: Any =
     )
 
     if getattr(disposition, "replay", False):
-        _refuse_frozen_drift(project_root)  # W3d AF2/AF3: before any other gate, as the
-        _refuse_unproven_edges(project_root, lock, [])  # full pipeline's preflight runs
+        # W3d AF2/AF3: try_apply already ran the frozen preflight (refuse_frozen_drift)
+        # for every frozen fast run; the lock-only edge walk re-judges the hit's edges.
+        _refuse_unproven_edges(project_root, lock, [])
     _refuse_lifecycle_scripts(project_root)
     _refuse_unsilent_executables(lock)
     from apm_cli.install.fast_output import quiet
@@ -114,7 +115,7 @@ def release_attested(held: Any) -> bool:
     return True
 
 
-def _refuse_frozen_drift(project_root: Path) -> None:
+def refuse_frozen_drift(project_root: Path) -> None:
     """The frozen preflight owner itself (InstallService.enforce_frozen), live."""
     from apm_cli.core.scope import InstallScope, manifest_file
     from apm_cli.install.diff_apply import Decline
@@ -125,7 +126,8 @@ def _refuse_frozen_drift(project_root: Path) -> None:
 
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
     try:
-        InstallService.enforce_frozen(InstallRequest(manifest, scope=InstallScope.PROJECT))
+        request = InstallRequest.frozen_preflight(manifest, scope=InstallScope.PROJECT)
+        InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
     except FrozenInstallError:
         raise Decline("frozen preflight") from None  # the full run renders the refusal
 
@@ -137,7 +139,7 @@ def _refuse_frozen_drift(project_root: Path) -> None:
 # fast path declines the shape. tests/integration/test_verdict_record.py keeps
 # this closed: a new frozen owner fails until it is classified here.
 FROZEN_OWNERS: dict[str, tuple[str, str]] = {
-    "service:enforce_frozen": ("live", "the preflight owner runs on the hit"),
+    "service:enforce_frozen": ("live", "the preflight owner runs before any fast decision"),
     "service:_refuse_frozen_dropped_targets": ("live", "inside enforce_frozen"),
     "service:_verify_frozen_local_catalogs": ("live", "inside enforce_frozen"),
     "service:_verify_frozen_local_content": ("live", "inside enforce_frozen"),
