@@ -77,3 +77,10 @@
 - Frozen: resolver yields relative keys vs legacy lock -> frozen mismatch unless the in-memory rekey also runs for --frozen (no write).
 - Total rename surfaces: dependency keys, anchored_local_path, declaring_parent, resolved_by, replacement request parents (_rekey_requests), ledger owners/active_owner (_rename_ledger_owners pattern), receipts: core/deployment_reanchor.reanchor_receipt_problems (precheck; any problem -> no rekey, today's behaviour) + rename_receipt_owners after the lock commits (uninstall precedent: commands/uninstall/local_reanchor.py apply_local_reanchor, _rename_reanchored_receipts). apm_modules/_local/<sha12> slot is keyed by identity (models/dependency/materialization.py:154).
 - VP conditions: containment on read refuses escaping ../ keys; POSIX keys, cross-drive/UNC stay absolute; upgrade cell then prune/uninstall deletes nothing; W3d walk.
+
+## 08:35 state
+- #5447 (Fixes #5434): branch danielmeppiel-replay-carriers, worktree ../l5-carriers, head 76afde5b (waiver). W3d ACCEPT 3bd9908c (carry asked). Red 45567096815 / green 45567169056. Scratch branches l5/5434-red, l5/5434-green (delete after H8).
+- #5452 (Fixes #5399): branch danielmeppiel-skill-stale-lock, worktree ../l5-5418, head 1ca9d7e4. Red 45567938106 / green 45567986382. Scratch l5/5399-red, l5/5399-green.
+- #5429: H8 SIGNED c0483deb, TRAIN 2.
+- #5423: parked 0.40 (needs S93 input-mutation oracle before H8).
+- 0.40 notes: W3d N1 (attested write under unknown claude routing is wasted), N2 (memoize routable per content_hash); key routed prefixes to win back replay for AGENTS.md projects.
