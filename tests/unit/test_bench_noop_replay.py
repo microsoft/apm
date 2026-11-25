@@ -68,3 +68,53 @@ def test_a_failed_warm_up_install_fails_the_cell(failing: int) -> None:
 
     with pytest.raises(RuntimeError, match=r"failed \(1\)"):
         journeys._setup_replay(ctx)
+
+
+def test_the_frozen_noop_journey_reinstalls_an_installed_project_frozen() -> None:
+    """install-frozen-noop: install #2 with --frozen (#4770), on every fixture."""
+    journey = journeys.JOURNEYS["install-frozen-noop"]
+    ctx = SimpleNamespace(roots=lambda: [Path(".")], project=Path("."))
+
+    assert "install-frozen-noop" in journeys.ALL_JOURNEYS
+    assert journey.setup is journeys.Context.installed
+    assert journey.env == journeys._REPLAY_TRACE
+    assert [argv for argv, _cwd in journey.steps(ctx)] == [["install", "--frozen"]]
+    assert journeys._journeys_for(_fixture("a", "b"), 0, True, [journey.name], []) == [journey.name]
+
+
+def test_setup_refuses_a_blank_trace_once_the_cli_recorded() -> None:
+    """A CLI that printed record diagnostics converges only on a hit."""
+    ctx = _Ctx((0, "recorded"), (0, ""), (0, ""), (0, ""))
+
+    with pytest.raises(RuntimeError, match="did not converge"):
+        journeys._setup_replay(ctx)
+
+
+def test_a_cli_without_the_record_converges_on_a_blank_trace() -> None:
+    ctx = _Ctx((0, ""), (0, ""))
+
+    journeys._setup_replay(ctx)
+
+    assert ctx.runs == 2
+    assert ctx.replay_supported is False
+
+
+@pytest.mark.parametrize(
+    ("replay", "missed"),
+    [
+        ("hit", False),
+        ("miss (expired), recorded", True),
+        ("recorded", True),
+        ("", True),
+    ],
+)
+def test_a_timed_replay_that_reproves_fails_the_cell(replay: str, missed: bool) -> None:
+    """Only all-hit timed samples count toward valid runs and CPU p50."""
+    journey = journeys.JOURNEYS["install-noop-replay"]
+    ctx = _Ctx()
+    ctx.replay_supported = True
+    sample = SimpleNamespace(replay=replay)
+
+    assert bool(journeys._replay_miss(ctx, journey, sample)) is missed
+    ctx.replay_supported = False
+    assert journeys._replay_miss(ctx, journey, sample) == ""

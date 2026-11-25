@@ -79,6 +79,7 @@ NETWORK_JOURNEYS = (
     "install-warm",
     "install-noop",
     "install-noop-replay",
+    "install-frozen-noop",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
@@ -507,6 +508,8 @@ class Context:
     # Setup reuse: the installed state survives a no-op sample, and the
     # committed lockfiles are captured once per fixture (generation is seeded).
     is_installed: bool = False
+    # The CLI emitted verified-state record diagnostics during replay setup.
+    replay_supported: bool = False
     locks: dict[str, bytes] | None = None
 
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -752,6 +755,7 @@ def _setup_replay(ctx: Context) -> None:
         # rerun) replay the record the setup already proved.
         return
     ctx.installed()
+    ctx.replay_supported = False
     for root in ctx.roots():
         first = _replay_outcome(ctx.checked(["install"], root).stderr)
         # The first unchanged re-install must record (a CLI without the record prints nothing).
@@ -759,17 +763,33 @@ def _setup_replay(ctx: Context) -> None:
             raise RuntimeError(
                 f"first no-op after install did not record in {root}: replay {first}"
             )
+        ctx.replay_supported = ctx.replay_supported or bool(first)
         # Up to three more untimed no-ops until one replays: a CLI may need more
         # than one no-op to write its record (the count is in the trace).
         seen = []
         for _ in range(3):
             outcome = _replay_outcome(ctx.checked(["install"], root).stderr)
             seen.append(outcome or "-")
-            # No trace line: a CLI without the verified-state record (nothing to converge).
-            if not outcome or outcome == "hit":
+            if outcome == "hit":
                 break
+            # No trace at all: a CLI without the verified-state record (nothing to
+            # converge). Once a run printed record diagnostics, only a hit converges.
+            if not outcome and not ctx.replay_supported:
+                break
+            ctx.replay_supported = ctx.replay_supported or bool(outcome)
         else:
             raise RuntimeError(f"setup no-op did not converge in {root}: replay {seen}")
+
+
+def _replay_miss(ctx: Context, journey: Journey, sample: Sample) -> str:
+    """Why a timed replay sample re-proved instead of replaying; "" when every step hit."""
+    if journey.setup is not _setup_replay or not ctx.replay_supported:
+        return ""
+    outcomes = sample.replay.split("; ") if sample.replay else []
+    steps = len(journey.steps(ctx))
+    if len(outcomes) == steps and all(outcome == "hit" for outcome in outcomes):
+        return ""
+    return f"timed no-op did not replay on every step ({steps}): replay {sample.replay or '-'}"
 
 
 def _replay_outcome(tail: str) -> str:
@@ -804,6 +824,14 @@ JOURNEYS: dict[str, Journey] = {
         # install-noop-replay is every later one (#3+): it replays that record.
         Journey(
             "install-noop", Context.installed, lambda c: _per_root(c, ["install"]), _REPLAY_TRACE
+        ),
+        # install-frozen-noop is a CI's --frozen re-install of an installed,
+        # unchanged project (#4770): the lockfile is never rewritten.
+        Journey(
+            "install-frozen-noop",
+            Context.installed,
+            lambda c: _per_root(c, ["install", "--frozen"]),
+            _REPLAY_TRACE,
         ),
         Journey(
             "install-noop-replay",
@@ -1017,6 +1045,7 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     finally:
         # Installed state kept between one journey's samples never leaks into the next.
         ctx.is_installed = False
+        ctx.replay_supported = False
 
 
 def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
@@ -1032,6 +1061,10 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         sample, output = _timed(ctx, journey)
         if journey.name not in _KEEP_INSTALLED:
             ctx.is_installed = False
+        # A replay cell never times a full re-proof: the bench fails instead.
+        if sample.returncode == 0 and (miss := _replay_miss(ctx, journey, sample)):
+            error = miss
+            break
         sample.load1 = load
         sample.load_ok = load < args.max_load
         samples.append(sample)
