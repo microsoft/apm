@@ -414,8 +414,10 @@ def _check_and_notify_updates():
 
         if latest_version:
             # Display yellow warning with update command
+            from ..update_notice import NEW_VERSION_NOTICE
+
             _rich_warning(
-                f"A new version of APM is available: {latest_version} (current: {current_version})",
+                f"{NEW_VERSION_NOTICE}{latest_version} (current: {current_version})",
                 symbol="warning",
             )
 

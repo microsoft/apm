@@ -30,7 +30,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-RECORD_VERSION = 2
+RECORD_VERSION = 3
+# A record's provenance (W3d A5): "proven" when the engine proved the recorded run a
+# no-op; "attested" when a successful full install committed the state it keys, or
+# when a run replayed an attested record. Provenance never upgrades.
+PROVEN, ATTESTED = "proven", "attested"
 RECORDS_DIR = "verdicts"
 KEY_FILE = "verdict.key"
 # Argv the record serves; anything else runs the CLI as usual.
@@ -196,11 +200,21 @@ _USER_SURFACES = (
     ".hermes/config.yaml",
 )
 
-_VERIFIED_NOOP: list[bool] = []
+_VERIFIED_NOOP: list[str] = []
+# A full install that committed a convergence-clean state, and the target line it
+# announced (W3d A1, A2): written as an attested record, never as replayable output.
+_ATTESTED_INSTALL: list[str] = []
+# recording()'s entry state, which an attested check inside the CLI keys (O3).
+_RUN_ENTRY: list[Any] = []
+_RUN_TARGETS: list[str] = []
 # Same values as install/noop_diff.disabled() (APM_INSTALL_FAST_PATH kill switch).
 _KILL_VALUES = frozenset({"0", "false", "no", "off"})
 # O1: the summary's elapsed seconds are templated; any other clock-dependent
 # token (a cache age, a countdown) means the output is not recorded at all.
+# W3d A2 (allowlist): a full install attests only when every warning-or-error
+# line it printed is a notice the attested hit re-judges and prints live.
+_WARNING_LINE = re.compile(r"^\s*\[[!x]\]")
+_LIVE_NOTICES = (re.compile(r"^\s*\[!\] Parked MCP server '"),)
 _ELAPSED = "\x00elapsed\x00"
 _ELAPSED_RE = re.compile(r"(up to date in )\d+\.\d(s\.)")
 _CLOCK_RE = re.compile(
@@ -316,9 +330,10 @@ def _note_proven_lock() -> None:
         _PROVEN_LOCK.append(None)
 
 
-def note_verified_noop() -> None:
-    """The install engine proved this run a no-op (under its lifecycle lock)."""
-    _VERIFIED_NOOP.append(True)
+def note_verified_noop(provenance: str = PROVEN) -> None:
+    """The install engine proved this run a no-op (under its lifecycle lock), or
+    matched an attested record (*provenance* ``attested``)."""
+    _VERIFIED_NOOP.append(provenance)
     _note_proven_lock()
 
 
@@ -492,6 +507,7 @@ def _inputs(
         raise ValueError("root .apm sources")  # not verdict inputs: never recorded, never a hit
     digest.put("version", str(RECORD_VERSION).encode())
     digest.put("build", str(getattr(sys.modules.get("apm_cli"), "__version__", "")).encode())
+    digest.put("build-id", _build_identity())
     digest.put("argv", "\x00".join(argv).encode())
     digest.put("root", os.path.realpath(root).encode("utf-8", "surrogateescape"))
     digest.put("platform", f"{sys.platform}|{os.sep}|{sys.version_info[:2]}".encode())
@@ -573,6 +589,58 @@ def _policy_identity(root: Path) -> Any:
         return _extract_org_host_port_from_git_remote(root)
 
 
+def _build_identity() -> bytes:
+    """The running APM implementation (W3d A3): changes with any APM code change.
+
+    A frozen binary's own stat; an installed (non-editable) distribution's RECORD,
+    which holds every installed file's hash; otherwise (an editable install or a
+    source tree) the content of every file of the package. Never the version alone:
+    when none can be read, this raises and neither a record nor a replay proceeds.
+    """
+    if getattr(sys, "frozen", False):
+        path = os.path.realpath(sys.executable)
+        info = os.stat(path)
+        return f"frozen|{path}|{info.st_size}|{info.st_mtime_ns}".encode("utf-8", "surrogateescape")
+    package = os.path.dirname(os.path.realpath(sys.modules["apm_cli"].__file__ or ""))
+    record = _installed_record(package)
+    if record is not None:
+        return b"installed|" + hashlib.sha256(record).hexdigest().encode()
+    digest = hashlib.sha256()
+
+    def refuse(error: OSError) -> None:
+        raise error
+
+    for here, dirs, files in os.walk(package, onerror=refuse):
+        dirs[:] = sorted(name for name in dirs if name != "__pycache__")
+        for name in sorted(files):
+            data = _read_nofollow(os.path.join(here, name))
+            if data is None:
+                raise ValueError("the APM source tree cannot be read")
+            rel = os.path.relpath(os.path.join(here, name), package)
+            digest.update(f"{rel}\x00{len(data)}\x00".encode("utf-8", "surrogateescape"))
+            digest.update(data)
+    return f"source|{package}|{digest.hexdigest()}".encode("utf-8", "surrogateescape")
+
+
+def _installed_record(package: str) -> bytes | None:
+    """The RECORD of the non-editable distribution that installed *package*, if any."""
+    site = os.path.dirname(package)
+    try:
+        names = [
+            n for n in os.listdir(site) if n.startswith("apm_cli-") and n.endswith(".dist-info")
+        ]
+    except OSError:
+        return None
+    if len(names) != 1:
+        return None
+    dist = os.path.join(site, names[0])
+    direct = _read_nofollow(os.path.join(dist, "direct_url.json")) or b""
+    record = _read_nofollow(os.path.join(dist, "RECORD"))
+    if b'"editable":true' in direct.replace(b" ", b"") or record is None:
+        return None  # an editable install's files are the source tree: stat them
+    return record if b"apm_cli/__init__.py," in record else None
+
+
 def _names(value: Any) -> bool:
     """A record's name list: a list of strings (an empty list is a list)."""
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
@@ -580,7 +648,7 @@ def _names(value: Any) -> bool:
 
 def _body(digest: _Digest, record: dict) -> None:
     """The replayed bytes and their validity window are authenticated too (W3d R1)."""
-    for field in ("stdout", "stderr", "exit", "issued_at", "expires_at"):
+    for field in ("stdout", "stderr", "exit", "issued_at", "expires_at", "kind", "provenance"):
         digest.put(f"body:{field}", repr(record.get(field)).encode("utf-8", "surrogateescape"))
 
 
@@ -672,8 +740,12 @@ class _Miss(Exception):
     """The record does not prove this run; the message (if any) is the trace reason."""
 
 
-def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
-    """The record and its stdout, only when it proves this run; raises _Miss otherwise."""
+def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> tuple[dict, str]:
+    """The record and its stdout, only when it proves this run; raises _Miss otherwise.
+
+    *attested* selects an attested record (no output, W3d A5), which only the
+    install engine's fast path consumes; a replay never reads one.
+    """
     raw = _read_nofollow(_record_path(root))
     if raw is None or not _location_trusted(root):
         raise _Miss("")
@@ -684,6 +756,8 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
     lock_text = _read_nofollow(root / "apm.lock.yaml")
     run_env, surfaces = record.get("run_env"), record.get("surfaces")
     git_system, notice = record.get("git_system"), record.get("notice")
+    if (record.get("kind") == ATTESTED) is not attested:
+        raise _Miss("")  # an attested record has no output: only the engine consumes it
     if (
         lock_text is None
         or record.get("v") != RECORD_VERSION
@@ -797,14 +871,24 @@ def recording(argv: list[str]) -> Iterator[None]:
     if not _served(argv) or not _hits_allowed():
         yield
         return
-    for state in (_VERIFIED_NOOP, _UNKNOWN, _PROVEN_LOCK):
+    for state in (
+        _VERIFIED_NOOP,
+        _UNKNOWN,
+        _PROVEN_LOCK,
+        _ATTESTED_INSTALL,
+        _RUN_ENTRY,
+        _RUN_TARGETS,
+    ):
         state.clear()
     _ENV_READS.clear()
     entry = (_env_snapshot(), _presentation())
+    _RUN_ENTRY.append(entry)
     _ENTRY_FILES[:] = [_entry_bytes("apm.yml"), _entry_bytes("apm.lock.yaml")]
     from apm_cli.install.verdict_inputs import entry_stamp
 
     _ENTRY_TIME[:] = entry_stamp()
+    if (console := sys.modules.get("apm_cli.utils.console")) is not None:
+        console.EMITTED.clear()  # never imported here: the replay path stays light
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
@@ -819,182 +903,25 @@ def recording(argv: list[str]) -> Iterator[None]:
     finally:
         _ACTIVE.remove(out)
         sys.stdout, sys.stderr = out.stream, err.stream
-        if _UNKNOWN:
-            _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
-        elif code == 0 and _VERIFIED_NOOP:
-            _record_locked(argv, entry, out, err)
+        _settle(argv, entry, out, err, code)
+
+
+def _settle(argv: list[str], entry: Any, out: _Tee, err: _Tee, code: object) -> None:
+    """Write what this run proved, attested or recorded (install/verdict_write.py)."""
+    from apm_cli.install.verdict_write import _record_locked, _unsettled_line, unsettled_message
+
+    if code == 0 and _ATTESTED_INSTALL and not _VERIFIED_NOOP:
+        # No output is recorded, so an unknown no-op form does not matter:
+        # every attested hit renders its output live.
+        text = "".join(out.parts) + "".join(err.parts)
+        unsettled = _unsettled_line(text) or unsettled_message()
+        if unsettled is None:
+            _record_locked(argv, entry, out, err, attested=True)
         else:
-            _trace("no record (not a verified no-op)")
-
-
-def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
-    """Record under the lifecycle lock, only over the state the run proved.
-
-    The CLI released its lock when it returned: the record is written only while
-    no one else can write, and only when apm.yml and the lock are byte-identical
-    to the run's entry and to what the engine held its lock over when it proved
-    the no-op (W3d R4).
-    """
-    try:
-        from apm_cli.install.locking import acquire_lifecycle_lock
-
-        lock = acquire_lifecycle_lock()
-    except Exception as exc:  # busy: the install succeeded, only the record is lost
-        _trace(f"no record (lock: {type(exc).__name__})")
-        return
-    try:
-        current = _read_nofollow(Path.cwd() / "apm.lock.yaml")
-        manifest_at_entry, lock_at_entry = _ENTRY_FILES or (None, None)
-        if (
-            current is None
-            or not _PROVEN_LOCK
-            or _PROVEN_LOCK[-1] != current
-            or lock_at_entry != current
-            or _entry_bytes("apm.yml") != manifest_at_entry
-        ):
-            _trace("no record (apm.yml or the lock changed while the run proved its verdict)")
-            return
-        _record_after(argv, entry, out, err)
-    except OSError as exc:
-        _trace(f"no record ({type(exc).__name__})")
-    finally:
-        lock.release()
-
-
-def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
-    """Record a verified no-op's output, when every input it rests on is provable."""
-    from apm_cli.core.lifecycle_scripts import discover_scripts
-
-    if discover_scripts(str(Path.cwd())):
-        # Scripts fire on every install; a replay fires none, so never record (W3d R1).
-        _trace("no record (lifecycle scripts)")
-        return
-    lock = _committed_lock()
-    if lock is None:
-        return
-    deployed = frozenset(
-        rel
-        for key, dep in lock.dependencies.items()
-        if key != "."
-        for rel in getattr(dep, "deployed_file_hashes", None) or {}
-    )
-    _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts), deployed)
-
-
-def _committed_lock() -> Any:
-    """The lock this run committed (its owner's read), if a hit could prove it."""
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-
-    try:
-        lock = LockFile.read(get_lockfile_path(Path.cwd()))
-    except Exception as exc:  # the install succeeded; only the record is lost
-        _trace(f"no record (lockfile: {type(exc).__name__})")
-        return None
-    if lock is None:
-        _trace("no record (no lockfile)")
-        return None
-    unprovable = lock.local_deployed_files or lock.local_staged_files
-    for key, dep in lock.dependencies.items():
-        if key != "." and not _provable_row(lambda name, dep=dep: getattr(dep, name, None)):
-            unprovable = True
-    if unprovable:
-        _trace("no record (content a hit cannot prove)")
-        return None
-    return lock
-
-
-def _write_at_entry(
-    entry: tuple[dict[str, str], bytes],
-    argv: list[str],
-    out: str,
-    err: str,
-    deployed: frozenset[str],
-) -> None:
-    """Write the record keyed by the run's entry state (what a hit will see)."""
-    global _ENTRY_ENV, _ENTRY_PRESENTATION
-    _ENTRY_ENV, _ENTRY_PRESENTATION = entry
-    try:
-        _write(argv, out, err, deployed)
-    finally:
-        _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
-
-
-def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozenset[str]) -> None:
-    root = Path.cwd()
-    try:
-        if not _location_trusted(root):
-            _trace("no record (APM_HOME inside the project or cache)")
-            return  # never create a key or record inside the project or cache
-        lock_text = _read_nofollow(root / "apm.lock.yaml")
-        if lock_text is None:
-            _trace("no record (no lockfile)")
-            return
-        stdout_text, stamps = _ELAPSED_RE.subn(rf"\g<1>{_ELAPSED}\g<2>", stdout_text)
-        from apm_cli.install import verdict_policy
-
-        templated = verdict_policy._template_ages(stdout_text)
-        if templated is None:
-            _trace("no record (a policy age without one cache entry)")
-            return
-        stdout_text = templated
-        if stamps != 1 or _CLOCK_RE.search(stdout_text) or _CLOCK_RE.search(stderr_text):
-            _trace("no record (clock-dependent output)")
-            return  # O1: only the elapsed seconds may depend on the clock
-        if verdict_policy._discovery_unproven(root, _policy_identity(root)):
-            _trace("no record (discovery would fetch a policy candidate)")
-            return
-        from apm_cli.install import verdict_inputs
-
-        notice, due = verdict_inputs.notice_schedule(_ENTRY_TIME[0] if _ENTRY_TIME else 0.0)
-        key = _key(create=True)
-        if key is None:
-            _trace("no record (no private key)")
-            return
-        run_env = sorted(
-            name
-            for name in _ENV_READS
-            if isinstance(name, str) and name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
-        )
-        surfaces = sorted({*_owner_surfaces(root), *verdict_inputs.tls_surfaces(_ENTRY_ENV)})
-        from apm_cli.install import verdict_git, verdict_policy
-
-        git_system = verdict_git._git_system()
-        digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed, notice)
-        stderr_kept = "".join(
-            line
-            for line in stderr_text.splitlines(keepends=True)
-            if "install fast path:" not in line
-        )
-        issued = time.time()
-        record = {
-            "v": RECORD_VERSION,
-            "stdout": stdout_text,
-            "stderr": stderr_kept,
-            "exit": 0,
-            "issued_at": issued,
-            "expires_at": min(verdict_policy._expiry(issued), due or float("inf")),
-            "run_env": run_env,
-            "surfaces": surfaces,
-            "git_system": git_system,
-            "notice": notice,
-        }
-        _body(digest, record)
-        record["mac"] = digest.hexdigest()
-        record["tags"] = digest.tags
-        import tempfile
-
-        path = _record_path(root)
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".record-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(record, handle)
-            os.replace(tmp, path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
-        _trace("recorded")
-    except (OSError, ValueError, TypeError) as exc:
-        _trace(f"no record ({type(exc).__name__})")
-        return
+            _trace(f"no attestation (printed: {unsettled[:80]})")
+    elif _UNKNOWN:
+        _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
+    elif code == 0 and _VERIFIED_NOOP:
+        _record_locked(argv, entry, out, err)
+    else:
+        _trace("no record (not a verified no-op)")

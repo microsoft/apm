@@ -148,6 +148,7 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
+from apm_cli.install.verdict_attest import attest_clean_install
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -1640,15 +1641,18 @@ def install(  # noqa: PLR0913
             )
             command_result = transaction.complete(command_result)
 
-            command_result = _post_install_summary(
-                logger=logger,
-                apm_count=apm_count,
-                mcp_count=mcp_count,
-                lsp_count=lsp_count,
-                apm_diagnostics=apm_diagnostics,
-                force=force,
-                elapsed_seconds=time.perf_counter() - install_started_at,
-                result=command_result,
+            command_result = attest_clean_install(
+                _post_install_summary(
+                    logger=logger,
+                    apm_count=apm_count,
+                    mcp_count=mcp_count,
+                    lsp_count=lsp_count,
+                    apm_diagnostics=apm_diagnostics,
+                    force=force,
+                    elapsed_seconds=time.perf_counter() - install_started_at,
+                    result=command_result,
+                ),
+                dry_run=dry_run,
             )
             summary_rendered = True
 

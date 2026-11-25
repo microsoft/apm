@@ -731,10 +731,16 @@ def try_apply(
         import click
 
         from apm_cli.deps.lockfile_generator import require_current_cli
+        from apm_cli.install import verdict_attest
 
+        # An attested record MACs these exact lock bytes and this build, which
+        # passed the generator gate when it committed them: the gate's answer is
+        # the same, so only a run without a matching attestation re-reads it.
+        attested = verdict_attest.attested_state(list(argv or []), project_root)
         try:
-            # The command's own gate: the full run renders its refusal.
-            require_current_cli(project_root, command="apm install")
+            if not attested:
+                # The command's own gate: the full run renders its refusal.
+                require_current_cli(project_root, command="apm install")
         except click.ClickException:
             raise Decline("lockfile generator") from None
         lock_path = get_lockfile_path(project_root)
@@ -778,6 +784,15 @@ def try_apply(
         deploy = DeployStore.open_default()
         if deploy is None:
             raise Decline("no deploy store")
+        if attested and verdict_attest.attested_gates(project_root, lock, fetch):
+            if decide_only:
+                _trace("no-op (attested record)")
+                return True
+            raise _AttestedCommitted(
+                _commit_attested(
+                    project_root, lock, fetch, targets, session, started, frozen_disposition
+                )
+            )
         packages = _plan_packages(project_root, lock)
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
@@ -823,6 +838,9 @@ def try_apply(
         return False
     except ApplyRestoreIncomplete:
         raise  # the tree is not the pre-run tree: never run the full pipeline on it
+    except _AttestedCommitted as committed:
+        # Committed: as below, the held output is printed outside the fallback.
+        return verdict_attest.release_attested(committed.args[0])
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False
@@ -840,6 +858,27 @@ def try_apply(
         # An applied diff holds its service output, so only a no-op is recorded (#4977).
         verdict_record.note_verified_noop()
     return True
+
+
+class _AttestedCommitted(Exception):
+    """An attested no-op committed its journal (``args[0]`` holds its output)."""
+
+
+def _commit_attested(
+    project_root: Path,
+    lock: Any,
+    fetch: Any,
+    targets: Any,
+    session: Any,
+    started: float,
+    frozen_disposition: Any,
+) -> Any:
+    """Render the no-op through the proven no-op's own path: an empty diff, journaled."""
+
+    def render() -> None:
+        _render(project_root, lock, [], [], [], started, frozen_disposition)
+
+    return _commit(project_root, fetch, [], [], targets, session, False, render)
 
 
 def _render(
