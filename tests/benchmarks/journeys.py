@@ -525,13 +525,15 @@ class Context:
             tail += _redact(err.read().decode(errors="replace"))[-3000:]
         return returncode, tail, cpu
 
-    def checked(self, argv: list[str], cwd: Path) -> None:
+    def checked(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
+        """Run one untimed setup command; a nonzero exit fails the cell (redacted)."""
         result = self.run(argv, cwd)
         if result.returncode != 0:
             raise RuntimeError(
                 f"setup `apm {' '.join(argv)}` failed ({result.returncode}) in {cwd}:\n"
                 f"{_redact(result.stdout)[-3000:]}\n{_redact(result.stderr)[-3000:]}"
             )
+        return result
 
     # state helpers (untimed)
 
@@ -729,7 +731,7 @@ def _setup_replay(ctx: Context) -> None:
         return
     ctx.installed()
     for root in ctx.roots():
-        first = _replay_outcome(ctx.run(["install"], root).stderr)
+        first = _replay_outcome(ctx.checked(["install"], root).stderr)
         # The first unchanged re-install must record (a CLI without the record prints nothing).
         if first and "recorded" not in first:
             raise RuntimeError(
@@ -739,7 +741,7 @@ def _setup_replay(ctx: Context) -> None:
         # than one no-op to write its record (the count is in the trace).
         seen = []
         for _ in range(3):
-            outcome = _replay_outcome(ctx.run(["install"], root).stderr)
+            outcome = _replay_outcome(ctx.checked(["install"], root).stderr)
             seen.append(outcome or "-")
             # No trace line: a CLI without the verified-state record (nothing to converge).
             if not outcome or outcome == "hit":
