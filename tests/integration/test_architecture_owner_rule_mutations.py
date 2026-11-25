@@ -5408,7 +5408,7 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/utils/git_env.py",
-        old="    return filesystem_containment(path, root) is not False",
+        old="    return root is not None and filesystem_containment(path, root) is not False",
         new="    return os.path.samefile(path, root) or filesystem_containment(path, root) is not False",
         intent="Helper exclusion computes containment itself beside the path_security owner.",
     ),
