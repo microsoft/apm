@@ -166,7 +166,9 @@ jobs:
       if: matrix.shard == 1
       working-directory: harness
       continue-on-error: true
-      run: uv run --frozen pytest tests/integration/test_redteam_rt5_pack_trees.py -p no:cacheprovider -o addopts="" -rA -q 2>&1 | tail -60
+      env:
+        APM_BINARY_PATH: ${{ github.workspace }}/new/${{ env.VENV_APM }}
+      run: uv run --frozen pytest tests/integration/test_redteam_rt5_pack_trees.py tests/integration/test_redteam_rt5_lock_repoint.py -p no:cacheprovider -o addopts="" -rA -q 2>&1 | tail -80
     - name: Interleaved runs
       working-directory: harness
       env:
