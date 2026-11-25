@@ -59,6 +59,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests.benchmarks import output_oracle  # noqa: E402
 from tests.fixtures.perf import (  # noqa: E402
     MONOREPO_RECIPES,
     REAL_PACKAGES,
@@ -908,6 +909,7 @@ class Sample:
     routes: dict = field(default_factory=dict)
     git_verbs: dict = field(default_factory=dict)
     fs: dict = field(default_factory=dict)
+    output: dict = field(default_factory=dict)
     # Verified-state record outcome per step (noop journeys): "hit", "miss (...)".
     replay: str = ""
 
@@ -944,7 +946,30 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
     sample.replay = "; ".join(r for r in replays if r)
+    if returncode == 0:
+        sample.output = _deployed_output(ctx, journey)
     return sample, output
+
+
+def _deployed_output(ctx: Context, journey: Journey) -> dict:
+    """What the journey left behind (untimed): see ``output_oracle``."""
+    work = ctx.work.parents[1]
+    if journey.name in _GLOBAL:
+        env = ctx.world.env
+        roots = [Path(env[name]) for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME")]
+        apm_home = ctx.world.apm_home
+        return output_oracle.capture(roots, work, lock_dirs=[apm_home], skip=(apm_home,))
+    if journey.name == "pack":
+        return output_oracle.capture([ctx.work / "dist"], work, lock_dirs=[])
+    if journey.name == "install-bundle":
+        return output_oracle.capture([ctx.work / "bundle-consumer"], work)
+    return output_oracle.capture(ctx.roots(), work)
+
+
+def _sample_record(sample: Sample) -> dict:
+    record = asdict(sample)
+    record["output"] = {k: v for k, v in sample.output.items() if k != "manifest"}
+    return record
 
 
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
@@ -1097,7 +1122,8 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "git_verbs": ok[-1].git_verbs if ok else {},
         "fs": ok[-1].fs if ok else {},
         "replay": ok[-1].replay if ok else "",
-        "samples": [asdict(s) for s in samples],
+        "output": output_oracle.record_output([s.output for s in ok]),
+        "samples": [_sample_record(s) for s in samples],
         "error": error,
     }
     if args.profile and not error:

@@ -12,7 +12,9 @@ the median of the per-pair new/base CPU ratios, and the deterministic counts
 (requests, round trips, connects, spawns). Wall p50 is reported only as
 modeled-RTT wall (the mirror injects ``--rtt`` per round trip): evidence for
 network-bound journeys such as a fresh install, never for CPU-bound ones,
-since runners are shared VMs.
+since runners are shared VMs. The ``output`` column compares what each side
+deployed (``output_oracle``); a cell whose new side deploys different files or
+a different lockfile is INVALID and fails the report.
 
 ``abab --profile`` adds one cProfile run per cell on the new side (shard
 artifacts carry ``profiles/*.txt``: cumulative and self-time top lists), the
@@ -38,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.benchmarks import journeys  # noqa: E402
+from tests.benchmarks import journeys, output_oracle  # noqa: E402
 
 SIDES = ("base", "new")
 
@@ -122,11 +124,13 @@ def _load(root: Path) -> dict:
         side, _, pair = run_dir.partition("-")
         if side not in SIDES:
             continue
-        shard = _shard_of(path, root)
+        # The pair id keeps every directory above the side's run dir: pooled
+        # workflow runs (downloaded side by side) reuse shard names and indices.
+        where = "/".join(path.relative_to(root).parts[:-2]) or _shard_of(path, root)
         report = json.loads(path.read_text(encoding="utf-8"))
         for record in report["results"]:
             key = (record["fixture"], record["journey"], record["rtt_ms"])
-            cells.setdefault(key, {}).setdefault(side, []).append((f"{shard}/{pair}", record))
+            cells.setdefault(key, {}).setdefault(side, []).append((f"{where}/{pair}", record))
     return cells
 
 
@@ -180,6 +184,9 @@ def summarize(root: Path) -> list[dict]:
                 "spawns_by_exe": last.get("spawns"),
                 "modules": last.get("modules"),
             }
+        row["output"] = output_oracle.compare(
+            *([(p, r.get("output")) for p, r in sides.get(side, [])] for side in SIDES)
+        )
         row["paired_new_over_base"] = _paired(sides, _cpu)
         row["paired_wall_new_over_base"] = _paired(sides, _wall)
         rows.append(row)
@@ -204,8 +211,8 @@ def render(rows: list[dict], meta: dict) -> str:
         "| fixture | journey | rtt ms | base CPU p50 s | new CPU p50 s | speedup x | "
         "CPU removed | paired new/base | wall p50 s base->new | paired wall | "
         "requests base->new | round trips base->new | connects base->new | "
-        "spawns base->new | samples base/new | errors base/new |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "spawns base->new | samples base/new | errors base/new | output |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         b, n = row["base"], row["new"]
@@ -224,9 +231,59 @@ def render(rows: list[dict], meta: dict) -> str:
             f"| {b['requests']}->{n['requests']} "
             f"| {_change(b.get('round_trips'), n.get('round_trips'))} "
             f"| {_change(b.get('connects'), n.get('connects'))} | {b['spawns']}->{n['spawns']} "
-            f"| {b['samples']}/{n['samples']} | {b['errors']}/{n['errors']} |"
+            f"| {b['samples']}/{n['samples']} | {b['errors']}/{n['errors']} "
+            f"| {_output_cell(row.get('output'))} |"
         )
+    lines.extend(_invalid_lines(rows))
     return "\n".join(lines) + "\n"
+
+
+def _output_cell(output: dict | None) -> str:
+    """``same``, ``INVALID``, ``INCOMPLETE``, ``UNSTABLE`` or ``-``."""
+    if not output or output["verdict"] == "-":
+        return "-"
+    if output["verdict"] == "INCOMPLETE":
+        return f"INCOMPLETE ({output['uncovered_pairs']}/{output['pairs']} pairs uncaptured)"
+    if output["verdict"] == "UNSTABLE":
+        return f"UNSTABLE ({output['variants']} output variants)"
+    return f"{output['verdict']} ({output.get('files')} files)"
+
+
+def _invalid_lines(rows: list[dict]) -> list[str]:
+    """One line per cell whose new side deployed different output than its base."""
+    lines = []
+    for row in rows:
+        output = row.get("output") or {}
+        if output.get("verdict") == "INCOMPLETE":
+            lines.append(
+                f"\n[x] INCOMPLETE {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
+                f"{output['uncovered_pairs']} of {output['pairs']} pairs carry no output on "
+                f"one side (first: {output['first']}), so parity is unproven."
+            )
+            continue
+        if output.get("verdict") == "UNSTABLE":
+            lines.append(
+                f"\n[x] UNSTABLE {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
+                f"the journey left {output['variants']} different outputs across "
+                f"{output['pairs']} pairs ({output['unstable_records']} records varied "
+                "between their own samples), so no output is like-for-like."
+            )
+            continue
+        if output.get("verdict") != "INVALID":
+            continue
+        detail = ", ".join(
+            f"{name} {len(output[name])}: {' '.join(output[name][:5])}"
+            for name in ("missing", "added", "changed")
+            if output.get(name)
+        )
+        lock = "; lockfile differs" if output.get("lock_differs") else ""
+        lock += f"; {output.get('mismatched_pairs')}/{output.get('pairs')} pairs differ"
+        lines.append(
+            f"\n[x] INVALID {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
+            f"new deploys different output than base ({detail or 'see json'}{lock}). "
+            "Its CPU ratio is not a like-for-like measurement."
+        )
+    return lines
 
 
 def report(args: argparse.Namespace) -> int:
@@ -237,7 +294,9 @@ def report(args: argparse.Namespace) -> int:
         Path(args.json).write_text(
             json.dumps({"meta": meta, "rows": rows}, indent=2) + "\n", encoding="utf-8"
         )
-    return 1 if not rows or any(_incomplete(r, args) for r in rows) else 0
+    failing = ("INVALID", "INCOMPLETE", "UNSTABLE")
+    invalid = any((r.get("output") or {}).get("verdict") in failing for r in rows)
+    return 1 if not rows or invalid or any(_incomplete(r, args) for r in rows) else 0
 
 
 def _incomplete(row: dict, args: argparse.Namespace) -> bool:
