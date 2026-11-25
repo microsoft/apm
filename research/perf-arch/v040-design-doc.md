@@ -6,7 +6,9 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
 
 ## 0. Summary
 
-- **Target** (reference runner class EPYC 9V74, cold t50, default-on, 0 errors): Linux <= 3.5 s, Windows <= 7.5 s. There is NO macOS target in v0.40; macOS is reported as a paired ratio only, since there is no 9V74-class calibration for macOS runners.
+- **Target** (reference runner class EPYC 9V74, cold t50, default-on, 0 errors): Linux <= 3.5 s, Windows <= 7.5 s.
+  - Targets and all seconds in this doc are CPU p50 (user+sys, apm plus children), NOT stopwatch time.
+  - Wall adds network/IO wait: on 9V74 at rtt=30, main+#5374 is 12.26 s wall vs 10.53 s CPU (+~1.7 s) [45534359514]. There is NO macOS target in v0.40; macOS is reported as a paired ratio only, since there is no 9V74-class calibration for macOS runners.
 - **Main today (1e4a208e):** Linux 6.1 s, Windows 13.2 s. The physics floor is ~0.7 s Linux / ~1.2 s Windows, so the gap is 8.7x Linux / 11x Windows.
 - **Where the gap is** (measured by paired deletion and a per-phase CPU probe on main):
   - integrate is ~45% Linux / ~50% Windows;

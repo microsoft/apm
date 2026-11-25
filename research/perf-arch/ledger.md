@@ -285,3 +285,4 @@
 03:43 | #5382 H8 already signed 03:07 (desk row 387, desk DB d42f94a1 inbox.db); my risk flag was wrong; check desk H8 rows first | SoL calib | none
 03:52 | tick; notes 1d723b4527730c6a50aea98dfd9dbd569d56c6d4 | SoL calib | none
 03:52 | W schannel calib 9V74 10.53 s x 0.568 = 5.98 s -> doc 'AT target' (3/4 classes) | SoL oracles | none
+03:54 | VP challenged 10.53; traced = cpu_p50_s artifact vm4 (wall 12.26); doc v3.2 caveats 48d166872cf38827b932052fdb1af2aaff603c1b | VP | none
