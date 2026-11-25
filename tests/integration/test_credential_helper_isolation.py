@@ -123,7 +123,9 @@ def _fake_helper(tmp_path: Path) -> Path:
     sleep = shutil.which("sleep")
     assert sleep is not None
     helper = tmp_path / "git-credential-apmleak"
-    shutil.copy2(sleep, helper)
+    # Content only: copying /bin/sleep's metadata (SIP flags) fails on macOS.
+    shutil.copy(sleep, helper)
+    helper.chmod(0o755)
     return helper
 
 
