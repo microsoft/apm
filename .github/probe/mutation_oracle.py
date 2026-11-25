@@ -154,7 +154,11 @@ def _victim(cwd) -> Path | None:
     except (OSError, ValueError):
         return None
     files = sorted(f for d in lock.get("dependencies") or [] for f in d.get("deployed_files") or [])
-    return Path(cwd) / files[0] if files else None
+    for rel in files:
+        path = Path(cwd) / rel
+        if path.is_file() and not path.is_symlink():
+            return path
+    return None
 
 
 def baseline_served(world, cwd) -> tuple[bool, str]:
