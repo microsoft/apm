@@ -1920,24 +1920,11 @@ class GitHubPackageDownloader:
                 validate_cached_links(_cached, None, self._git_env_dict())
                 from ..utils.file_ops import robust_copy_entry
 
-                # RESEARCH ONLY: hardlink the cache checkout into apm_modules (shared inodes; unsafe).
-                for _root, _dirs, _files in os.walk(_cached):
-                    _rel = os.path.relpath(_root, _cached)
-                    if _rel == "." and ".git" in _dirs:
-                        _dirs.remove(".git")
-                    _dest = target_path if _rel == "." else target_path / _rel
-                    _dest.mkdir(parents=True, exist_ok=True)
-                    for _name in list(_dirs):
-                        if os.path.islink(os.path.join(_root, _name)):
-                            _dirs.remove(_name)
-                            robust_copy_entry(Path(_root) / _name, _dest / _name)
-                    for _name in _files:
-                        _src = os.path.join(_root, _name)
-                        if os.path.islink(_src):
-                            robust_copy_entry(Path(_src), _dest / _name)
-                        else:
-                            os.link(_src, _dest / _name)
-                # RESEARCH: verified-copy re-read deleted (same inodes as the verified checkout)
+                for item in _cached.iterdir():
+                    if item.name == ".git":
+                        continue
+                    robust_copy_entry(_cached / item.name, target_path / item.name)
+                require_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)
