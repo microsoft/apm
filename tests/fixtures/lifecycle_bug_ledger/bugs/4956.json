@@ -15,6 +15,7 @@
     "tests/integration/test_install_policy_fields_lifecycle.py::test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes",
     "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_refuses_a_merged_config_beside_user_hooks",
     "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_refuses_a_hook_file_the_install_skips",
-    "tests/integration/test_install_policy_fields_lifecycle.py::test_bundle_dry_run_never_writes_through_a_linked_hook_destination"
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_bundle_dry_run_never_writes_through_a_linked_hook_destination",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_passes_an_approved_bundle_upgrade"
   ]
 }

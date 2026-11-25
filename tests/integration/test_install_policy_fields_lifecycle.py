@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -1033,3 +1034,50 @@ def test_bundle_dry_run_never_writes_through_a_linked_hook_destination(
     assert "Traceback" not in _text(result), _evidence(result)
     assert outside.read_bytes() == b'{"hooks": {}}\n'
     assert destination.is_symlink()
+
+
+def _packed_exec_upgrade(world: World) -> Path:
+    """Pack p-exec again with a changed session hook: a new bundle version and approval key."""
+    source = world.root / "exec-v2-src"
+    shutil.copytree(Path(world.packages["p-exec"].spec), source)
+    for hook in source.rglob("*.json"):
+        text = hook.read_text(encoding="utf-8")
+        if "echo p-exec" in text:
+            hook.write_text(text.replace("echo p-exec", "echo p-exec-v2"), encoding="utf-8")
+    manifest = source / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("version: 1.0.0", "version: 2.0.0"),
+        encoding="utf-8",
+    )
+    return _pack_bundle(source, world.root / "exec-v2-bundle", world.env)
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+def test_unmanaged_files_deny_passes_an_approved_bundle_upgrade(
+    lifecycle_world: World,  # noqa: F811
+    target: str,
+) -> None:
+    """#4956: the preview retires the previous version's hooks, as the real run does."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    _approve_parked_exec_bundle(world, target)
+    _assert_ok(world, "install", "--target", target, world.packages["p-exec:bundle"].spec)
+    upgrade = _packed_exec_upgrade(world)
+    parked = _apm(world, "install", "--target", target, str(upgrade))
+    key = re.search(r"apm approve '([^']+)'", _text(parked))
+    assert key is not None, _evidence(parked)
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["executables"] = {"allow": {key.group(1): {"hooks": True}}}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    _assert_ok(world, "install", "--target", target, str(upgrade))
+
+    deployed = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (world.project / f".{'github' if target == 'copilot' else 'claude'}").rglob(
+            "*.json"
+        )
+    )
+    assert "echo p-exec-v2" in deployed, deployed
