@@ -114,7 +114,12 @@ def _assert_like_git_or_left(world: Path, build) -> None:
         assert sorted(os.listdir(staged)) == [".git"]
         return
     reference = _staged(world, src, "reference")
-    done = subprocess.run(["git", "checkout", "-q", sha], cwd=reference, capture_output=True)
+    # APM checks out with core.autocrlf=false and core.eol=lf (git_env line-ending pins).
+    done = subprocess.run(
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "checkout", "-q", sha],
+        cwd=reference,
+        capture_output=True,
+    )
     assert done.returncode == 0, "in-process wrote a tree git itself refuses to check out"
     assert _snapshot(staged) == _snapshot(reference)
     assert sorted(manifest) == sorted(_snapshot(staged))
