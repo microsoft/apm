@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -107,14 +108,58 @@ def hash_blind(package: Path) -> bool:
 _MARK = {b"dir": "/", b"link": "@", b"file": "", b"absent": "?"}
 
 
+# path_security._is_link: a Windows name-surrogate reparse point (a junction) is a link.
+_REPARSE_POINT = 0x400
+_NAME_SURROGATE = 0x20000000
+
+
 def _kind(path: str) -> bytes:
+    """One lstat: dir, link (a symlink or a junction), file or absent."""
     try:
-        mode = os.lstat(path).st_mode
+        info = os.lstat(path)
     except FileNotFoundError:
         return b"absent"
     except NotADirectoryError:
         return b"absent"
-    return b"dir" if stat.S_ISDIR(mode) else b"link" if stat.S_ISLNK(mode) else b"file"
+    if stat.S_ISLNK(info.st_mode) or (
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
+        and getattr(info, "st_reparse_tag", 0) & _NAME_SURROGATE
+    ):
+        return b"link"
+    return b"dir" if stat.S_ISDIR(info.st_mode) else b"file"
+
+
+def walk_governed(base: str) -> Iterator[tuple[str, list[os.DirEntry[str]], list[str]]]:
+    """``_tree`` over one governed target root, refusing any linked directory level.
+
+    The engine never deploys through a link (diff_apply._within, #5438): a root or
+    a subdirectory that is a link or a junction is no verdict a hit can prove, so
+    it raises (no record, a miss). One lstat per directory level.
+    """
+    if _kind(base) == b"link":
+        raise ValueError("linked target directory")
+    for rel, files, dirs in _tree(base):
+        for name in dirs:
+            if _kind(os.path.join(base, rel, name)) == b"link":
+                raise ValueError("linked target directory")
+        yield rel, files, dirs
+
+
+def has_linked_parent(root: Path, rel: str, proven: set[str]) -> bool:
+    """Whether a directory between *root* and the file *rel* is a link or a junction.
+
+    *proven* holds the directories already seen to be real in this check.
+    """
+    parent = os.path.dirname(rel)
+    chain = []
+    while parent and parent not in proven:
+        chain.append(parent)
+        parent = os.path.dirname(parent)
+    for here in reversed(chain):
+        if _kind(os.path.join(root, here)) != b"dir":
+            return True
+        proven.add(here)
+    return False
 
 
 def _key_parents(digest: Any, root: Path, surfaces: list[str]) -> None:

@@ -1540,3 +1540,66 @@ def test_terminal_styling_never_hides_a_deferral_warning(
 
 def _assert_replays(expected: bool) -> None:
     assert verdict_record.replay(["install"]) is expected
+
+
+def _link_dir(path: Path, target: Path) -> None:
+    """A symlink to *target* (a junction on Windows, which needs no privilege)."""
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(path))
+    else:
+        path.symlink_to(target, target_is_directory=True)
+
+
+def _swap_for_link(project: Path, rel: str) -> None:
+    """Replace the governed directory *rel* with a link to an identical copy outside."""
+    outside = project.parent / "outside" / rel
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(project / rel, outside, symlinks=True)
+    shutil.rmtree(project / rel)
+    _link_dir(project / rel, outside)
+
+
+@pytest.mark.parametrize("rel", [".github", ".github/prompts"], ids=["root", "subdir"])
+def test_a_governed_directory_swapped_for_a_link_misses_the_replay(
+    project: Path, capsys, rel: str
+) -> None:
+    """The engine never deploys through a link (diff_apply._within), so a hit must not (#5438)."""
+    _record()
+    _swap_for_link(project, rel)
+    capsys.readouterr()
+
+    hit = verdict_record.replay(["install"])
+
+    assert (hit, capsys.readouterr().out) == (False, "")
+
+
+@pytest.mark.parametrize("rel", [".github", ".github/prompts"], ids=["root", "subdir"])
+def test_a_governed_directory_swapped_for_a_link_misses_the_attested_hit(
+    project: Path, rel: str
+) -> None:
+    _attest(project)
+    assert _attested_hit() is True, "positive control: run 2 matches the attestation"
+
+    _swap_for_link(project, rel)
+
+    _assert_proves_itself()
+
+
+def test_the_engine_fast_path_refuses_a_linked_target_root(project: Path) -> None:
+    """Control: the owner the record must agree with declines the same state."""
+    from apm_cli.install.diff_apply import Decline, _within
+
+    _swap_for_link(project, ".github")
+
+    with pytest.raises(Decline, match="symlink in a deployed path"):
+        _within(project, _REL)
+
+
+def test_a_linked_target_root_is_never_recorded(project: Path) -> None:
+    _swap_for_link(project, ".github")
+
+    _record()
+
+    assert not (_home(project) / "verdicts").exists()
