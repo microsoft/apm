@@ -158,15 +158,27 @@ def transitive_local_identity(
     )
 
 
+def declared_dir(base: Path, local_path: str) -> Path:
+    """The directory a local edge declares: *local_path* (``~`` expanded) under *base*."""
+    return base / Path(local_path).expanduser()
+
+
 def same_stored_leaf(first: Path, ranked: Path) -> bool:
     """Whether two declared spellings of a package directory are one directory entry.
 
     On a case-folding or normalizing volume ``shared/F-Pkg`` and ``shared/f-pkg``
     are one stored entry; on a case-sensitive volume ``vendor/f``, a symlink to
-    ``vendor/F``, is its own entry (an alias, #5386). An exact entry always wins
+    ``vendor/F``, is its own entry (an alias, #5386). The two containing
+    directories must be one directory, so ``alias/F`` (a link) is never the
+    entry ``shared/F`` is. An exact entry always wins
     (:func:`apm_cli.utils.paths.stored_spelling`), so only a folded spelling
     maps to another one's entry.
     """
+    try:
+        if not os.path.samefile(first.parent, ranked.parent):
+            return False
+    except OSError:
+        return False
     stored = stored_spelling(first.parent, first.name)
     return stored is not None and stored == stored_spelling(ranked.parent, ranked.name)
 
@@ -219,8 +231,8 @@ def _edges_one_entry(
 
     def one_entry(first: DependencyReference, ranked: DependencyReference) -> bool:
         return same_stored_leaf(
-            first_base / Path(first.local_path or "").expanduser(),
-            ranked_base / Path(ranked.local_path or "").expanduser(),
+            declared_dir(first_base, first.local_path or ""),
+            declared_dir(ranked_base, ranked.local_path or ""),
         )
 
     return one_entry

@@ -120,3 +120,75 @@ def test_a_case_only_symlink_alias_is_its_own_entry(tmp_path: Path) -> None:
         pytest.skip("this volume folds case or cannot link")
     assert not same_stored_leaf(tmp_path / "F", tmp_path / "f")
     assert same_stored_leaf(tmp_path / "F", tmp_path / "F")
+
+
+def _folds_case(tmp_path: Path) -> bool:
+    probe = tmp_path / "Fold-Probe"
+    probe.mkdir()
+    return (tmp_path / "fold-probe").is_dir()
+
+
+def _link(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("this volume cannot link")
+
+
+def test_a_link_in_another_directory_is_not_the_stored_entry(tmp_path: Path) -> None:
+    """#5457: ``alias/F``, a link to ``shared/F``, sits in another directory, so it is
+    never the entry ``shared/F`` is, whatever its stored leaf."""
+    from apm_cli.deps.local_identity import same_stored_leaf
+
+    (tmp_path / "shared" / "F").mkdir(parents=True)
+    _link(tmp_path / "alias" / "F", tmp_path / "shared" / "F")
+    assert not same_stored_leaf(tmp_path / "shared" / "F", tmp_path / "alias" / "F")
+
+
+def test_a_folded_link_in_another_directory_keeps_the_first_edge(tmp_path: Path) -> None:
+    """#5457: on a folding volume ``alias/f`` opens the link ``alias/F`` (to
+    ``shared/F``); the parents differ, so it stays an alias and keeps the first edge."""
+    from apm_cli.deps.local_identity import recorded_declaring_edge, same_stored_leaf
+
+    if not _folds_case(tmp_path):
+        pytest.skip("this filesystem keeps both spellings distinct")
+    (tmp_path / "shared" / "F").mkdir(parents=True)
+    _link(tmp_path / "alias" / "F", tmp_path / "shared" / "F")
+    first, ranked = {"dir": tmp_path / "shared" / "F"}, {"dir": tmp_path / "alias" / "f"}
+    chosen = recorded_declaring_edge(
+        first,
+        ranked,
+        lambda edge: str(edge["dir"]),
+        lambda a, b: same_stored_leaf(a["dir"], b["dir"]),
+    )
+    assert chosen is first
+
+
+def test_reanchoring_expands_a_home_relative_declaration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5457: uninstall and prune pick the ranked edge of a respelled diamond whose
+    first edge is home-relative (``~/...``), as install does."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import _declaring_edge
+
+    if not _folds_case(tmp_path):
+        pytest.skip("this filesystem keeps both spellings distinct")
+    home = tmp_path / "home"
+    vendor = home / "proj" / "vendor"
+    for directory in (vendor / "shared" / "F-Pkg", vendor / "deep" / "z", vendor / "a"):
+        directory.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    walk = SimpleNamespace(
+        declaring_edges={
+            "_local/F-Pkg": {
+                "_local/z": ("_local/z", "~/proj/vendor/shared/F-Pkg"),
+                "_local/a": ("_local/a", "../shared/f-pkg"),
+            }
+        },
+        local_dirs={"_local/z": vendor / "deep" / "z", "_local/a": vendor / "a"},
+    )
+    assert _declaring_edge(walk, "_local/F-Pkg", ["_local/z", "_local/a"]) == "_local/a"
