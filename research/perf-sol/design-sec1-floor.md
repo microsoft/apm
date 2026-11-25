@@ -172,3 +172,21 @@ O-time [45543605433] (per-thread CPU INSIDE walk/stat primitives, whole run, sta
 ~0.4-0.55 s L, and any single loop frees <= ~0.25 s. **Lane N KILLED (05:12 Wed): one native fs loop
 can't reach >= 0.5 s on L.** Possible future W-only bet: the whole-layer W bound (~1.2-1.6 s) would need a
 many-call-site redesign, not a native loop.
+
+## Deletion map of what remains (stacked L + B 10720dee; time-boxed 05:10-06:10, 25 Nov)
+Profile of the head [45544853504] (L, process 2.67 s on a fast runner), ranked by inclusive owner (wrappers excluded):
+integrate.run 37.7% (the job itself; families already cut), download_package 28.9% (fetch_worktree 9.3% +
+cache checkout 11.4% + post-fetch processing), core/auth.try_with_fallback 17.3% (ref listing + HTTPS, at
+network floor), base_integrator 13.5% (shared helpers across call sites), prompt_integrator 11.8%, MCP
+services 5.7%, config/registry loads ~9% combined. Imports (13.5%) were excluded, already sized by fork (0.807).
+Top owners sized by paired deletion (unsafe stubs), L cold t50, 6 pairs, vs the B head:
+| ORACLE | tree-50 | prompts+commands family deleted (c970dabc) | L | pairs 6 | B -> stub | 1.005 [45546098738]; skipped 100 dispatches |
+| ORACLE | tree-50 | MCP/LSP services phase deleted (5c2a9967) | L | pairs 6 | B -> stub | 0.988 [45546121424]; skipped 1 phase |
+| ORACLE | tree-50 | post-fetch route_agent_plugin_package + carry_licenses deleted (ac71b23b) | L | pairs 6 | B -> stub | 0.988 [45546139343]; skipped 50 packages |
+Engagement counts: trace 45546229005.
+**No single remaining owner is >= 0.5 s L at 9V74 (~12%).** The largest sized one frees ~1.2% (~0.05 s).
+What is left is the network floor (auth + ref listing + fetch), the irreducible one write per file, imports,
+and per-file Python spread over ~100 call sites.
+**No third bet: this is the honest end of v0.40 research.** The two bets are integrate (Bets, section 2)
+and materialize-once (M2, this section). Beyond them, L needs either the revised bar (~4.3 s) or a
+many-call-site redesign, which is not a single lever.

@@ -53,3 +53,4 @@
 01:44 F23 #5414 killed (main fast path now cheaper); F24 warm cache-hit design-doc
 02:16 main phase map written; frozen-mcp sizing in flight
 03:34 sec1 final; Lane N plan sent, awaiting OK
+05:35 Lane N killed; deletion map: no third bet

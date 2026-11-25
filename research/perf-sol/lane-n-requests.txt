@@ -7,3 +7,6 @@ macos oresolve perf-bench/98ea12bd-1795574258-f1a8a0
 L owalk2 perf-bench/c1cc26a0-1795576298-3d84fd
 W owalk2 perf-bench/3238ba28-1795576307-7ac2d0
 M owalk2 perf-bench/c1cc26a0-1795576316-741dd3
+prompts perf-bench/c970dabc-1795580412-7798ff
+services perf-bench/5c2a9967-1795580425-64d3f8
+postfetch perf-bench/ac71b23b-1795580435-c7fcaf
