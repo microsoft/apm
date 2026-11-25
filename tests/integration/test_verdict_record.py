@@ -1536,6 +1536,7 @@ def test_a_frozen_hit_re_proves_every_declared_edge_from_the_lock(project: Path)
     package = project / "apm_modules" / "o" / "p" / "apm.yml"
     package.write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")  # a readable copy
     lock = LockFile.read(project / "apm.lock.yaml")
+    before = lock_bytes(project)  # the frozen no-write invariant, judged against this
     assert verdict_attest.attested_gates(project, lock, None, SimpleNamespace(replay=True))
     from apm_cli.models.apm_package import clear_apm_yml_cache
 
@@ -1545,7 +1546,7 @@ def test_a_frozen_hit_re_proves_every_declared_edge_from_the_lock(project: Path)
 
     with pytest.raises(Decline, match="unlocked dependency edge"):
         verdict_attest.attested_gates(project, lock, None, SimpleNamespace(replay=True))
-    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes(project)
+    assert lock_bytes(project) == before
 
 
 def lock_bytes(project: Path) -> bytes:
