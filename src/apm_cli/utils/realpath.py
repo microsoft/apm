@@ -230,3 +230,7 @@ if sys.platform == "win32":
         """
         fast = _resolve_windows(path)
         return fast if fast is not None else path.resolve()
+
+
+def resolve_path(path: Path) -> Path:  # research: lexical ceiling, overrides every platform form
+    return type(path)(os.path.abspath(path))
