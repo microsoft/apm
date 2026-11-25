@@ -16,7 +16,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, TypeVar
 
 from ..models.dependency.reference import DependencyReference
-from ..utils.paths import portable_relpath, relative_posix, spelling_key, stored_spelling
+from ..utils.paths import (
+    portable_link_relpath,
+    portable_relpath,
+    relative_posix,
+    repository_root,
+    spelling_key,
+    stored_spelling,
+)
 from ..utils.realpath import resolve_path
 
 _T = TypeVar("_T")
@@ -37,14 +44,30 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     Packages inside ``base`` (the project root) are recorded relative to
     it in forward-slash POSIX form -- matching how directly-declared local
     owners already serialize -- which keeps a regenerated lockfile
-    deterministic across machines and CI. Packages outside ``base`` (or
-    when ``base`` is unknown) fall back to the resolved absolute POSIX
-    path: such out-of-project local deps are inherently non-committable,
-    and the fallback preserves a unique identity without inventing one.
+    deterministic across machines and CI. A package outside ``base`` but in
+    the same repository (a monorepo sibling, #5418; both sides resolved, one
+    :func:`apm_cli.utils.paths.repository_root`) is recorded relative to
+    ``base`` with ``../``, as direct rows are. Anything else (outside the
+    repository, no repository, another drive, ``base`` unknown, a resolution
+    error) falls back to the resolved absolute POSIX path: such local deps
+    are inherently non-committable, and the fallback preserves a unique
+    identity without inventing one.
     """
     if base is None:
         return anchored.resolve().as_posix()
-    return portable_relpath(anchored, base)
+    try:
+        resolved, resolved_base = resolve_path(anchored), resolve_path(base)
+    except (OSError, RuntimeError):
+        return portable_relpath(anchored, base)
+    inside = relative_posix(resolved, resolved_base)
+    if inside is not None:
+        return inside
+    repository = repository_root(resolved_base)
+    if repository is not None and repository_root(resolved) == repository:
+        sibling = portable_link_relpath(resolved, resolved_base)
+        if sibling is not None:
+            return sibling
+    return resolved.as_posix()
 
 
 def stored_directory(anchored: Path, root: Path | None) -> Path:

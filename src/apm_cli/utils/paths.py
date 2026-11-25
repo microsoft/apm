@@ -6,6 +6,7 @@ call site gets Windows-safe, forward-slash relative paths by default.
 
 from __future__ import annotations
 
+import functools
 import os
 import unicodedata
 from collections.abc import Callable, Container, Iterable, Iterator
@@ -118,6 +119,36 @@ def portable_relpath(path: Path, base: Path) -> str:
         return resolve_path(path).as_posix()
     except (OSError, RuntimeError):
         return path.as_posix()
+
+
+def repository_root(base: Path) -> Path | None:
+    """The repository holding *base*, or ``None`` (#5418).
+
+    The nearest ancestor of resolved *base* (itself included) with a ``.git``
+    entry, directory or file: a submodule or worktree ``.git`` file makes that
+    directory its own repository. A root equal to the home directory or above
+    it (a dotfiles ``~/.git``) does not count. No git subprocess; the walk is
+    cached per resolved *base* and home.
+    """
+    try:
+        resolved = resolve_path(base)
+    except (OSError, RuntimeError):
+        return None
+    try:
+        home: Path | None = resolve_path(Path.home())
+    except (OSError, RuntimeError, KeyError):
+        home = None
+    return _repository_root(resolved, home)
+
+
+@functools.lru_cache(maxsize=256)
+def _repository_root(resolved: Path, home: Path | None) -> Path | None:
+    for candidate in (resolved, *resolved.parents):
+        if os.path.lexists(candidate / ".git"):
+            if home is not None and is_within(home, candidate):
+                return None
+            return candidate
+    return None
 
 
 def portable_relpaths(paths: Iterable[Path], base: Path) -> list[str]:
