@@ -93,7 +93,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
 
@@ -145,7 +145,7 @@ jobs:
         id: license_review_1
         if: github.event_name == 'pull_request'
         continue-on-error: true
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
           allow-dependencies-licenses: pkg:pypi/pylint
@@ -157,7 +157,7 @@ jobs:
         id: license_review_2
         if: github.event_name == 'pull_request' && steps.license_review_1.outcome == 'failure'
         continue-on-error: true
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
           allow-dependencies-licenses: pkg:pypi/pylint
@@ -168,7 +168,7 @@ jobs:
       - name: License policy check (PR only)
         id: license_review_3
         if: github.event_name == 'pull_request' && steps.license_review_1.outcome == 'failure' && steps.license_review_2.outcome == 'failure'
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
           allow-dependencies-licenses: pkg:pypi/pylint
