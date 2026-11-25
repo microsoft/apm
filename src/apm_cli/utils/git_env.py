@@ -438,14 +438,14 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
 def trusted_executable(name: str) -> str | None:
     """Return the absolute path of helper *name*, or ``None`` if it is not installed.
 
-    The single owner for locating a helper program APM launches or probes
-    (git, az, npm, codex, PowerShell, ...). It searches only PATH directories
-    outside the current project, never the working directory, so a program
-    shipped inside a checkout cannot stand in for the real tool. Launch the
-    returned path, never a bare name; see ``executable_exclusion.not_found_message``.
+    The single owner for locating a helper (git, az, npm, codex, PowerShell, ...).
+    It searches only PATH directories outside the current project, never the
+    working directory, so a program shipped inside a checkout cannot stand in
+    for the real tool. Launch the returned path, never a bare name; see
+    ``executable_exclusion.not_found_message``.
     """
     try:
-        return _resolve_trusted_executable(name)
+        return _exclusion.forget_shadow(name, _resolve_trusted_executable(name))
     except FileNotFoundError as error:
         return _exclusion.note_shadow(name, error)
 

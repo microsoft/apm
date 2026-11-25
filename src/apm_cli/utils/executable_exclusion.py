@@ -28,6 +28,12 @@ def note_shadow(name: str, error: FileNotFoundError) -> None:
         _last_shadow.pop(name, None)
 
 
+def forget_shadow(name: str, path: str) -> str:
+    """Drop a stale shadow note once *name* resolves to *path*, and return it."""
+    _last_shadow.pop(name, None)
+    return path
+
+
 def not_found_message(name: str, default: str) -> str:
     """Return the shadowed-in-project message for *name*, else *default*."""
     return _last_shadow.get(name, default)

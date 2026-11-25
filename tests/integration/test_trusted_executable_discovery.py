@@ -393,7 +393,7 @@ def test_external_scanner_ignores_a_project_local_binary(
 
     adapter = SkillSpectorAdapter()
     assert adapter.is_available()[0] is False
-    with pytest.raises(ExternalScanError, match="not found"):
+    with pytest.raises(ExternalScanError, match="inside the project"):
         adapter.scan([project])
     assert not marker.exists()
 
