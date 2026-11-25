@@ -1045,3 +1045,61 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     assert victim.read_text(encoding="ascii") == "# My Skill\n"
     assert result.deleted == []
     assert result.rejected == {"cowork://skills/my-skill/SKILL.md": REJECTED_UNSAFE_PATH}
+
+
+def _held_then_swapped_to_link(target: Path, real: Path):
+    """A Path.unlink double: the first unlink of *target* swaps it for a link to *real*, held."""
+    calls = []
+    real_unlink = Path.unlink
+
+    def swap(path, *args, **kwargs):
+        if path != target:
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        real_unlink(path)
+        path.symlink_to(real)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    return swap, calls
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+@pytest.mark.parametrize("recorded", [False, True], ids=["no-hash", "recorded-hash"])
+def test_hook_swapped_to_link_during_sharing_retry_is_consent_kept(
+    tmp_path, project_root, diagnostics, recorded
+):
+    """A held hook file relinked mid-backoff gets the first pass's consent keep (#5441)."""
+    rel = ".github/hooks/pkg-hooks.json"
+    target = _make_managed_file(project_root, rel, "as deployed\n")
+    recorded_hashes = _recorded(project_root, rel) if recorded else {}
+    real = tmp_path / "elsewhere.json"
+    real.write_text("elsewhere\n", encoding="utf-8")
+    swap, calls = _held_then_swapped_to_link(target, real)
+    evidence = receipted_evidence(project_root)
+    evidence.consent_to_lockfile_hashes()
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=swap),
+    ):
+        result = remove_stale_deployed_files(
+            [rel],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=evidence,
+            recorded_hashes=recorded_hashes,
+            allow_final_symlink=True,
+        )
+
+    assert len(calls) == 1
+    assert target.is_symlink()
+    assert result.deleted == []
+    assert result.failed == []
+    assert result.skipped_user_edit == []
+    assert rel in result.skipped_unmanaged
+    assert rel in evidence.kept_under_consent()
