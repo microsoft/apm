@@ -162,6 +162,12 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
+    - name: Input-mutation oracle (research)
+      working-directory: harness
+      continue-on-error: true
+      env:
+        NEW_APM: ${{ github.workspace }}/new/${{ env.VENV_APM }}
+      run: uv run --frozen python .github/probe/mutation_oracle.py 2>&1 | grep -E "^ORACLE" | tail -200
     - name: Red-team cells (research)
       working-directory: new
       continue-on-error: true
