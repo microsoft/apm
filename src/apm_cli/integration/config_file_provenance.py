@@ -19,6 +19,7 @@ deployment receipts (machine-local state under ``$APM_HOME``); they are written 
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -178,6 +179,15 @@ class _Store:
     # The record files the index lists. A listed file that is gone or unreadable
     # fails closed; it never reads as a directory with no records (#5037).
     listed: set[str] | None = None
+    # Each record and its history as this store read them before saving: the base of
+    # the per record file 3-way merge a save runs under the lock (#5270).
+    base: dict[str, tuple[dict[str, Any], Any]] = field(default_factory=dict)
+    # Records both this store and another writer changed; the save kept the protective one.
+    conflicts: list[str] = field(default_factory=list)
+    # Record files this store published that its index write has not listed yet. Kept
+    # apart from ``base``: a retry after a failed save re-merges and lists them (#5444).
+    unlisted: set[str] = field(default_factory=set)
+    saving: bool = False
 
     def _shard_path(self, shard: str) -> Path:
         return self.path.parent / f"d-{shard}.json"
@@ -197,7 +207,7 @@ class _Store:
             data = _read_json(store.path)
             if data.get("version") == _V1 and isinstance(data.get("files"), list):
                 store.legacy_layout = True  # read whole; the next save migrates it
-                store._absorb(data)
+                store._absorb(_rows(data))
                 return store
             store._adopt(data)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
@@ -222,35 +232,39 @@ class _Store:
         self.generation, self.indexed = generation, True
         self.listed = set(shards) if shards is not None else None
 
-    def _absorb(self, data: dict[str, Any]) -> None:
-        if not isinstance(data.get("files"), list):
-            raise ValueError("unknown version or layout")
-        rows: dict[str, dict[str, Any]] = {}
-        for row in data["files"]:
-            key = row.get("path") if isinstance(row, dict) else None
-            # A key not in canonical form (relative, ".", "..", "//") proves nothing. It is
-            # checked as written, never re-resolved: a path linked for now keeps its record.
-            if isinstance(key, str) and _canonical_key(key):
-                rows[key] = {k: v for k, v in row.items() if k != "path"}
-        history = data.get("history")
-        for key, row in rows.items():
+    def _absorb(self, rows: dict[str, tuple[dict[str, Any], Any]]) -> None:
+        for key, value in rows.items():
+            if not self.saving:
+                # What this writer read: a save applies only its changes from here.
+                self.base.setdefault(key, copy.deepcopy(value))
             # A record changed in memory before its file was read stays as changed.
             if key not in self.files:
-                self.files[key] = row
-                prior = history.get(key) if isinstance(history, dict) else None
-                if _history_entry(prior):  # a str, or a journal's {"prior", "journal"}
-                    self.history[key] = prior
+                self._set(key, value)
 
-    def _load_shard(self, shard: str) -> None:
-        if shard in self.loaded:
+    def _value(self, key: str) -> tuple[dict[str, Any], Any] | None:
+        """The record of *key* with its history entry, or ``None`` when unrecorded."""
+        return (self.files[key], self.history.get(key)) if key in self.files else None
+
+    def _set(self, key: str, value: tuple[dict[str, Any], Any] | None) -> None:
+        if value is None:
+            self.files.pop(key, None)
+            self.history.pop(key, None)
             return
+        self.files[key] = value[0]
+        if value[1] is None:
+            self.history.pop(key, None)
+        else:
+            self.history[key] = value[1]
+
+    def _read_shard(self, shard: str) -> dict[str, tuple[dict[str, Any], Any]] | None:
+        """The records of *shard*'s file as on disk: none when absent, ``None`` when it is
+        another generation's leftover. Unreadable, or listed and missing: fails closed."""
         path = self._shard_path(shard)
         listed = self.listed is not None and shard in self.listed
         if not os.path.lexists(path):
             if listed:
                 raise _UnreadableStore(f"{path}: a listed record file is missing")
-            self.loaded.add(shard)
-            return
+            return {}
         try:
             data = _read_json(path)
             if data.get("version") != _VERSION:
@@ -260,11 +274,70 @@ class _Store:
             if data.get("generation", "") != self.generation:
                 # Another generation's leftover proves nothing. It is not loaded, so a
                 # save never deletes it; a save with records there overwrites it.
-                return
-            self._absorb(data)
-            self.loaded.add(shard)
+                return None
+            return _rows(data)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{path}: {exc}") from exc
+
+    def _load_shard(self, shard: str) -> None:
+        if shard in self.loaded:
+            return
+        rows = self._read_shard(shard)
+        if rows is None:
+            return
+        self._absorb(rows)
+        self.loaded.add(shard)
+
+    def _merge_shard(self, shard: str) -> None:
+        """Apply only this writer's changes to *shard*'s record file as it is now (#5270).
+
+        Called under the lifecycle lock. Per record: base is what this writer read, ours
+        what it holds, theirs what the file holds now. A side that did not change the
+        record takes the other's; when both changed it, the record that protects the file
+        more is kept and reported, so another writer's record is never silently dropped.
+        The file as read becomes the base: a retry after a failed save applies only this
+        writer's own changes again, never a record it merely imported (#5444).
+        """
+        theirs = self._read_shard(shard) or {}
+        keys = {key for key in (*self.files, *self.base) if _shard_id(key) == shard}
+        for key in sorted(keys | {key for key in theirs if _shard_id(key) == shard}):
+            base, ours, other = self.base.get(key), self._value(key), theirs.get(key)
+            if ours in (base, other):
+                self._set(key, other)
+            elif other != base:
+                if _protection(other) > _protection(ours):
+                    self._set(key, other)
+                self.conflicts.append(key)
+                _log.warning(
+                    "Another apm changed the config file record of %s at the same time; "
+                    "kept the record that protects the file",
+                    key,
+                )
+            self._set_base(key, other)
+        self.loaded.add(shard)
+
+    def _changed_shards(self) -> set[str]:
+        """The record files holding a record this writer changed since it read it."""
+        return {
+            _shard_id(key)
+            for key in {*self.files, *self.base}
+            if self._value(key) != self.base.get(key)
+        }
+
+    def _rebase(self) -> None:
+        """What this store saved is the base of its next save."""
+        self.base = {key: copy.deepcopy(self._value(key)) for key in self.files}
+
+    def _set_base(self, key: str, value: tuple[dict[str, Any], Any] | None) -> None:
+        if value is None:
+            self.base.pop(key, None)
+        else:
+            self.base[key] = copy.deepcopy(value)
+
+    def _rebase_shard(self, shard: str) -> None:
+        """*shard*'s record file is published: what it holds is the base from now on."""
+        for key in [key for key in (*self.files, *self.base) if _shard_id(key) == shard]:
+            self._set_base(key, self._value(key))
 
     def _load_all(self) -> None:
         for path in self._shard_files():
@@ -367,9 +440,11 @@ class _Store:
         except LifecycleBusyError as exc:
             raise _StoreBusy(f"another apm cannot be ruled out: {exc}") from exc
         try:
+            self.saving = True
             self._refresh()
             self._save_locked()
         finally:
+            self.saving = False
             lock.release()
 
     def _refresh(self) -> None:
@@ -385,9 +460,12 @@ class _Store:
             if data.get("version") == _V1 and isinstance(data.get("files"), list):
                 self.legacy_layout = True
                 return
-            if self.legacy_layout or not self.indexed or data.get("generation") != self.generation:
-                self.legacy_layout = False
-                self._adopt(data)
+            reset = self.legacy_layout or not self.indexed
+            reset = reset or data.get("generation") != self.generation
+            self.legacy_layout = False
+            # Same generation too: the record files another writer listed stay listed.
+            self._adopt(data)
+            if reset:
                 self._loaded_generation_reset()
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{self.path}: {exc}") from exc
@@ -395,26 +473,32 @@ class _Store:
     def _save_locked(self) -> None:
         # Never pruned by absence: the store is shared, and a file away for now (an
         # unmounted drive) keeps its record. Only a retirement forgets a record.
-        grouped = self._grouped()
         if self.legacy_layout:
-            self._migrate(grouped)
+            self._migrate(self._grouped())
+            self._rebase()
             return
-        if not self.indexed and grouped:
+        # Only record files this writer changed are saved, each re-read and merged
+        # first: one extra read per changed record file, under the lock (#5270).
+        changed = self._changed_shards() | self.unlisted
+        if not self.indexed and changed:
             self._start_index()
-        for shard in sorted(set(grouped) - self.loaded):
-            self._load_if_indexed(shard)  # a record file is never saved unread
-            grouped = self._grouped()
-        shards = {shard: sorted(grouped.get(shard, ())) for shard in self.loaded | set(grouped)}
+        for shard in sorted(changed):
+            self._merge_shard(shard)  # a record file is never saved unread
+        grouped = self._grouped()
+        written = {shard for shard in changed if grouped.get(shard)}
+        removed = changed - written
         # A record file is written before the index lists it, and unlisted before it
         # is removed, so a kill never leaves a listed file missing (#5037).
-        for shard in sorted(shards):
-            if shards[shard]:
-                self._save_shard(shard, shards[shard])
-        removed = {shard for shard, keys in shards.items() if not keys}
+        for shard in sorted(written):
+            self._save_shard(shard, sorted(grouped[shard]))
+            self.unlisted.add(shard)
+            self._rebase_shard(shard)
         if self.indexed:
-            self._save_listing(removed, {shard for shard, keys in shards.items() if keys})
+            self._save_listing(removed, written)
+        self.unlisted.clear()
         for shard in sorted(removed):
             self._save_shard(shard, [])
+            self._rebase_shard(shard)
         if self.indexed and not grouped and not self._shard_files():
             self._drop_index()  # like the other receipts: no records, no file
 
@@ -528,6 +612,41 @@ class _Store:
             return  # a converged install rewrites nothing (I2)
         mkdir(path.parent, mode=0o700, parents=True, exist_ok=True)
         atomic_write_text(path, text, new_file_mode=0o600)
+
+
+def _rows(data: dict[str, Any]) -> dict[str, tuple[dict[str, Any], Any]]:
+    """Each canonical record of a record file with its history entry, or ``ValueError``."""
+    if not isinstance(data.get("files"), list):
+        raise ValueError("unknown version or layout")
+    history = data.get("history")
+    rows: dict[str, tuple[dict[str, Any], Any]] = {}
+    for row in data["files"]:
+        key = row.get("path") if isinstance(row, dict) else None
+        # A key not in canonical form (relative, ".", "..", "//") proves nothing. It is
+        # checked as written, never re-resolved: a path linked for now keeps its record.
+        if isinstance(key, str) and _canonical_key(key):
+            prior = history.get(key) if isinstance(history, dict) else None
+            # A str, or a journal's {"prior", "journal"}.
+            rows[key] = (
+                {k: v for k, v in row.items() if k != "path"},
+                prior if _history_entry(prior) else None,
+            )
+    return rows
+
+
+def _protection(value: tuple[dict[str, Any], Any] | None) -> int:
+    """How firmly a record keeps its file from deletion, to settle a conflict (#5270).
+
+    A user's file, or a record APM cannot read, is never deleted; a created record
+    deletes only the bytes APM wrote; a legacy record, or none, falls back to the
+    content proof.
+    """
+    if value is None:
+        return 0
+    origin = _origin(value[0])
+    if origin is None or origin is Origin.PREEXISTING:
+        return 3
+    return 2 if origin is Origin.CREATED else 1
 
 
 def _has_other_links(path: Path) -> bool:
@@ -862,6 +981,6 @@ def delete_emptied_config(
         store.files.pop(key, None)
         try:
             store.save()
-        except OSError:
+        except (OSError, _UnreadableStore):
             _log.debug("Could not forget the record of %s", path, exc_info=True)
     return True
