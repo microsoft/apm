@@ -1967,20 +1967,21 @@ def _stale_content_outcome(
         if _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
             return None
         return lambda: _keep_replaced_by_link(result, diagnostics, stale_path, dep_key)
+    # A hash of a link is its target's and of a non-file the empty hash: never proof.
+    try:
+        mode = os.lstat(stale_target).st_mode
+    except FileNotFoundError:
+        mode = stat.S_IFREG
+    except OSError:
+        mode = None
+    if mode is not None and stat.S_ISLNK(mode):
+        return lambda: _keep_replaced_by_link(result, diagnostics, stale_path, dep_key)
     verdict = evidence.verdict(stale_path, stale_target)
-    if verdict == AUTHORIZED and not _is_regular_or_gone(stale_target):
-        verdict = UNREADABLE  # a hash of a non-file is the empty hash: never proof
+    if verdict == AUTHORIZED and (mode is None or not stat.S_ISREG(mode)):
+        verdict = UNREADABLE
     if verdict == AUTHORIZED:
         return None
     return lambda: _keep_without_evidence(result, diagnostics, stale_path, verdict, dep_key)
-
-
-def _is_regular_or_gone(path: Path) -> bool:
-    """Whether *path* is a regular file (or absent, which unlink reports itself)."""
-    try:
-        return stat.S_ISREG(os.lstat(path).st_mode)
-    except OSError:
-        return True
 
 
 def _keep_replaced_by_link(

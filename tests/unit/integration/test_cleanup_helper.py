@@ -1153,3 +1153,30 @@ def test_directory_swapped_in_during_sharing_retry_is_never_deleted(
     assert result.deleted == []
     assert (target / "keep.txt").read_text(encoding="utf-8") == "precious\n"
     assert rel in result.skipped_user_edit or rel in result.failed
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_in_project_final_link_is_kept_as_replaced_by_link(project_root, diagnostics):
+    """Without allow_final_symlink an in-project final link is kept, named as a link (#5441)."""
+    rel = ".github/prompts/linked.prompt.md"
+    real = _make_managed_file(project_root, "docs/real.md", "as deployed\n")
+    link = project_root / rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real)
+
+    result = remove_stale_deployed_files(
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
+        recorded_hashes={rel: compute_file_hash(real)},
+    )
+
+    assert link.is_symlink()
+    assert real.read_text(encoding="utf-8") == "as deployed\n"
+    assert result.deleted == []
+    assert rel in result.skipped_user_edit
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any(rel in m and "replaced by a symlink" in m for m in msgs), msgs
