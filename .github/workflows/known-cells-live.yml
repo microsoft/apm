@@ -38,6 +38,7 @@ jobs:
       - name: Output delta, v0.38.1 vs RC (content)
         shell: bash
         run: |
+          set +e +o pipefail
           rel=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/apm.exe || echo .venv/bin/apm)
           for side in v0381 rc; do
             apm=$([ $side = v0381 ] && echo "$GITHUB_WORKSPACE/../v0381/$rel" || echo "$GITHUB_WORKSPACE/$rel")
@@ -51,7 +52,11 @@ jobs:
               echo "--- .gitignore (od -c head)"; od -c "$proj/.gitignore" | head -8
               echo "--- .mcp.json"; cat "$proj/.mcp.json" 2>/dev/null || echo "(absent)"
               echo "--- lock mcp"; grep -n -A12 -iE '^mcp' "$proj/apm.lock.yaml" | head -40
-              echo "--- direct deps with mcp"; grep -n 'mcp' "$proj/apm.yml" | head
-              ls "$proj/apm_modules" 2>/dev/null | head -3
+              echo "--- .gitignore text"; cat "$proj/.gitignore"
+              echo "--- lock top-level keys"; grep -nE '^[a-z_]+:' "$proj/apm.lock.yaml" | head -40
+              cp "$proj/apm.lock.yaml" "$RUNNER_TEMP/lock-$side-$journey.yaml"
             done
           done
+          echo "===== lock diff (uninstall) v0381 -> rc ====="
+          diff <(grep -vE '^(generated_at|apm_version):' "$RUNNER_TEMP/lock-v0381-uninstall.yaml") \
+               <(grep -vE '^(generated_at|apm_version):' "$RUNNER_TEMP/lock-rc-uninstall.yaml") | head -60
