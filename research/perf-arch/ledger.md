@@ -253,3 +253,17 @@
 02:44 | W3d ruled materialize-once: M1/M2 OK (MS1-MS7), M3 rejected -> VP + SoL | SoL 04:30; Bets lockfile 04:00 | none
 02:45 | PRODUCT FINDING: lockfile embeds absolute paths for monorepo siblings (local_identity.py portable_anchor_identity) -> issue #5418 filed, VP asked QL row | Bets L skill-tree; SoL 04:30 | none
 02:45 | VP: #5418 pre-existing (e37400fa), QL row + PM known-issue, v0.40 w/ rekey, L5 fix owner; Bets back to sec2/L skill-tree (already told) | Bets; SoL 04:30 | none
+02:46 | tick; notes 41c202786f3a655d038e9d931cd595a9e5e288df | Bets L skill-tree; SoL MCP + materialization 04:30 | none
+02:49 | #5382 head moved 9be8e258 after H8 (W3d T1/T2 fix) -> VP hold slot + re-sign; L integrate stuck 0.899 (misses), W3d IR1-IR9 co-sign -> VP | Bets H8 re-sign + L profile 20 min; SoL 04:30 | #5382 H8 stale
+02:49 | VP: #5382 9be8e258 needs M cold+warm <=0.92 + L neutral <=1.010 before 05:00 (slot held) -> Bets; L bar wording deferred until cProfile + SoL ceiling | Bets; SoL 04:30 | none
+02:51 | E2 given K hack refs (893b7b89 containment-only, ea46241b full, cc5aac78/8efedece on #5374) for _trusted_hash overlap | E2 04:00 | none
+02:52 | L residual flat (classify 1.15 ms/file top); synthesis: manifest-driven deploy across fetch+integrate for L -> VP | SoL M2 04:30; Bets #5382 benches 20 min | none
+02:52 | train #5406 Lint-red (apm_resolver.py 2106>2100): Bets trims >=3 lines on #5382 in re-H8 push, lint via host_guard, re-bench final head | Bets before 05:00 | train lint red
+02:53 | VP accepted manifest-driven deploy as v0.40 architecture; W3d asked to co-sign trust-root sentence (05:30) | W3d; SoL M2 04:30; Bets #5382 trim+re-H8 | train lint red
+02:54 | W3d co-signed manifest-deploy w/ MD1-MD5 (row w3d:ruling:manifest-deploy) -> outline, VP | SoL M2 04:30; Bets #5382 | train lint red
+02:56 | VP: lint fixed by #5413; Bets trim CANCELLED; #5382 9be8e258 in train 217dcf90, stays iff re-H8 + M/L benches by 05:00 | Bets | none
+02:56 | #5382 9be8e258 gates pass (M 0.900/0.897, L 1.002, Copilot, W3d); CI 44/20 pending; QL re-H8 next -> VP | Bets; SoL M2 04:30 | none
+03:01 | FINDING materialize-once 15-20% cold all OS; paper W ~6.4 s clears, L ~4.1 s misses -> VP; SoL stacked ceiling 04:30 | SoL; Bets #5382 re-H8 | none
+03:01 | VP approved stacked ceiling (L+W+M) + native-core gate measurement on stacked L profile -> SoL 04:30 | SoL; Bets re-H8 | none
+03:07 | #5382 9be8e258 fully green, QL re-H8 requested -> VP | QL; SoL 04:30 | none
+03:08 | doc skeleton v040-design-doc.md written; Bets -> sec3 security table + sec4 build plan 05:30 | SoL 04:30; QL re-H8 #5382 | none
