@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The first published 0.39 release. It includes everything in 0.39.0 below, plus the fixes in this section.
 
+### Fixed
+
+- Helper tools such as git under your home directory are found again when apm runs outside a project. (#5470)
+
 ## [0.39.0] - 2026-11-25
 
 ### Highlights
