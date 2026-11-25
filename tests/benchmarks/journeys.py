@@ -723,6 +723,10 @@ def _setup_replay(ctx: Context) -> None:
     CLI with the record, the last untimed no-op must replay; otherwise the cell
     fails instead of timing a full re-proof.
     """
+    if ctx.is_installed:
+        # Converged by this journey's first sample: later samples (and a profile
+        # rerun) replay the record the setup already proved.
+        return
     ctx.installed()
     for root in ctx.roots():
         first = _replay_outcome(ctx.run(["install"], root).stderr)
@@ -1078,8 +1082,9 @@ def _journeys_for(
             continue
         if rtt != 0 and name not in rtt_journeys:
             continue
-        # A monorepo has several roots and local-path deps, which pack refuses by design.
-        if name in (*_GLOBAL, *_PACKS) and len(fixture.roots) > 1:
+        # A monorepo has several roots and local-path deps, which pack refuses by design
+        # and the verified-state record never records, so it has nothing to replay.
+        if name in (*_GLOBAL, *_PACKS, *_KEEP_INSTALLED) and len(fixture.roots) > 1:
             continue
         # The served policy governs the project checkout only: global installs
         # and the bundle consumer have no governed remote, so they would not
