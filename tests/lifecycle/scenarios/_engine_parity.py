@@ -533,9 +533,31 @@ FRESH_DOUBTS: dict[str, tuple[tuple[str, ...], Callable[[World], None]]] = {
 }
 
 
+def _clone_keeping_the_lock(world: World) -> None:
+    """A fresh clone that commits its lockfile: no deployed tree, no checkout identity."""
+    _remove_deployed(world)
+    _rmtree(world.project / ".apm-local")
+
+
+def _clone_with_a_copied_identity(world: World) -> None:
+    """A clone carrying an installation identity its receipts were never bound to."""
+    _remove_deployed(world)
+    identity = world.project / ".apm-local" / "installation"
+    identity.write_text("0" * 32 + "\n", encoding="ascii")
+
+
+# A clone with its lockfile but no bound receipts: the whole project is the diff,
+# which the full pipeline deploys more cheaply than staging it.
+CLONE_DOUBTS: dict[str, Callable[[World], None]] = {
+    "clone-with-lock": _clone_keeping_the_lock,
+    "clone-copied-identity": _clone_with_a_copied_identity,
+}
+
+
 DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...], int]] = {
     **{f"lock-{t}": (BOTH, change, argv, code) for t, (change, argv, code) in DOUBTS.items()},
     **{f"fresh-{d}": (keys, change, ("install",), 0) for d, (keys, change) in FRESH_DOUBTS.items()},
+    **{name: (BOTH, change, ("install",), 0) for name, change in CLONE_DOUBTS.items()},
 }
 
 

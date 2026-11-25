@@ -19,6 +19,7 @@ from tests.lifecycle.scenarios._deploy_diff import CHANGES, SKILL_PATH, digest, 
 from tests.lifecycle.scenarios._engine_parity import (
     BOTH,
     CHANGE_EXIT,
+    CLONE_DOUBTS,
     DIFF,
     FULL,
     NEEDS_ANY,
@@ -35,7 +36,6 @@ from tests.lifecycle.scenarios._engine_parity import (
     _deployed,
     _publish_skill,
     _remove_deployed,
-    _rmtree,
     _snapshot,
     _user_and_orphan_files,
     make_twin,
@@ -89,17 +89,12 @@ def test_warm_locked_install_applies_the_diff(twin: Twin) -> None:
     _assert_decision(twin.ok("install"), DIFF)
 
 
-def _fresh_clone_keeping_the_lock(world: World) -> None:
-    """A fresh clone that commits its lockfile: no deployed tree, no checkout identity."""
-    _remove_deployed(world)
-    _rmtree(world.project / ".apm-local")
-
-
+@pytest.mark.parametrize("clone", sorted(CLONE_DOUBTS))
 @NEEDS_ANY
-def test_fresh_clone_with_a_lockfile_takes_the_full_pipeline(twin: Twin) -> None:
-    """No receipts: the whole project is the diff, and the full pipeline is cheaper than staging it."""
+def test_a_clone_without_bound_receipts_takes_the_full_pipeline(twin: Twin, clone: str) -> None:
+    """No bound receipts: the whole project is the diff, and the full pipeline is cheaper."""
     _converge(twin, *BOTH)
-    twin.each(_fresh_clone_keeping_the_lock)
+    twin.each(CLONE_DOUBTS[clone])
     _assert_decision(twin.ok("install"), FULL)
 
 
