@@ -7,11 +7,12 @@ first listing of that path (package trees are complete before integrate starts).
 from __future__ import annotations
 
 import os
+import time as _t
 
 _ORIG_SCANDIR = os.scandir
 _ORIG_LISTDIR = os.listdir
 _SCANS: dict[str, list] = {}
-STATS = {"scan_hit": 0, "scan_miss": 0, "list_hit": 0, "list_miss": 0, "walk_hit": 0, "walk_miss": 0, "glob_hit": 0, "glob_miss": 0}
+STATS = {"scan_hit": 0, "scan_miss": 0, "list_hit": 0, "list_miss": 0, "walk_hit": 0, "walk_miss": 0, "glob_hit": 0, "glob_miss": 0, "cpu_scan_miss": 0.0, "cpu_list_miss": 0.0, "cpu_walk_miss": 0.0, "cpu_glob_miss": 0.0}
 _LISTS: dict[str, list] = {}
 ACTIVE = False
 
@@ -55,8 +56,10 @@ def _scandir(path="."):
     entries = _SCANS.get(key)
     STATS["scan_hit" if entries is not None else "scan_miss"] += 1
     if entries is None:
+        _c = _t.process_time()
         with _ORIG_SCANDIR(path) as it:
             entries = _SCANS[key] = list(it)
+        STATS["cpu_scan_miss"] += _t.process_time() - _c
     return _Cached(entries)
 
 
@@ -67,7 +70,9 @@ def _listdir(path="."):
     names = _LISTS.get(key)
     STATS["list_hit" if names is not None else "list_miss"] += 1
     if names is None:
+        _c = _t.process_time()
         names = _LISTS[key] = _ORIG_LISTDIR(path)
+        STATS["cpu_list_miss"] += _t.process_time() - _c
     return list(names)
 
 
@@ -100,7 +105,9 @@ def _walk(top, topdown=True, onerror=None, followlinks=False):
     tree = _TREES.get(form)
     STATS["walk_hit" if tree is not None else "walk_miss"] += 1
     if tree is None:
+        _c = _t.process_time()
         tree = {root: (dirs, files) for root, dirs, files in _ORIG_WALK(form, True, onerror, False)}
+        STATS["cpu_walk_miss"] += _t.process_time() - _c
         _TREES[form] = tree
     stack = [form]
     while stack:
@@ -123,7 +130,9 @@ def _glob_cached(orig, kind):
         found = _GLOBS.get(ck)
         STATS["glob_hit" if found is not None else "glob_miss"] += 1
         if found is None:
+            _c = _t.process_time()
             found = _GLOBS[ck] = list(orig(self, pattern))
+            STATS["cpu_glob_miss"] += _t.process_time() - _c
         return iter(found)
 
     return method
