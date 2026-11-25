@@ -186,16 +186,20 @@ ON_TRACK_FINAL = {
 }
 
 
+# PRs riding train #5406 (in the measured head 42878803; merge when the train lands). PERF VP 06:10.
+TRAIN_PRS = {5374, 5376, 5377, 5381, 5382, 5383, 5385, 5388, 5389}
+
+
 def IN(n):
-    """PR n is part of the measured NEW head (bench re-run at the fat train head and n merged)."""
-    return FAT and gh_state(n) == "MERGED"
+    """PR n is part of the measured NEW head: merged, or riding the measured train."""
+    return FAT and (gh_state(n) == "MERGED" or n in TRAIN_PRS)
 
 
 def ontrack(j, os_, pop, now, src="interim"):
     if src == "final" or os_ == "windows-openssl":
         prs = ON_TRACK_FINAL.get((j, os_, pop))
         if FAT and prs:
-            prs = [p for p in prs if gh_state(p[0]) == "OPEN"]
+            prs = [p for p in prs if not IN(p[0])]
     else:
         prs = ON_TRACK.get((j, os_, pop))
     if not prs or now is None:
@@ -312,6 +316,8 @@ def gh_state(n, cache={}):
 def pr(n):
     s = gh_state(n).lower()
     s = {"merged": "merged", "open": "open", "closed": "closed"}.get(s, s)
+    if s == "open" and FAT and n in TRAIN_PRS:
+        s = "in the train #5406"
     return f"[#{n}](https://github.com/microsoft/apm/pull/{n}) ({s})"
 
 
