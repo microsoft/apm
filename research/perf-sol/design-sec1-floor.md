@@ -143,3 +143,32 @@ cpu_attr leaf kinds, L process CPU, one profiled sample each:
 **Gate MET on main and at the stacked head (45%, >= 25%).** Hash is negligible (0.2%): bytes are not the
 cost. The native-core candidate is the walk/stat/realpath/file-op layer (syscall-heavy Python), not hashing.
 Even at the stacked ceiling, 65% of L CPU is filesystem-syscall Python, plus 13% imports.
+
+## Lane N (native fs-op core): oracle reads and attribution reconciliation (25 Nov early morning)
+Oracles on the stacked heads (L/M d3881480, W 6d67f5aa), cold t50, 6 pairs:
+| ORACLE | tree-50 | O-walk2 (scandir/listdir/os.walk/glob/rglob served zero-cost, apm_modules, integrate) | L/W/M | pairs 6 | stacked -> oracle | 0.992 / 0.987 / ~1.00 [45538269139 / 45538289388 / 45538306906] |
+| ORACLE | tree-50 | O-resolve (every Path.resolve / os.path.realpath lexical) | L/W/M | pairs 6 | stacked -> oracle | 0.956 / 0.954 / 0.916 [45534288568 / 45534253181 / 45534321911] |
+Engagement [45540082415]: O-walk2 served scandir 1,951 / listdir 553 / glob 167 (identical on L/W/M); O-resolve
+served Path.resolve 1.8-3.2k and os.path.realpath 219-377. On W, resolve_path = realpath.py:235 (the override
+after the win32 block); native _resolve_windows called 0 times. First-call walk/glob CPU inside integrate:
+~29 ms L [45541269625].
+Whole-run CPU inside walk/stat primitives (O-time, per-thread, thread-local guard): see the kill/keep line below.
+
+Attribution reconciliation (why cpu_attr reported 45% walk/stat/file_io + 20% realpath while oracles free ~5%):
+1. Kinds are matched by frame-NAME SUBSTRING (cpu_attr._KINDS). ":resolve", ":abspath", ":read", ":write",
+   ":open", ":replace", ":stat", ":exists", ":walk" match non-syscall Python: abspath (the ceiling's own
+   lexical replacement), click's resolve, transport_selection.resolve, read_manifest_text,
+   checkout_verify.read, walk_source_tree.
+2. Leaf = innermost Python frame including its own bytecode: "stat" is mostly pathlib wrapper Python inside
+   per-file caller loops. A native walk returns data; it does not remove the callers' per-file Path checks.
+3. file_io is content reads + copy machinery (needed bytes, or M2's lane). Out of Lane N scope.
+4. Sampler: per-thread CPU deltas are charged to the frame on top at the sample, biased toward long-lived
+   generator/wrapper frames.
+Rule for the doc: a native core is justified only if a zero-cost ORACLE frees >= the bar. A profile share is
+not enough.
+O-time [45543605433] (per-thread CPU INSIDE walk/stat primitives, whole run, stacked head): L 0.48-0.50 s
+(13-18% of process CPU, ~0.56-0.77 s at 9V74) over ~80k calls from ~100 call sites; M 16-19%; W 19-27%
+(~1.2-1.6 s at 9V74). After the irreducible syscalls (~0.15 s L), moving every call into native frees at most
+~0.4-0.55 s L, and any single loop frees <= ~0.25 s. **Lane N KILLED (05:12 Wed): one native fs loop
+can't reach >= 0.5 s on L.** Possible future W-only bet: the whole-layer W bound (~1.2-1.6 s) would need a
+many-call-site redesign, not a native loop.

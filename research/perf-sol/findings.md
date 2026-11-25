@@ -179,3 +179,4 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 ## F31 (03:20) Native-core gate MET: walk+stat+hash+copy = 45.5% (main) / 45.2% (stacked) of L process CPU; 54-65% incl. realpath; hash 0.2% [45520769932, 45530101839].
 ## F32 (03:50) W stacked ceiling corrected: 0.568 vs main+#5374 [45532025700] -> ~7.1 s @9V74 (target 7.5). The first W head missed the lexical resolve on Windows (platform redefinition of resolve_path).
 ## F33 (03:52) Schannel calibration [45534359514]: main+#5374 cold t50 = 8.0 (9V45) / 10.53 (9V74) / 11.34 (Xeon 8573C) / 14.6-15.1 (7763); stacked W at 9V74 = ~6.0 s (at target).
+## F34 (05:12) Lane N KILLED: O-walk2 L 0.992 / W 0.987 / M ~1.0; O-resolve 0.956 / 0.954 / 0.916; O-time L 13-18% inside primitives over ~80k calls (~100 sites); single loop <= 0.25 s at 9V74. Runs 45538269139.., 45534288568.., 45543605433.

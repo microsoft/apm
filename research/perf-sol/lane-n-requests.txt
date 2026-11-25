@@ -4,3 +4,6 @@ linux owalk perf-bench/a38c20d6-1795574232-cb18d3
 linux oresolve perf-bench/98ea12bd-1795574241-56ad76
 macos owalk perf-bench/a38c20d6-1795574250-3ee3e8
 macos oresolve perf-bench/98ea12bd-1795574258-f1a8a0
+L owalk2 perf-bench/c1cc26a0-1795576298-3d84fd
+W owalk2 perf-bench/3238ba28-1795576307-7ac2d0
+M owalk2 perf-bench/c1cc26a0-1795576316-741dd3
