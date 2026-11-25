@@ -1855,9 +1855,7 @@ class APMDependencyResolver:
         from apm_cli.utils.realpath_win import register_held_root
 
         if downloaded_candidate is None or self._activation_callback is None:
-            # Already at its final placement (existing install or direct download).
-            if package.package_path is not None:
-                register_held_root(package.package_path, self._apm_modules_dir)
+            register_held_root(package.package_path, self._apm_modules_dir)  # already placed
             return package
         try:
             live_path = self._activation_callback(downloaded_candidate)
@@ -1870,8 +1868,7 @@ class APMDependencyResolver:
             ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
-        # Placed for good: path resolution may now hold it (Windows) for this command.
-        register_held_root(live_path, self._apm_modules_dir)
+        register_held_root(live_path, self._apm_modules_dir)  # placed for good
         package.package_path = self._remap_candidate_path(
             package.package_path,
             downloaded_candidate,
