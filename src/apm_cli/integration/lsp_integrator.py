@@ -201,8 +201,8 @@ class LspInstallRecord:
     (out) maps runtime -> managed server names held at their locked render on
     a target the new config cannot reach; the caller keeps that target claim
     so stale cleanup leaves the entry (#4871). *locked_roots* (in) maps a
-    locked server to its locked declaring package's root: the locked render
-    uses it, so a package move is APM's update, not an edit (#4872).
+    locked server to its locked declaring package's root: an entry rendered
+    there is APM's, so a package move is an update, not an edit (#4872).
     """
 
     locked_configs: dict[str, dict] | None = None
@@ -810,6 +810,7 @@ class LSPIntegrator:
         legacy_server_names: builtins.set | None = None,
         locked_servers: dict[str, dict] | None = None,
         held: builtins.set | frozenset = frozenset(),
+        locked_written: dict[str, dict] | None = None,
     ) -> _PreparedTargetConfig:
         """Validate and render one target config without writing it.
 
@@ -818,6 +819,8 @@ class LSPIntegrator:
         new render and the locked one is kept, never rewritten (#4626).
         ``None`` (a caller without lock evidence) judges no entry. A *held*
         server, kept on another target, stays at its locked render here too.
+        *locked_written* renders the locked configs at their locked package's
+        root: an entry equal to it is APM's too (#4872).
         """
         config_path = LSPIntegrator._target_config_path(
             spec,
@@ -948,7 +951,10 @@ class LSPIntegrator:
                 or name not in existing
                 or (name not in managed_names and name not in (legacy_server_names or ()))
                 else LSPIntegrator._kept_entry_kind(
-                    existing[name], locked_servers.get(name), server_config
+                    existing[name],
+                    locked_servers.get(name),
+                    server_config,
+                    written=(locked_written or {}).get(name),
                 )
             )
             if kind is not None:
@@ -982,9 +988,9 @@ class LSPIntegrator:
         """The entries APM renders for *spec* from the locked server configs (#4626).
 
         Only servers this install renders are judged; each locked config goes
-        through the same rendering as a fresh declaration, with the locked
-        declaring package's root from *locked_roots* (#4872), else the current
-        declaration's. ``None`` without locked configs.
+        through the same rendering as a fresh declaration, with the declaring
+        package's current root, or its locked root from *locked_roots*
+        (#4872). ``None`` without locked configs.
         """
         if locked_configs is None:
             return None
@@ -1117,18 +1123,21 @@ class LSPIntegrator:
                     diagnostics.error(message)
 
     @staticmethod
-    def _kept_entry_kind(current: object, locked: dict | None, rendered: dict) -> str | None:
+    def _kept_entry_kind(
+        current: object, locked: dict | None, rendered: dict, *, written: dict | None = None
+    ) -> str | None:
         """Judge one managed entry that differs from the new render (#4626).
 
         ``None`` replaces it: it still holds the entry APM rendered from the
-        locked config. Otherwise it is kept: ``"unproven"`` without a locked
-        render, else the proven edit's ``"drift"`` or ``"blocked"``.
+        locked config, at the current or the locked package root (*written*,
+        #4872). Otherwise it is kept: ``"unproven"`` without a locked render,
+        else the proven edit's ``"drift"`` or ``"blocked"``.
         """
         from apm_cli.integration.base_integrator import edit_kind
 
         if locked is None:
             return "unproven"
-        if current == locked:
+        if current == locked or (written is not None and current == written):
             return None
         return edit_kind(locked, rendered)
 
@@ -1519,6 +1528,13 @@ class LSPIntegrator:
                     "force": force,
                     "legacy_server_names": legacy_server_names,
                     "locked_servers": LSPIntegrator._locked_target_servers(
+                        record.locked_configs if record is not None else None,
+                        runtime_deps,
+                        spec,
+                        project_root=project_root_path,
+                        user_scope=user_scope,
+                    ),
+                    "locked_written": LSPIntegrator._locked_target_servers(
                         record.locked_configs if record is not None else None,
                         runtime_deps,
                         spec,

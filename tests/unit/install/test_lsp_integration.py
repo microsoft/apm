@@ -744,7 +744,7 @@ class TestPackageMoveWithPluginRoot:
         diagnostics = self._install(tmp_path, runtime, lock, dep_b)
 
         command = json.loads(config.read_text())["lspServers"]["srv"]["command"]
-        assert command.endswith("apm_modules/acme/pkg-b/bin/srv")
+        assert command.replace("\\", "/").endswith("apm_modules/acme/pkg-b/bin/srv")
         diagnostics.warn.assert_not_called()
         diagnostics.error.assert_not_called()
         written = LockFile.read(tmp_path / "apm.lock.yaml")
@@ -795,40 +795,34 @@ class TestPackageMoveWithPluginRoot:
 
         config = tmp_path / ".github" / "lsp.json"
         command = json.loads(config.read_text())["lspServers"]["srv"]["command"]
-        assert command.endswith("apm_modules/acme/pkg-b/bin/srv")
+        assert command.replace("\\", "/").endswith("apm_modules/acme/pkg-b/bin/srv")
         diagnostics.warn.assert_not_called()
 
     def test_locked_root_keeps_the_spelling_install_bound(self, tmp_path, monkeypatch) -> None:
         """A case-insensitive volume: resolve_path keeps the stored spelling (#5437 R1)."""
-        from apm_cli.deps.plugin_root_render import bind_plugin_roots
         from apm_cli.utils import realpath
 
         def stored_spelling(path):
-            return Path(str(Path(path).resolve()).replace("/pkg-a", "/PKG-A"))
+            resolved = Path(path).resolve()
+            return resolved.with_name("PKG-A") if resolved.name == "pkg-a" else resolved
 
         monkeypatch.setattr(realpath, "resolve_path", stored_spelling)
-        # An upgrade: the entry is judged against the locked render, not skipped as equal.
-        dep = _make_dep(
-            "srv",
-            command="${CLAUDE_PLUGIN_ROOT}/bin/srv-v2",
-            extension_to_language=None,
-            resolved_by="acme/pkg-a",
-        )
-        bind_plugin_roots([dep], self._dep(tmp_path, "pkg-a").plugin_root)
         config, lock = self._deploy_from_a(tmp_path, "copilot")
+        stored = stored_spelling(tmp_path / "apm_modules" / "acme" / "pkg-a")
         data = json.loads(config.read_text())
-        data["lspServers"]["srv"]["command"] = f"{dep.plugin_root}/bin/srv"
+        # What install wrote: bind_plugin_roots binds the root through resolve_path.
+        data["lspServers"]["srv"]["command"] = f"{stored}/bin/srv"
         config.write_text(json.dumps(data), encoding="utf-8")
 
+        # The upgrade drops the placeholder: only the locked root proves the entry.
+        dep = self._dep(tmp_path, "pkg-a", command="srv-v2")
         diagnostics = self._install(tmp_path, "copilot", lock, dep)
 
-        assert json.loads(config.read_text())["lspServers"]["srv"]["command"].endswith(
-            "/PKG-A/bin/srv-v2"
-        )
+        assert json.loads(config.read_text())["lspServers"]["srv"]["command"] == "srv-v2"
         diagnostics.warn.assert_not_called()
         diagnostics.error.assert_not_called()
 
-    def test_user_edit_across_a_move_is_kept_not_overwritten(self, tmp_path) -> None:
+    def test_user_edit_across_a_move_is_kept_as_drift(self, tmp_path) -> None:
         config, lock = self._deploy_from_a(tmp_path, "copilot")
         data = json.loads(config.read_text())
         data["lspServers"]["srv"]["command"] = "my-srv"
@@ -837,9 +831,9 @@ class TestPackageMoveWithPluginRoot:
         diagnostics = self._install(tmp_path, "copilot", lock, self._dep(tmp_path, "pkg-b"))
 
         assert json.loads(config.read_text())["lspServers"]["srv"]["command"] == "my-srv"
-        # The move renders a new path the kept edit holds back: a blocked keep.
-        (message,) = diagnostics.error.call_args.args
+        (message,) = diagnostics.warn.call_args.args
         assert message.startswith("Kept LSP server 'srv' in .github/lsp.json: it was modified")
+        diagnostics.error.assert_not_called()
 
 
 # ===========================================================================
