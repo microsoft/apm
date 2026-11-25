@@ -162,6 +162,7 @@
       "selectors": [
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/config_writes.py",
+        "src/apm_cli/policy/unmanaged_projection.py",
         "src/apm_cli/install/deploy_snapshot.py",
         "src/apm_cli/install/deploy_replay_state.py",
         "src/apm_cli/install/deploy_state.py",
