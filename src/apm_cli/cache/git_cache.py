@@ -1165,13 +1165,14 @@ class GitCache:
             if inprocess_files is not None:
                 from .checkout_verify import register_inprocess_manifest
 
-                if not atomic_land(staged, final_dir, lock):
+                if atomic_land(staged, final_dir, lock):
+                    register_inprocess_manifest(final_dir, sha, inprocess_files)
+                    _log.debug("In-process checkout: %s @ %s", _sanitize_url(url), sha[:12])
+                else:
                     from ..utils.file_ops import robust_rmtree
 
                     robust_rmtree(staged, ignore_errors=True)
-                    raise RuntimeError(f"Race landing {_sanitize_url(url)} @ {sha[:12]}")
-                register_inprocess_manifest(final_dir, sha, inprocess_files)
-                _log.debug("In-process checkout: %s @ %s", _sanitize_url(url), sha[:12])
+                    self._require_landed_checkout(final_dir, url, sha)
                 return final_dir
             try:
                 # Checkout the specific SHA.
@@ -1238,17 +1239,8 @@ class GitCache:
             if not atomic_land(staged, final_dir, lock):
                 # Another process landed first between our re-probe and
                 # the rename (only possible if our lock dropped, which
-                # it didn't); verify integrity and the materialization pins.
-                if not (
-                    self._checkout_trusted(final_dir)
-                    and verify_checkout_sha(final_dir, sha)
-                    and _checkout_has_materialization_pins(final_dir)
-                ):
-                    self._evict_checkout(final_dir)
-                    raise RuntimeError(
-                        f"Race condition: concurrent checkout failed integrity "
-                        f"for {_sanitize_url(url)} @ {sha[:12]}"
-                    )
+                # it didn't).
+                self._require_landed_checkout(final_dir, url, sha)
             if remat_started is not None:
                 _log.info(
                     "[+] Rematerialized git checkout %s @ %s [%s] in %d ms",
@@ -1258,6 +1250,19 @@ class GitCache:
                     int((time.monotonic() - remat_started) * 1000),
                 )
             return final_dir
+
+    def _require_landed_checkout(self, final_dir: Path, url: str, sha: str) -> None:
+        """A checkout someone else landed is used only with its integrity and pins intact."""
+        if not (
+            self._checkout_trusted(final_dir)
+            and verify_checkout_sha(final_dir, sha)
+            and _checkout_has_materialization_pins(final_dir)
+        ):
+            self._evict_checkout(final_dir)
+            raise RuntimeError(
+                f"Race condition: concurrent checkout failed integrity "
+                f"for {_sanitize_url(url)} @ {sha[:12]}"
+            )
 
     def _bare_has_sha(
         self,

@@ -205,6 +205,30 @@ def test_a_corrupt_loose_commit_on_top_of_the_pack_goes_to_git(world: Path, monk
     _assert_verdicts(pack, git, expected=git[0], pack_spawns=1)
 
 
+def test_a_loose_object_that_grows_while_read_goes_to_git(world: Path, monkeypatch) -> None:
+    """The read is bounded by the opened size: bytes appended after the fstat are refused."""
+    from apm_cli.cache import pack_objects
+
+    checkout, sha = _loose_only_checkout(world)
+    path = checkout / ".git" / "objects" / sha[:2] / sha[2:]
+    real_fstat = pack_objects.os.fstat
+
+    def fstat_then_grow(fd):
+        info = real_fstat(fd)
+        if (
+            pack_objects.os.path.samestat(info, os.stat(path))
+            and info.st_size == path.stat().st_size
+        ):
+            with open(path, "ab") as handle:
+                handle.write(b"grown")
+        return info
+
+    os.chmod(path, 0o644)
+    monkeypatch.setattr(pack_objects.os, "fstat", fstat_then_grow)
+    pack = _verdict(checkout, sha, monkeypatch, git_only=False)
+    _assert_verdicts(pack, (pack[0], 1), expected=pack[0], pack_spawns=1)
+
+
 def _loose_only_checkout(root: Path) -> tuple[Path, str]:
     """A checkout whose objects are all loose, as the in-process fetch writes them."""
     _bare, checkout, sha = _checkout(root)

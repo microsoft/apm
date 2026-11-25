@@ -295,8 +295,11 @@ def _loose(path: str, budget: list[int]) -> tuple[str, bytes] | None:
             raise _Refuse("loose object is not a regular file")
         if opened.st_size > _MAX_OBJECT:
             raise _Refuse("object exceeds the size cap")
-        # Read what is there: read(n) reserves n bytes up front, which Windows commits.
-        packed = handle.read()
+        # Bounded by the opened size (read(n) reserves n bytes up front, which
+        # Windows commits): a file that grew after the fstat is refused.
+        packed = handle.read(opened.st_size + 1)
+        if len(packed) > opened.st_size:
+            raise _Refuse("loose object changed while read")
     inflater = zlib.decompressobj()
     head = inflater.decompress(packed, _LOOSE_HEADER_MAX)
     kind_size, nul, rest = head.partition(b"\0")
