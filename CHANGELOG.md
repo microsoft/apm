@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Faster everyday commands: a fresh `apm install` is 2-2.4x faster than v0.38.1, re-running it with nothing to change is 3-7x faster, and `apm audit` uses up to 44% less CPU. (#5330, #5353, #4993, #5383, #5018)
 - `apm uninstall` adds `--trust-lockfile`, re-anchors still-needed local dependencies, and cleans up bundles, orphaned MCP servers and emptied settings. (#4650, #4964, #4679, #4900, #4955)
-- An install after an interrupted one restores every file the killed run changed; cache, extraction and deploy paths are hardened. (#4982, #5016, #4891, #4976, #5146)
+- Interrupted installs recover on the next run, keeping and reporting paths you edited or that fail permission checks; cache, extraction and deploy paths are hardened. (#4982, #5016, #4891, #4976, #5146)
 - Upgrade notes: stricter org policy, exact dependency refs, and helper tools that resolve only from PATH outside the project. (#4920, #4827, #4853, #4970, #5006)
 
 ### Breaking changes and upgrade notes
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - APM's helper tools (git, az, npm and others) and the setup scripts it runs resolve programs only from PATH outside the project; install them there. Your scripts are unaffected. (#5006, #5059)
 - `apm.lock.yaml` is now parsed with libyaml; a hand-edited lockfile with nonstandard YAML may be rejected, so regenerate it with `apm install`. (#4893)
 - MCP and LSP servers named or keyed `__proto__`, `constructor` or `prototype` (any case) are now refused; rename them before installing again. (#4990)
-- Config-write records are now kept per project directory; an older or side-by-side apm sharing `APM_HOME` refuses config writes until you remove `APM_HOME/deployment-receipts/config-files`. (closes #5037, #5060)
+- An older or side-by-side apm sharing `APM_HOME` refuses config writes until you remove `APM_HOME/deployment-receipts/config-files`, which drops deletion protection for emptied user-created MCP and hook configs. (closes #5037, #5060)
 - `apm install` keeps a journal left by an earlier apm's interrupted install and exits non-zero; restore the paths its `journal.jsonl` lists by hand. (#5117)
 - Claude instructions: install-only projects keep the 0.37 `.claude/rules/` layout; compiled `AGENTS.md` keeps working. (#5394)
 - Org policy still does not govern `-g` (user-scope) installs, updates and uninstalls; tracked in #3703. (#5041)
@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frontmatter errors name the key or line instead of crashing, and `apm install` prints a resolution error once and names a malformed hook event. (#5160, #5220, #5284, #5306)
 - `apm init --discover` and `apm compile` explain that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` stays in place and is not APM content. -- by @AndresDvst (closes #3228, #3737)
 - `apm install` and `apm compile` refuse to write through a symlinked, dangling or looping directory link or onto a special file, naming the link and next step. (#5174, #5186, #5295, #5306)
-- `apm install` after an interrupted install restores every file the killed run changed, including hook settings, sidecars, MCP configs and local bundle deploys or retirements. (closes #5009, #5038, #5039, #5051; #4982, #5016, #5042, #5053, #5098, #5110, #5153)
+- After an interrupted install, `apm install` restores hook, MCP, sidecar and bundle files it changed, keeping and reporting paths you edited or failing permission checks. (closes #5009, #5038, #5039, #5051; #4982, #5016, #5042, #5053, #5098, #5110, #5153)
 - Crash recovery keeps an MCP config directory whose mode you changed and a staging file you edited, restores cleaned configs and killed skill writes, and ignores other workspaces' journals. (#5115, #5131, #5401, #5409, #5440)
 - An interrupted `apm compile` or install stops its lifecycle command script even when Ctrl+C or SIGTERM lands while the script is starting. (#5412)
 - `apm install`, `apm approve` and other trust readers report a rejected org policy inheritance chain as a named error, not a traceback. (#4947)
