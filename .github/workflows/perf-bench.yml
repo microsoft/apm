@@ -162,6 +162,14 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
+    - name: Schannel probe (diagnostics)
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      env:
+        HARNESS_DIR: ${{ github.workspace }}/harness
+        PYTHONUNBUFFERED: '1'
+      run: |
+        "$GITHUB_WORKSPACE/new/.venv/Scripts/python.exe" harness/.github/probe/schannel_probe.py 2>&1 | tee probe.log
     - name: Interleaved runs
       working-directory: harness
       env:
