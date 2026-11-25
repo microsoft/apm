@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import os
 from pathlib import Path
 
@@ -18,8 +17,8 @@ class ProjectShadowedExecutableError(FileNotFoundError):
         )
 
 
-def _same_directory(first: Path, second: Path) -> bool:
-    """Compare by identity, so a case-variant spelling on a case-insensitive FS matches."""
+def same_directory(first: Path, second: Path) -> bool:
+    """Compare by identity, so a case-variant or symlinked spelling matches."""
     if first == second:
         return True
     try:
@@ -28,58 +27,67 @@ def _same_directory(first: Path, second: Path) -> bool:
         return False
 
 
-@functools.lru_cache(maxsize=4)
-def _resolve(path: Path) -> Path | None:
-    try:
-        return path.resolve()
-    except (OSError, RuntimeError):
-        return None
+_RESOLVED_HOME: dict[str, Path] = {}
+_HOME_CHAIN: dict[Path, frozenset[tuple[int, int]]] = {}
 
 
 def resolved_home() -> Path | None:
-    """Return the resolved home directory, or None when it cannot be determined."""
+    """Return the resolved home directory, or None when it cannot be determined.
+
+    Only a successful resolution is remembered: a transient failure must not
+    disable the HOME ceiling for the rest of the process.
+    """
     try:
-        return _resolve(Path.home())
-    except RuntimeError:
+        raw = str(Path.home())
+        cached = _RESOLVED_HOME.get(raw)
+        if cached is None:
+            cached = _RESOLVED_HOME[raw] = Path(raw).resolve()
+        return cached
+    except (OSError, RuntimeError):
         return None
 
 
 def is_home(directory: Path) -> bool:
     """Whether *directory* is the home directory (by identity, not spelling)."""
     home = resolved_home()
-    return home is not None and _same_directory(directory, home)
+    return home is not None and same_directory(directory, home)
 
 
-@functools.lru_cache(maxsize=4)
-def _home_chain_identities(home: Path) -> frozenset[tuple[int, int]]:
-    """(dev, ino) of *home* and each ancestor, stat'ed once per resolved home."""
-    identities = set()
-    for level in (home, *home.parents):
-        try:
-            info = os.stat(level)
-        except OSError:
-            continue
-        identities.add((info.st_dev, info.st_ino))
-    return frozenset(identities)
+def _home_chain_identities(home: Path) -> frozenset[tuple[int, int]] | None:
+    """(dev, ino) of *home* and each ancestor; cached only when every level stat'ed."""
+    cached = _HOME_CHAIN.get(home)
+    if cached is not None:
+        return cached
+    try:
+        identities = frozenset(
+            (info.st_dev, info.st_ino) for info in map(os.stat, (home, *home.parents))
+        )
+    except OSError:
+        return None
+    _HOME_CHAIN[home] = identities
+    return identities
 
 
-def is_home_or_above(directory: Path) -> bool:
-    """Whether *directory* is HOME or one of its ancestors (``/``, ``/home``, ...).
+def is_home_or_above(directory: Path, home: Path | None) -> bool:
+    """Whether *directory* is *home* or one of its ancestors (``/``, ``/home``, ...).
 
     The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
     manifest) is not a project. Identity-based, so a case-variant or symlinked
     spelling matches; HOME's chain is stat'ed once, then one stat per query.
+    A missing *home* (``resolved_home()`` returned None) disables the check.
     """
-    home = resolved_home()
     if home is None:
         return False
     if directory == home or directory in home.parents:
         return True
+    chain = _home_chain_identities(home)
     try:
         wanted = os.stat(directory)
     except OSError:
         return False
-    return (wanted.st_dev, wanted.st_ino) in _home_chain_identities(home)
+    if chain is None:
+        return same_directory(directory, home)
+    return (wanted.st_dev, wanted.st_ino) in chain
 
 
 def executable_exclusion_root() -> Path | None:
@@ -93,9 +101,10 @@ def executable_exclusion_root() -> Path | None:
     from apm_cli.core.scope import manifest_file
 
     cwd = Path.cwd().resolve()
+    home = resolved_home()
     ancestors = (cwd, *cwd.parents)
     for has_marker in (lambda d: (d / ".git").exists(), lambda d: manifest_file(d).is_file()):
         for directory in ancestors:
-            if not is_home_or_above(directory) and has_marker(directory):
+            if not is_home_or_above(directory, home) and has_marker(directory):
                 return directory
-    return None if is_home_or_above(cwd) else cwd
+    return None if is_home_or_above(cwd, home) else cwd

@@ -570,16 +570,18 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
 
     cwd = (start or Path.cwd()).resolve()
     geteuid = getattr(os, "geteuid", None)
-    from ..core.scope import USER_APM_DIR, is_user_scope_root
-    from ..utils.executable_exclusion import is_home_or_above
+    from ..core.scope import USER_APM_DIR, get_apm_home
+    from ..utils.executable_exclusion import is_home_or_above, resolved_home, same_directory
+
+    home = resolved_home()
+    metadata_roots = ()
+    if start is None:
+        metadata_roots = (get_apm_home(), *((home / USER_APM_DIR,) if home else ()))
 
     for candidate in (cwd, *cwd.parents):
         if candidate != cwd and (
-            is_home_or_above(candidate)
-            or (
-                start is None
-                and (is_user_scope_root(candidate) or candidate == Path.home() / USER_APM_DIR)
-            )
+            is_home_or_above(candidate, home)
+            or any(same_directory(candidate, root) for root in metadata_roots)
         ):
             break
         manifest = manifest_file(candidate)

@@ -48,7 +48,14 @@ def _run(engine: tuple[str, ...], args: tuple[str, ...], cwd: Path, env: dict[st
 
 
 # APM's own per-user state (lifecycle lock files), not project data.
-_APM_STATE = (".apm/", ".apm-local/", ".cache/")
+_APM_STATE = (
+    ".apm/cache/",
+    ".apm/locks/",
+    ".apm/deployment-receipts/",
+    ".apm/.apm-lifecycle.lock",
+    ".apm-local/",
+    ".cache/",
+)
 
 
 def _home_tree(home: Path) -> dict[str, bytes]:
@@ -113,7 +120,9 @@ def test_a_project_install_after_a_global_install_leaves_home_alone(
     (project / ".claude").mkdir(parents=True)
     user_state = isolated.home / ".apm"
     before = _home_tree(isolated.home)
-    user_before = {p: p.read_bytes() for p in user_state.rglob("*") if p.is_file()}
+    user_files = (user_state / "apm.yml", user_state / "apm.lock.yaml")
+    assert all(f.is_file() for f in user_files)
+    user_before = [f.read_bytes() for f in user_files]
 
     result = _run(apm_engine_command, ("install", str(package)), project, environment)
 
@@ -124,9 +133,7 @@ def test_a_project_install_after_a_global_install_leaves_home_alone(
     assert {k: v for k, v in after.items() if not k.startswith(project_prefix)} == {
         k: v for k, v in before.items() if not k.startswith(project_prefix)
     }, _describe(result)
-    assert {p: p.read_bytes() for p in user_state.rglob("*") if p.is_file()}.keys() >= (
-        user_before.keys()
-    ), _describe(result)
+    assert [f.read_bytes() for f in user_files] == user_before, _describe(result)
 
 
 def test_a_new_project_in_the_home_directory_is_refused_and_names_the_fix(

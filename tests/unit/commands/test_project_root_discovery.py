@@ -375,3 +375,43 @@ def test_a_plugin_json_source_package_is_not_pinned_as_a_bundle(
         "pkg",
         str(bundle.resolve()),
     )
+
+
+def test_the_metadata_root_stop_compares_by_identity(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home, _ = _home_world(tmp_path, monkeypatch)
+    metadata = home / "real-apm"
+    scratch = metadata / "cache" / "scratch"
+    scratch.mkdir(parents=True)
+    (metadata / "apm.yml").write_text("name: global\nversion: 1.0.0\n", encoding="utf-8")
+    alias = home / "alias-apm"
+    alias.symlink_to(metadata, target_is_directory=True)
+    monkeypatch.setenv("APM_HOME", str(alias))
+    monkeypatch.chdir(scratch)
+
+    assert _find_apm_yml() is None
+
+
+def test_a_failed_home_resolution_is_not_remembered(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.utils import executable_exclusion as ee
+
+    home, work = _home_world(tmp_path, monkeypatch)
+    ee._RESOLVED_HOME.clear()
+    real = Path.resolve
+    calls = {"n": 0}
+
+    def flaky(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("transient")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", flaky)
+
+    assert ee.resolved_home() is None
+    resolved = ee.resolved_home()
+    assert resolved == home.resolve()
+    assert ee.is_home_or_above(home.parent, resolved)
+    assert not ee.is_home_or_above(work, resolved)
+    assert not ee.is_home_or_above(home, None)
