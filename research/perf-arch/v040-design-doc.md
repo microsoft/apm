@@ -18,6 +18,7 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
   - Materialization writes each file once (M2), and integrate consumes the manifest, with no re-walk, re-hash or re-classify.
   - Containment is proved by construction for APM-created trees.
 - **Result** (stacked measured ceiling, ONE head = integrate ceiling ea0ec45e + M2 bound c2, unsafe upper bounds):
+  - **ON HOLD (07:11 CET):** Car 2 (M2) was killed: the faithful M2 step 2 removes all copy+verify CPU but reads only W 0.979 / L 0.965 / M 0.891 [45556952859 / 45556969927 / 45556988005], while the c2 bound read W 0.802 / L 0.817 / M 0.856. c2 therefore deleted more than copy+verify. The numbers below include c2 and are restated once the stack is re-measured without c2 (or c2's extra effect is named and made reachable).
   - L 0.701 (~4.3 s on 9V74 vs 3.5; miss ~0.8 s) [45530064444].
   - M 0.663 [45530082924].
   - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~6.0 s on 9V74: AT TARGET (7.5 s).
@@ -26,10 +27,8 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
     - Base = CPU p50 (cpu_p50_s), not wall (wall p50 on 9V74 is 12.26 s), from artifact calib-windows-2025-vm4/direct/*.json. CPU base x paired CPU ratio keeps the units consistent.
     - Caveats: n = 1 VM per class (3 for 7763), 3 runs each; the paired ratio was measured on the bench's VM mix and is applied to one VM's base.
   - The levers stack slightly better than paper (0.701 vs 0.716-0.734).
-- **Native-core gate on Linux:** MET.
-  - walk+stat+hash+copy = 45.5% of L CPU on main [45520769932] and 45.2% at the stacked head [45530101839] (65% with realpath).
-  - Hash is 0.2%: the candidate is the filesystem-op layer, not hashing.
-- **Linux bar (REGENT RULING):** L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured ~4.3 s L milestone. A native fs-op core is a 48 h research lane (Lane N).
+- **Native-core gate on Linux:** read as MET (walk+stat+hash+copy = 45% of L CPU [45520769932 / 45530101839]) but SUPERSEDED: that attribution counted fs-named Python frames, not syscall CPU. Zero-cost oracles free ~5%, and Lane N was KILLED (section 8).
+- **Linux bar (REGENT RULING):** L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured ~4.3 s L milestone. A native fs-op core was a 48 h research lane (Lane N), KILLED WED 05:12 (section 8). No measured Python path reaches 3.5 s (section 7-8).
 
 ## 1. Physics floor per phase on main (PERF-SOL)
 

@@ -324,3 +324,8 @@
 06:16 | Bets pulse: #5406 READY 42878803, final H8 (desk 402/403), not merged; standby + Car 3 prep | #5406 merge -> SoL re-check | none
 06:20 | tick: main 1e4a208e; inbox silent; #5406 ready not merged | E2 diff/bench | none
 06:31 | tick: main 1e4a208e; inbox silent; #5406 ready not merged; notes push | E2 diff/bench | none
+06:42 | tick: main 1e4a208e; inbox silent | E2 diff/bench | none
+06:49 | Bets pulse: #5406 42878803 final H8 (402), integration 45546057913 green, lands at first admin window (manifest 405); SoL 10:30 fallback likely applies | SoL re-check | none
+06:53 | tick: main 1e4a208e; inbox silent; GODSPEED ends 07:00 + research closed -> my tick spaced to 30 min (messages still wake me) | E2 diff; SoL re-check by 11:30 | none
+07:08 | E2 Car 1 render diff VERIFIED identical (tree-50/10-mcp/10-multi, L/W/M 45555261181/45555296987/45555328454); -mcp-policy blocked by design (POLICY_DOCUMENT lacks mcp.allow, offline.py:49) -> E2 uses tree-50-policy + tree-10-multi-policy | E2 final diff runs | none
+07:11 | VP: Car 2 M2 KILLED (faithful W 0.979/L 0.965/M 0.891 verified); c2 overstated -> doc W headline ON HOLD; SoL: c2 attribution + stack re-measure without c2; summary gate line updated | SoL ~07:55 | W headline hold
