@@ -622,8 +622,10 @@ def persist_dependency_list_if_changed(
         return
     data[dep_section]["apm"] = current_deps
     try:
+        from apm_cli.install.manifest_journal import expect_manifest_data
         from apm_cli.utils.yaml_io import dump_yaml_roundtrip
 
+        expect_manifest_data(apm_yml_path, data)  # before the write (#5454)
         dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(f"Updated {apm_yml_filename} dependency entries")

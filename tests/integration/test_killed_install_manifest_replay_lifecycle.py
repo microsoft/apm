@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.yaml_io import load_yaml
 from tests.integration._fault_injection_kit import FaultWorld, build_world, evidence
 from tests.lifecycle import driver
 from tests.utils.lifecycle_evidence import expect_output_violation
@@ -102,6 +103,7 @@ def test_a_kill_at_the_lock_commit_point_restores_apm_yml_on_the_next_command(
     _kill_at_commit(world, delta)
     assert delta in _declared(world), "the kill came before apm.yml was written"
     assert world.lockfile_bytes() == lock
+    assert _records(world), "the kill left no manifest record to replay"
 
     _assert_restored(world, manifest, lock, delta)
     added = world.install(delta)
@@ -176,10 +178,16 @@ def test_a_killed_install_that_created_apm_yml_removes_it_on_the_next_command(
         result = world.install("--frozen")
     output = _text(result)
     assert result.returncode != 0, evidence(result)
-    assert f"Run 'apm install {delta}' to add it again" in output, evidence(result)
+    assert f"Run 'apm install --target claude {delta}' to add it again" in output, evidence(result)
     assert "No apm.yml found" in output, evidence(result)
     assert _OUT_OF_SYNC not in output, evidence(result)
     assert not (world.project / "apm.yml").exists()
+
+    # The retry bootstraps apm.yml again and keeps the --target it pins.
+    retried = world.install("--target", "claude", delta)
+    assert retried.returncode == 0, evidence(retried)
+    targets = load_yaml(world.project / "apm.yml").get("targets")
+    assert targets == ["claude"], (world.project / "apm.yml").read_text(encoding="utf-8")
 
 
 def test_concurrent_commands_after_the_kill_restore_apm_yml_once(
@@ -224,3 +232,87 @@ def test_a_killed_uninstall_keeps_apm_yml_and_lock_paired(
     frozen = world.install("--frozen")
     assert frozen.returncode == 0, evidence(frozen)
     assert _OUT_OF_SYNC not in _text(frozen), evidence(frozen)
+
+
+def test_a_kill_between_the_apm_yml_write_and_its_seal_restores_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The add names the bytes before it writes them, so no seal is needed (#5454)."""
+    world = build_world(tmp_path, apm_binary_path)
+    manifest, lock = (world.project / "apm.yml").read_bytes(), world.lockfile_bytes()
+    delta = world.write_package("delta")
+
+    _kill_on_engine(world, "manifest+kill", delta)
+    assert delta in _declared(world), "the kill came before apm.yml was written"
+
+    _assert_restored(world, manifest, lock, delta)
+
+
+def test_a_killed_dev_add_names_the_dev_retry(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = build_world(tmp_path, apm_binary_path)
+    manifest = (world.project / "apm.yml").read_bytes()
+    delta = world.write_package("delta")
+    _kill_at_commit(world, "--dev", delta)
+
+    result = world.install("--frozen")
+    assert result.returncode == 0, evidence(result)
+    assert f"Run 'apm install --dev {delta}' to add it again" in _text(result), evidence(result)
+    assert (world.project / "apm.yml").read_bytes() == manifest
+
+
+def test_a_killed_root_install_restores_the_source_apm_yml(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``--root``: the source apm.yml and the deploy root's lockfile stay paired."""
+    world = build_world(tmp_path, apm_binary_path, installed=False)
+    deploy = world.project.parent / "deploy"
+    deploy.mkdir()
+    (deploy / ".claude").mkdir()
+    first = world.install("--root", str(deploy))
+    assert first.returncode == 0, evidence(first)
+    manifest = (world.project / "apm.yml").read_bytes()
+    lock = (deploy / "apm.lock.yaml").read_bytes()
+    delta = str(world.project / world.write_package("delta"))
+
+    _kill_at_commit(world, "--root", str(deploy), delta)
+    assert delta in _declared(world), "the kill came before apm.yml was written"
+
+    frozen = world.install("--root", str(deploy), "--frozen")
+    assert frozen.returncode == 0, evidence(frozen)
+    assert _OUT_OF_SYNC not in _text(frozen), evidence(frozen)
+    assert f"Run 'apm install --root {deploy} {delta}' to add it again" in _text(frozen), evidence(
+        frozen
+    )
+    assert (world.project / "apm.yml").read_bytes() == manifest
+    assert (deploy / "apm.lock.yaml").read_bytes() == lock
+
+
+_BOOKKEEPING = frozenset({".apm-lifecycle.lock", "last_version_check", "device-id"})
+
+
+# Install's declared HOME write set: the receipts that bind deployed files.
+_DECLARED = ".apm/deployment-receipts"
+
+
+def _home_state(home: Path) -> dict[str, bytes | None]:
+    """Every path under HOME (``None`` for a directory) but bookkeeping and declared writes."""
+    state = {}
+    for path in sorted(home.rglob("*")):
+        rel = path.relative_to(home).as_posix()
+        if path.name in _BOOKKEEPING or rel == _DECLARED or rel.startswith(f"{_DECLARED}/"):
+            continue
+        state[rel] = path.read_bytes() if path.is_file() else None
+    return state
+
+
+def test_a_successful_add_leaves_home_byte_identical(tmp_path: Path, apm_binary_path: Path) -> None:
+    """I5: the record lives only while the add runs; HOME keeps no trace of it."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    before = _home_state(world.isolated.home)
+
+    added = world.install(delta)
+
+    assert added.returncode == 0, evidence(added)
+    assert _home_state(world.isolated.home) == before
+    assert not (world.isolated.config_root / "install-snapshots").exists()

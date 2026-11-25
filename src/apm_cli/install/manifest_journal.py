@@ -11,7 +11,9 @@ workspace under the APM home ``install-snapshots`` directory: the prior bytes
 (or that there were none), the lockfile on disk, the hash of each manifest the
 attempt wrote (a seal), and the lockfile it is about to commit (a mark). The
 record is dropped once that lockfile is on disk or the transaction ends in
-process. The next install entry, under the lifecycle lock and before it reads
+process. Every writer of that ``apm.yml`` names the bytes it is about to
+publish first (:func:`expect_manifest_text`), so a kill between the write and
+its seal still replays. The next install entry, under the lifecycle lock and before it reads
 the manifest, replays a record a killed process left
 (:func:`replay_abandoned_manifest`): while the lockfile is the one the killed
 install found and ``apm.yml`` holds bytes it wrote, the prior manifest is put
@@ -54,15 +56,82 @@ def _write(path: Path, record: dict[str, Any]) -> None:
     atomic_write_text(path, json.dumps(record, sort_keys=True), new_file_mode=0o600)
 
 
-def _packages(packages: list[str]) -> str:
+def _remove(path: Path) -> None:
+    """Delete the record and, like a discarded deploy journal, its parent once empty."""
+    from apm_cli.utils.realpath_win import release_held
+
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    with contextlib.suppress(OSError):
+        release_held(path.parent)
+        path.parent.rmdir()
+
+
+def _lock_identity(workspace: Path) -> str | None:
+    """The identity of the lockfile on disk, read as install reads it (legacy ``apm.lock`` too)."""
+    from apm_cli.deps.lockfile import resolve_lockfile_path_for_read
+    from apm_cli.install.deploy_snapshot import lockfile_identity
+
+    try:
+        path = resolve_lockfile_path_for_read(workspace, read_only=True)
+        return lockfile_identity(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _quoted(words: list[str]) -> str:
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     # The record is data on disk: never echo control or ANSI bytes to the terminal.
-    return " ".join(shlex.quote(printable_ascii_text(p)) for p in packages)
+    return " ".join(shlex.quote(printable_ascii_text(w)) for w in words)
 
 
-def _fix(packages: list[str]) -> str:
-    return f"apm install {_packages(packages)}".rstrip()
+def retry_options(
+    *, user_scope: bool, dev: bool, skills: Any = (), target: Any = None, root: Any = None
+) -> tuple[list[str], list[str]]:
+    """The ``apm install`` options that repeat an add, and those only a bootstrap needs.
+
+    The scope options (``--global``, ``--root DIR``) come first: the kept-manifest
+    advice repeats only those.
+    """
+    options = _scope_options(user_scope=user_scope, root=root) + (["--dev"] if dev else [])
+    for skill in skills or ():
+        options += ["--skill", str(skill)]
+    if isinstance(target, list | tuple):
+        target = ",".join(str(t) for t in target)
+    return options, (["--target", str(target)] if target else [])
+
+
+def _scope_options(*, user_scope: bool, root: Any) -> list[str]:
+    return (["--global"] if user_scope else []) + (["--root", str(root)] if root else [])
+
+
+def _scope_prefix(options: list[str]) -> list[str]:
+    """The leading scope options (``--global``, ``--root DIR``) of a recorded option list."""
+    prefix, rest = [], list(options)
+    while rest and rest[0] in ("--global", "--root"):
+        width = 1 if rest[0] == "--global" else 2
+        prefix, rest = prefix + rest[:width], rest[width:]
+    return prefix
+
+
+_ACTIVE: ManifestJournal | None = None
+
+
+def expect_manifest_text(path: Path, text: str) -> None:
+    """Name the bytes about to be published at *path*, before the write (#5454)."""
+    journal = _ACTIVE
+    if journal is not None and Path(os.path.abspath(path)) == journal.manifest_path:
+        journal.expect(text)
+
+
+def expect_manifest_data(path: Path, data: Any) -> None:
+    """Name the round-trip YAML *data* ``dump_yaml_roundtrip`` is about to write to *path*."""
+    if _ACTIVE is None:
+        return
+    from apm_cli.utils.yaml_io import yaml_roundtrip_to_str
+
+    expect_manifest_text(Path(path), yaml_roundtrip_to_str(data))
 
 
 class ManifestJournal:
@@ -74,8 +143,9 @@ class ManifestJournal:
         workspace: Path,
         prior: bytes | None,
         packages: list[str],
+        options: tuple[list[str], list[str]] = ([], []),
     ) -> None:
-        from apm_cli.install.transaction import _committed_lockfile
+        global _ACTIVE
 
         self.manifest_path = Path(os.path.abspath(manifest_path))
         self.workspace = Path(os.path.abspath(workspace))
@@ -86,22 +156,35 @@ class ManifestJournal:
             "workspace": str(self.workspace),
             "manifest": str(self.manifest_path),
             "prior": base64.b64encode(prior).decode("ascii") if prior is not None else None,
-            "lock": _committed_lockfile(self.workspace),
+            "lock": _lock_identity(self.workspace),
             "written": [],
             "commit": None,
             "packages": list(packages),
+            "options": list(options[0]),
+            "bootstrap_options": list(options[1]),
         }
         _write(self.path, self._record)
+        _ACTIVE = self
+
+    def _add(self, digests: list[str]) -> None:
+        new = [d for d in digests if d not in self._record["written"]]
+        if new:
+            self._record["written"].extend(new)
+            _write(self.path, self._record)
+
+    def expect(self, text: str) -> None:
+        """Record the bytes a write is about to publish, as LF or platform newlines."""
+        lf = text.replace("\r\n", "\n")
+        self._add(
+            [_digest(v.encode("utf-8")) for v in dict.fromkeys((lf, lf.replace("\n", os.linesep)))]
+        )
 
     def seal(self) -> None:
         """Record the manifest this attempt wrote, so replay may undo exactly it."""
         try:
-            digest = _digest(self.manifest_path.read_bytes())
+            self._add([_digest(self.manifest_path.read_bytes())])
         except OSError:
             return
-        if digest not in self._record["written"]:
-            self._record["written"].append(digest)
-            _write(self.path, self._record)
 
     def mark_commit(self, lockfile_identity: str) -> None:
         """Name the lockfile about to commit: a kill after its write settles the record."""
@@ -110,8 +193,15 @@ class ManifestJournal:
         _write(self.path, self._record)
 
     def discard(self) -> None:
-        with contextlib.suppress(FileNotFoundError):
-            self.path.unlink()
+        global _ACTIVE
+
+        if _ACTIVE is self:
+            _ACTIVE = None
+        _remove(self.path)
+
+
+def _strings(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
 def _load(path: Path, workspace: Path) -> dict[str, Any]:
@@ -125,31 +215,35 @@ def _load(path: Path, workspace: Path) -> dict[str, Any]:
         raise ValueError("the record has an unknown format or version")
     if record.get("workspace") != str(workspace):
         raise ValueError("the record names another workspace")
-    written, packages, manifest = (
-        record.get("written"),
-        record.get("packages"),
-        record.get("manifest"),
-    )
-    if not isinstance(manifest, str) or Path(manifest) not in {workspace / n for n in _NAMES}:
-        raise ValueError("the record names a file other than the workspace apm.yml")
-    if not isinstance(written, list):
-        raise ValueError("the record is malformed")
-    if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
+    manifest = record.get("manifest")
+    if not isinstance(manifest, str) or Path(manifest).name not in _NAMES:
+        raise ValueError("the record names a file other than an apm.yml")
+    if not all(_strings(record.get(k)) for k in _LISTS):
         raise ValueError("the record is malformed")
     prior = record.get("prior")
     record["prior"] = base64.b64decode(prior, validate=True) if prior is not None else None
     return record
 
 
-def replay_abandoned_manifest(workspace: Path, logger: Any) -> None:
+_LISTS = ("written", "packages", "options", "bootstrap_options")
+
+
+def _retry(record: dict[str, Any]) -> str:
+    """The exact ``apm install`` that repeats the interrupted add."""
+    bootstrap = record["bootstrap_options"] if record["prior"] is None else []
+    return _quoted([*record["options"], *bootstrap, *record["packages"]])
+
+
+def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path | None = None) -> None:
     """Restore the ``apm.yml`` an install killed before its lock commit left (#5454).
 
-    Call under the lifecycle lock, before the command reads the manifest.
+    Call under the lifecycle lock, before the command reads *manifest* (the
+    command's source ``apm.yml``; a record for another source is left alone).
     Raises ``InstallFailureAlreadyRendered`` when the record cannot be read.
     """
     from apm_cli.core.remediation import INTERRUPTED_ADD_KEPT, INTERRUPTED_ADD_RETRY
     from apm_cli.install.errors import InstallFailureAlreadyRendered
-    from apm_cli.install.transaction import _committed_lockfile, _restore_manifest_from_snapshot
+    from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
     workspace = Path(os.path.abspath(workspace))
     path = _record_path(workspace)
@@ -165,35 +259,42 @@ def replay_abandoned_manifest(workspace: Path, logger: Any) -> None:
                 "then run the command again."
             )
         raise InstallFailureAlreadyRendered(f"unreadable manifest record {path}") from None
-    lock = _committed_lockfile(workspace)
+    target = Path(record["manifest"])
+    if manifest is not None and target != Path(os.path.abspath(manifest)):
+        return  # Another source's apm.yml (--root): its own next install replays it.
+    lock = _lock_identity(workspace)
     if (record.get("commit") is not None and lock == record["commit"]) or lock != record.get(
         "lock"
     ):
         # The killed install's lockfile reached disk, or a later command changed it.
-        path.unlink()
+        _remove(path)
         return
-    manifest, prior = Path(record["manifest"]), record["prior"]
-    current = manifest.read_bytes() if manifest.is_file() else None
-    fix = _fix(record["packages"])
+    prior = record["prior"]
+    current = target.read_bytes() if target.is_file() else None
+    retry = _retry(record)
+    fix = f"apm install {retry}"
     if current == prior:
-        path.unlink()
+        _remove(path)
         return
     if current is None or _digest(current) not in record["written"]:
-        path.unlink()
+        _remove(path)
+        kept = INTERRUPTED_ADD_KEPT
+        if scope := _scope_prefix(record["options"]):
+            kept = kept.with_command(f"apm install {_quoted(scope)}")
         if logger is not None:
             logger.warning(
-                f"An interrupted '{fix}' never locked what it added to {manifest.name}, which "
-                f"changed since, so it was kept as is. {INTERRUPTED_ADD_KEPT.sentence()}"
+                f"An interrupted '{fix}' never locked what it added to {target.name}, which "
+                f"changed since, so it was kept as is. {kept.sentence()}"
             )
         return
     if prior is None:
-        manifest.unlink()
+        target.unlink()
     else:
-        _restore_manifest_from_snapshot(manifest, prior)
-    path.unlink()
+        _restore_manifest_from_snapshot(target, prior)
+    _remove(path)
     if logger is not None:
         logger.warning(
-            f"An interrupted '{fix}' never locked what it added to {manifest.name}; "
-            f"{manifest.name} was restored to its state before that install. "
-            f"{INTERRUPTED_ADD_RETRY.bind(packages=_packages(record['packages'])).sentence()}"
+            f"An interrupted '{fix}' never locked what it added to {target.name}; "
+            f"{target.name} was restored to its state before that install. "
+            f"{INTERRUPTED_ADD_RETRY.bind(packages=retry).sentence()}"
         )

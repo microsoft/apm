@@ -250,7 +250,9 @@ def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
     return ledger
 
 
-def replay_abandoned_deploys(apm_modules_dir: Path, logger: Any) -> None:
+def replay_abandoned_deploys(
+    apm_modules_dir: Path, logger: Any, manifest_path: Path | None = None
+) -> None:
     """Replay the deploy journal and manifest record a killed install left (#4863, #5454).
 
     The one recovery owner: every install entry that mutates deployed state
@@ -266,7 +268,7 @@ def replay_abandoned_deploys(apm_modules_dir: Path, logger: Any) -> None:
 
     apm_dir = Path(os.path.abspath(apm_modules_dir)).parent
     # apm.yml first: the command reads it next (#5454).
-    replay_abandoned_manifest(apm_dir, logger)
+    replay_abandoned_manifest(apm_dir, logger, manifest_path)
     store_parent = get_apm_home() / "install-snapshots"
     if not any(store_parent.glob("deploy-*")):
         return
@@ -307,9 +309,9 @@ def replay_before_install_entry(scope: Any, *, dry_run: bool, logger: Any) -> No
     The local-bundle and ``--mcp`` entries never open an install transaction.
     """
     if not dry_run:
-        from apm_cli.core.scope import get_modules_dir
+        from apm_cli.core.scope import get_manifest_path, get_modules_dir
 
-        replay_abandoned_deploys(get_modules_dir(scope), logger)
+        replay_abandoned_deploys(get_modules_dir(scope), logger, get_manifest_path(scope))
 
 
 def _report_kept_journal(exc: Any, logger: Any) -> None:
@@ -376,6 +378,7 @@ class InstallTransaction:
         acquire_lock: bool = True,
         recover_deploys: bool = True,
         journal_packages: Sequence[str] = (),
+        journal_options: tuple[list[str], list[str]] = ([], []),
     ) -> None:
         """Capture the manifest and create one resolution staging session.
 
@@ -412,7 +415,7 @@ class InstallTransaction:
             # Commit reachability verdicts of this attempt; written on commit only.
             self._verdicts = open_verdict_stage()
             if journal_packages:
-                self._journal_manifest(list(journal_packages))
+                self._journal_manifest(list(journal_packages), journal_options)
         except BaseException:
             self._release_workspace_lock()
             raise
@@ -432,21 +435,27 @@ class InstallTransaction:
         """Return the single resolution journal owned by this attempt."""
         return self._resolution
 
-    def _journal_manifest(self, packages: list[str]) -> None:
+    def _journal_manifest(self, packages: list[str], options: tuple[list[str], list[str]]) -> None:
         """Keep the pre-install apm.yml on disk until the lockfile commits (#5454).
 
         A process killed before then leaves it for the next install entry,
         which restores apm.yml while the lockfile is still the one found here.
+        The record is keyed by the lockfile workspace and names the source
+        manifest, which ``--root`` keeps elsewhere.
         """
         from apm_cli.install.manifest_journal import ManifestJournal
 
+        if self._workspace_lock is None:
+            return
         workspace = Path(os.path.abspath(self.apm_modules_dir)).parent
-        manifest = Path(os.path.abspath(self.manifest_path))
-        if self._workspace_lock is None or manifest.parent != workspace:
-            return  # replay restores only the workspace root apm.yml
         self._manifest_journal = ManifestJournal(
-            manifest, workspace, self._manifest_snapshot, packages
+            self.manifest_path, workspace, self._manifest_snapshot, packages, options
         )
+
+    def expect_manifest(self, text: str) -> None:
+        """Name the bytes a bootstrap is about to publish as apm.yml (#5454)."""
+        if self._manifest_journal is not None:
+            self._manifest_journal.expect(text)
 
     def record_validation(self, validation: _ValidationOutcome) -> None:
         """Attach the validation outcome produced after transaction creation."""
@@ -604,7 +613,7 @@ class InstallTransaction:
 
     def _replay_abandoned_deploys(self) -> None:
         """Replay the deploy journal a killed install left for this deploy root (#4863)."""
-        replay_abandoned_deploys(self.apm_modules_dir, self._logger)
+        replay_abandoned_deploys(self.apm_modules_dir, self._logger, self.manifest_path)
 
     def journal_deploy_writes(self, ctx: Any = None) -> None:
         """Record, at the integrator write seam, the prior state of every path written from now on.
