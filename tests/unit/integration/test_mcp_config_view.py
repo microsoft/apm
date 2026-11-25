@@ -83,18 +83,23 @@ def test_frozen_skills_only_checks_exact_omission(tmp_path: Path, damage: str) -
         lock.mcp_omissions.clear()
     elif damage == "stale":
         _write_manifest(source, name="tools", mcp=[_self_defined("tools", "changed")])
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text(lock.to_yaml(), encoding="utf-8")
+    # Frozen replay reads the evidence back from the lockfile on disk.
+    recorded = LockFile.from_yaml(lock_path.read_text(encoding="utf-8"))
 
     selected = CurrentMcpConfigView.select(
         root,
-        lock,
+        recorded,
         modules,
         admission=McpAdmission(None),
-        recorded=lock,
+        recorded=recorded,
         include_dependency_mcp=damage == "different-selection",
     )
     assert bool(selected.problems) is (damage != "none")
     if damage == "none":
-        assert selected.diff(lock.mcp_configs).is_empty
+        assert recorded.mcp_omissions == lock.mcp_omissions
+        assert selected.diff(recorded.mcp_configs).is_empty
 
 
 @pytest.mark.parametrize(

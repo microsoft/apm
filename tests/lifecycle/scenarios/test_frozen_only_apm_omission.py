@@ -14,7 +14,12 @@ from tests.lifecycle import driver
 from tests.lifecycle.world.contract import World
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-pytestmark = [pytest.mark.promise("P-INV-I2", "P-INV-I7", "P-INV-I8")]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I2", "P-INV-I7", "P-INV-I8"),
+]
 
 
 @pytest.mark.parametrize("target", ["agent-skills", "opencode"])

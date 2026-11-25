@@ -774,6 +774,7 @@ class InstallService:
         check uses the pipeline's routed trust context and is authoritative
         before anything deploys.
         """
+        from apm_cli.install.frozen_mcp_drift import frozen_mcp_drift_reasons
         from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
         if allow_pending and not (
@@ -796,25 +797,7 @@ class InstallService:
         )
         pending = current.pending_servers(lockfile) if allow_pending else frozenset()
         diff = current.diff(lockfile.mcp_configs)
-        reasons = [f"  - {problem.package_key}: {problem.message}" for problem in current.problems]
-        consent = current.consent_problems(lockfile)
-        for name, message in consent.items():
-            reasons.append(f"  - MCP server {name!r} is {message}")
-        for name in sorted(diff.changed):
-            reasons.append(f"  - MCP server {name!r} config differs from apm.lock.yaml")
-        for name in sorted(diff.source_only):
-            reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
-        for name in sorted(diff.lock_only - pending - set(consent)):
-            evidence = current.omissions.get(name)
-            reason = evidence.get("reason") if isinstance(evidence, Mapping) else None
-            if reason is not None:
-                # Still declared: the gate left it out this run (#3957).
-                reasons.append(f"  - MCP server {name!r} is now left out ({reason})")
-            else:
-                reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
-        if set(current.configs) | pending != set(lockfile.mcp_servers) and not reasons:
-            reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")
-        return reasons
+        return frozen_mcp_drift_reasons(current, lockfile, diff, pending)
 
     @staticmethod
     def enforce_hydrated_mcp(
