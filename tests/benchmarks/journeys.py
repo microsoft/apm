@@ -250,6 +250,13 @@ def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
     remove_tree(directory / "env")
     if fixture.real:
         isolated, env = isolated_environment(directory / "env")
+        if sys.platform == "win32":
+            # A real Git for Windows user keeps its TLS backend (schannel) in the
+            # SYSTEM config, which the isolated environment hides; carry it, as the
+            # offline default-TLS worlds do, so APM and git see what a user's do.
+            from tests.fixtures.perf.offline import carry_system_tls
+
+            carry_system_tls(env["GIT_CONFIG_GLOBAL"])
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
