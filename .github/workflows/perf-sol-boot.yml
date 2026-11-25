@@ -2,7 +2,7 @@ name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace3]
+    branches: [perf-research/arch-trace5]
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2025]
-        product: [1e4a208e073a3ea1484f71ceba8d065f23a815ec]
+        product: [7a7e77cf204dfaae6d7c0a307ec5aa2bd657c45b]
     defaults:
       run:
         shell: bash
@@ -44,12 +44,13 @@ jobs:
         working-directory: harness
         env:
           APM_INSTALL_FAST_PATH: trace
-          APM_BENCH_PASS_ENV: APM_INSTALL_FAST_PATH
+          APM_BENCH_PASS_ENV: APM_INSTALL_FAST_PATH,APM_RESEARCH_PHASECPU
+          APM_RESEARCH_PHASECPU: "1"
           APM_BENCH_NO_IMPORTTIME: "1"
         run: |
           set -euo pipefail
-          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-noop,install-locked-warm,install-warm,install-frozen-warm --rtt 0 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
-          grep -h "install fast path" "$GITHUB_WORKSPACE"/out/stderr/*.txt | sort | uniq -c
+          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold,install-warm --rtt 30 --runs 3 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
+          for f in "$GITHUB_WORKSPACE"/out/stderr/*.txt; do echo "== $f"; grep -h "phasecpu\|install fast path" "$f"; done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
