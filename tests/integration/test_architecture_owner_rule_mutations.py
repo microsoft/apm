@@ -5575,14 +5575,14 @@ def test_owner_rules_report_nothing_before_mutation(
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/integration/hook_ownership.py",
-            "return delete_emptied_config(json_path, root=root, empty=hook_file_emptied(data, defaults))",
-            "return hook_file_emptied(data, defaults) and not json_path.unlink()",
+            "if delete_emptied_config(json_path, root=root, empty=emptied, require_created=True):",
+            "if emptied and not json_path.unlink():",
             id="hook-cleanup-deletes-an-emptied-file-without-provenance-4867",
         ),
         pytest.param(
             "install-deployment-mcp-ownership-migration",
             "src/apm_cli/integration/hook_integrator.py",
-            "if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root):",
+            "if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root, stats):",
             "if modified and not write_seam.unlink(json_path):",
             id="hook-reconcile-deletes-an-emptied-file-without-provenance-4867",
         ),
