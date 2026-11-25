@@ -145,9 +145,10 @@ Claude projects now get always-on and single-directory instructions through
 Path-scoped instructions (for example `applyTo: "**/*.py"`) stay in
 `.claude/rules/`.
 
-1. Run `apm install`. It removes the `.claude/rules/<name>.md` files APM wrote
-   for always-on and directory instructions. A rule file you edited is kept
-   with a warning; delete it to finish the move.
+1. In a project that compiles, run `apm install`. Once a compiled `AGENTS.md`
+   carries an always-on or directory instruction, it removes the
+   `.claude/rules/<name>.md` file APM wrote for it and names where it moved.
+   A rule file you edited is kept with a warning; delete it to finish the move.
 2. Run `apm compile` (install prints a reminder). It writes the root
    `AGENTS.md`, a `<dir>/AGENTS.md` for each single-directory instruction, and
    a `CLAUDE.md` next to each that contains `@AGENTS.md`.
@@ -175,6 +176,10 @@ A nested `AGENTS.md` loads when Claude opens a file in that folder, not in
 sessions that only run shell commands; put guidance needed there at the root.
 User scope (`apm install -g`) is unchanged: every instruction stays in
 `~/.claude/rules/`. Details: [`apm compile`](../../reference/cli/compile/).
+
+### Projects that never compile
+
+From 0.39, a project that installs without running `apm compile` keeps the 0.37 layout: `apm install` writes always-on and directory instructions to `.claude/rules/`, as before 0.38. If a 0.38 install removed those files, the next `apm install` restores them. Projects that compile keep `AGENTS.md` and its `CLAUDE.md` import. No action is needed either way.
 
 ## Update the APM CLI binary
 

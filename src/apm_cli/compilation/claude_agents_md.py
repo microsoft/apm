@@ -327,8 +327,8 @@ def claude_agents_md_blocker_warning(blocker: str) -> str:
     from ..core.remediation import CLAUDE_AGENTS_MD_BLOCKED
 
     return (
-        f"{CLAUDE_AGENTS_MD_BLOCKED.bind(fix=blocker).sentence()} Until then, always-on "
-        "and directory instructions stay in .claude/rules/."
+        f"{CLAUDE_AGENTS_MD_BLOCKED.bind(fix=blocker).sentence()} Always-on and directory "
+        "instructions stay in .claude/rules/ until a compiled AGENTS.md carries them."
     )
 
 
@@ -528,6 +528,7 @@ class CompiledCoverage:
         self._index: dict[str, list[Path]] | None = None
         self._current: dict[Path, bool] = {}
         self._loads: dict[Path, bool] = {}
+        self._texts: dict[Path, str | None] = {}
 
     def _fingerprint_index(self) -> dict[str, list[Path]]:
         """Map each recorded fingerprint to the compiled files that carry it."""
@@ -560,11 +561,90 @@ class CompiledCoverage:
         wherever the shared optimizer placed the instruction, and its sibling
         ``CLAUDE.md`` must import it (a pre-#3939 compile does not).
         """
+        return self.carrier(apply_to, body) is not None
+
+    def carrier(self, apply_to: object, body: str) -> Path | None:
+        """The compiled ``AGENTS.md`` Claude loads that carries this body, if any (#5343).
+
+        Install writes no ``.claude/rules/`` file for a routed instruction only
+        when one exists, and names it when it retires the rule.
+        """
         files = self._fingerprint_index().get(instruction_fingerprint(apply_to, body), ())
-        return any(
-            self._current.get(agents_md) and self._claude_loads(agents_md.parent)
-            for agents_md in files
+        for agents_md in files:
+            if self._current.get(agents_md) and self._claude_loads(agents_md.parent):
+                return agents_md
+        if not self._current:
+            return self._destination_carrier(apply_to, body)
+        return None
+
+    def _destination_carrier(self, apply_to: object, body: str) -> Path | None:
+        """With no record for this root (a fresh clone), read the destination (#5344).
+
+        The record lives in APM home, so a committed compiled ``AGENTS.md`` is
+        recognized when Claude loads it and it holds the body verbatim, as
+        whole lines under the instruction's own scope section; a body compile
+        rewrote (links) still asks for ``apm compile``.
+        """
+        text = body.replace("\r\n", "\n").strip()
+        prefix = "" if _is_always_on(apply_to) else directory_scope(apply_to)
+        if not text or prefix is None:
+            return None
+        directory = self.project_root / prefix if prefix else self.project_root
+        if directory not in self._texts:
+            self._texts[directory] = _read_text(directory / "AGENTS.md", self.project_root)
+        compiled = self._texts[directory]
+        carries = (
+            compiled is not None
+            and _section_carries_block(compiled, apply_to, text)
+            and self._claude_loads(directory)
         )
+        return directory / "AGENTS.md" if carries else None
+
+
+# The section headings compile's instruction renderer writes (template_builder).
+_SECTION_HEADING = re.compile(r"^## (?:Global Instructions|Files matching `.*`)$")
+
+
+def _section_carries_block(compiled: str, apply_to: object, text: str) -> bool:
+    """Whether *compiled* holds *text* as whole lines under its own scope section.
+
+    The body's lines must appear as one contiguous run of complete lines
+    inside the section compile writes for this ``applyTo`` (``## Global
+    Instructions`` or ``## Files matching `<applyTo>```), bounded as a whole
+    block, so "use tabs" never matches inside "never use tabs", a shortened
+    body never matches a longer stale block, and no other scope counts (#5343).
+    """
+    scope = normalize_apply_to(apply_to, default="")
+    heading = f"## Files matching `{scope}`" if scope else "## Global Instructions"
+    lines = [line.rstrip() for line in compiled.replace("\r\n", "\n").split("\n")]
+    block = [line.rstrip() for line in text.split("\n")]
+    for start, line in enumerate(lines):
+        if line != heading:
+            continue
+        end = next(
+            (i for i in range(start + 1, len(lines)) if _SECTION_HEADING.match(lines[i])),
+            len(lines),
+        )
+        section = lines[start + 1 : end]
+        if any(
+            section[i : i + len(block)] == block and _block_bounded(section, i, i + len(block))
+            for i in range(len(section) - len(block) + 1)
+        ):
+            return True
+    return False
+
+
+def _block_bounded(section: list[str], start: int, end: int) -> bool:
+    """Whether ``section[start:end]`` is a whole emitted block, not part of one.
+
+    Compile separates blocks with a blank line (or a ``Source`` comment), so a
+    shortened body never matches the head or tail of a longer stale one.
+    """
+    before = section[start - 1] if start > 0 else ""
+    after = section[end] if end < len(section) else ""
+    return (not before or before.startswith("<!-- Source:")) and (
+        not after or after.startswith("<!-- End source:")
+    )
 
 
 def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:
@@ -577,6 +657,24 @@ def refresh_compiled_digest(base_dir: Path, agents_md: Path) -> None:
     if isinstance(entry, dict) and digest is not None:
         entry["sha256"] = digest
         write_record(base_dir, files)
+
+
+def compiled_agents_md_may_carry(project_root: Path) -> bool:
+    """Whether a compiled ``AGENTS.md`` may stand in for a Claude rule here (#5343).
+
+    The lockfile records only the rules install wrote, not the ones it left
+    to a carrying ``AGENTS.md``, so a fast path that replays the lock must
+    defer to the full run when APM home records a compile for this root or a
+    root ``AGENTS.md`` or ``CLAUDE.md`` exists.
+    """
+    from ..core.agents_md_compile_record import read_record
+
+    if read_record(project_root):
+        return True
+    return any(
+        (project_root / name).is_symlink() or (project_root / name).exists()
+        for name in ("AGENTS.md", "CLAUDE.md")
+    )
 
 
 def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:

@@ -31,6 +31,7 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 from pathlib import Path
@@ -46,6 +47,7 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
 # Two sibling subdirs under the same upstream repo+ref. Both are
 # present on github/awesome-copilot at the time of writing; if either
@@ -119,6 +121,20 @@ def _create_package_origin(
     commit = _git("rev-parse", "HEAD", cwd=worktree)
     _git("clone", "--bare", str(worktree), str(origin), cwd=root)
     return origin, commit
+
+
+def _deny_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any real network contact: in-process sockets and Git's own transports."""
+
+    def refuse(_sock, address, *_args):
+        if isinstance(address, tuple):
+            raise AssertionError(f"unexpected network connect to {address!r}")
+        return real_connect(_sock, address)
+
+    real_connect = socket.socket.connect
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
 
 
 def _dependency(remote: str, package_path: str) -> DependencyReference:
@@ -214,9 +230,11 @@ def _run_install(
 
 
 @pytest.mark.integration
-def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_path: Path) -> None:
+def test_nested_gitlab_repositories_with_same_group_install_independently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The old key reused repo A's real bare and bytes for repo B."""
-    origin_a, _ = _create_package_origin(
+    origin_a, commit_a = _create_package_origin(
         tmp_path,
         "origin-a",
         {
@@ -224,7 +242,7 @@ def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_pa
             "skills/reuse": ("repo-a-reuse", "reuse-bytes-from-repo-a"),
         },
     )
-    origin_b, _ = _create_package_origin(
+    origin_b, commit_b = _create_package_origin(
         tmp_path,
         "origin-b",
         {"skills/tool": ("repo-b", "bytes-from-repo-b")},
@@ -236,6 +254,7 @@ def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_pa
         dep_a.repo_url: origin_a,
         dep_b.repo_url: origin_b,
     }
+    commit_by_repository = {dep_a.repo_url: commit_a, dep_b.repo_url: commit_b}
     cloned_repositories: list[str] = []
     bare_by_repository: dict[str, Path] = {}
 
@@ -248,8 +267,19 @@ def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_pa
             capture_output=True,
         )
 
+    _deny_network(monkeypatch)
     downloader = GitHubPackageDownloader()
     downloader.persistent_git_cache = None
+
+    def resolve_fixture(dep: DependencyReference) -> ResolvedReference:
+        """Each origin's "main" resolves to that fixture's commit, without network."""
+        return ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit=commit_by_repository[dep.repo_url],
+            ref_name="main",
+        )
+
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     target_a = tmp_path / "installed" / "repo-a"
@@ -259,6 +289,7 @@ def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_pa
     with (
         SharedCloneCache(base_dir=cache_dir) as shared_cache,
         patch.object(downloader, "_bare_clone_with_fallback", side_effect=clone_fixture),
+        patch.object(downloader, "resolve_git_reference", side_effect=resolve_fixture),
     ):
         downloader.shared_clone_cache = shared_cache
         downloader.download_subdirectory_package(dep_a, target_a)
@@ -271,8 +302,9 @@ def test_nested_gitlab_repositories_with_same_group_install_independently(tmp_pa
             encoding="utf-8"
         ) == "reuse-bytes-from-repo-a"
 
-        key_a = (normalize_repo_url(dep_a.to_github_url()), "main")
-        key_b = (normalize_repo_url(dep_b.to_github_url()), "main")
+        # A named ref is fetched by its admitted commit, so it keys the shared clone.
+        key_a = (normalize_repo_url(dep_a.to_github_url()), commit_a)
+        key_b = (normalize_repo_url(dep_b.to_github_url()), commit_b)
         assert set(shared_cache._entries) == {key_a, key_b}
         assert shared_cache._entries[key_a].path != shared_cache._entries[key_b].path
 

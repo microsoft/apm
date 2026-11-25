@@ -57,7 +57,9 @@ class TestActiveTargets:
         except OSError:
             pytest.skip("directory symlinks are unavailable")
 
-        with pytest.raises(PathTraversalError, match="symlinked target root"):
+        with pytest.raises(
+            PathTraversalError, match=r"symlinked path component: \.claude\. Replace"
+        ):
             resolve_targets(self.root, explicit_target="claude")
 
     @pytest.mark.parametrize("linked", [".claude/commands", ".claude/skills"])
@@ -71,7 +73,7 @@ class TestActiveTargets:
         except OSError:
             pytest.skip("directory symlinks are unavailable")
 
-        with pytest.raises(PathTraversalError, match="symlinked target directory"):
+        with pytest.raises(PathTraversalError, match=r"symlinked path component: .+ Replace"):
             resolve_targets(self.root, explicit_target="claude")
 
     def test_only_opencode_returns_opencode(self):

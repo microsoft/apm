@@ -37,7 +37,7 @@ class ApplyRestoreIncomplete(Exception):
 
 
 @contextlib.contextmanager
-def journaled_apply() -> Iterator[DeployJournal]:
+def journaled_apply(contain: Path) -> Iterator[DeployJournal]:
     """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
 
     The caller records each path it creates; every path written at the
@@ -54,11 +54,13 @@ def journaled_apply() -> Iterator[DeployJournal]:
 
     store_parent = get_apm_home() / "install-snapshots"
     journal = DeployJournal(store_parent)
+    # *contain* (the project) bounds the rollback only; nothing is persisted for replay.
+    journal.contain = Path(os.path.abspath(contain))
 
     def seam(path: Path, contents: bool, expected: str | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
-    write_seam.listen(seam, journal.after_write)
+    write_seam.listen(seam, journal.after_write, journal=journal.token)
     try:
         yield journal
     except BaseException as exc:
@@ -306,6 +308,9 @@ def _report_kept_journal(exc: Any, logger: Any) -> None:
     """Name each path of a journal replay kept, and where its copies are."""
     if logger is None:
         return
+    if exc.home is not None:
+        _report_group_writable_home(exc, logger)
+        return
     if exc.applied:
         logger.error("An interrupted install left deployed files that could not all be restored:")
     else:
@@ -318,6 +323,22 @@ def _report_kept_journal(exc: Any, logger: Any) -> None:
     logger.error(
         f"The journal is kept at {exc.store}. Restore or remove the listed paths "
         "by hand, then run the command again."
+    )
+
+
+def _report_group_writable_home(exc: Any, logger: Any) -> None:
+    """Name APM_HOME, its fix and the paths an interrupted install left (#5385)."""
+    logger.warning(
+        f"An interrupted install left deployed files, but APM_HOME ({exc.home}) is group "
+        "writable and its group cannot be shown private to you, so they were not restored:"
+    )
+    for path, _reason in exc.issues:
+        logger.warning(f"  {path}")
+    import shlex
+
+    logger.warning(
+        f"Run 'chmod g-w {shlex.quote(str(exc.home))}', then run the command again; "
+        f"the journal is kept at {exc.store} and is replayed then."
     )
 
 
@@ -545,7 +566,8 @@ class InstallTransaction:
             self._deploy_journal = DeployJournal(
                 store_parent, root=root, workspace=self.apm_modules_dir.parent
             )
-            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)
+            token = self._deploy_journal.token
+            write_seam.listen(self._record_deploy_write, self._seal_deploy_write, journal=token)
 
     def _mark_deploy_commit(self) -> None:
         """Seal the journal and name the staged lockfile it is about to commit."""

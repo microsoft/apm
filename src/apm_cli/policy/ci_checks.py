@@ -985,6 +985,59 @@ def resolve_audit_scope(
     return deployment_root, user_scope, targets
 
 
+def resolve_claim_scope(
+    project_root: Path, lock: LockFile
+) -> tuple[Path, bool, list[TargetProfile]]:
+    """:func:`resolve_audit_scope` with targets that resolve every recorded claim (#5312).
+
+    The one call the frozen install checks share with audit.
+    """
+    deploy_root, user_scope, targets = resolve_audit_scope(project_root, lock)
+    claim_targets = resolve_claim_targets(
+        project_root, lock, user_scope=user_scope, targets=targets
+    )
+    return deploy_root, user_scope, claim_targets
+
+
+def resolve_claim_targets(
+    project_root: Path,
+    lock: LockFile,
+    *,
+    user_scope: bool,
+    targets: Sequence[TargetProfile],
+) -> list[TargetProfile]:
+    """Return the targets whose live roots resolve the lock's recorded claims (#5312).
+
+    At user scope a claim may sit under the relocated root (``CLAUDE_CONFIG_DIR``)
+    of a target the lock recorded but the manifest does not declare, from an
+    ``install -g --target`` deploy. Those targets resolve through the same
+    owner install uses; the audited target set itself is unchanged.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.scope import get_workspace_deploy_root
+    from ..integration.skill_layout import recorded_deployed_paths, resolve_reintegration_targets
+    from ..integration.targets import KNOWN_TARGETS
+
+    audited = {target.name for target in targets}
+    recorded = {
+        record.locator.target
+        for record in DeploymentLedgerCodec.from_lockfile(lock).records.values()
+    }
+    undeclared = sorted(recorded.intersection(KNOWN_TARGETS).difference(audited))
+    if not user_scope or not undeclared:
+        return list(targets)
+    return [
+        *targets,
+        *resolve_reintegration_targets(
+            get_workspace_deploy_root(project_root),
+            user_scope=True,
+            explicit_target=undeclared,
+            recorded_paths=recorded_deployed_paths(lock),
+            create_config=False,
+        ),
+    ]
+
+
 def verify_deployed_file_hashes(
     deploy_root: Path,
     lock: LockFile,
@@ -1525,6 +1578,20 @@ def _check_drift(
 # -- Aggregate runner ----------------------------------------------
 
 
+def _bundle_hook_ownership_result(problems: Sequence[str]) -> CheckResult:
+    """Bundle hook entries APM can no longer attribute are named, never dropped (#5078)."""
+    return CheckResult(
+        name="local-bundle-hooks",
+        passed=False,
+        message=(
+            f"{len(problems)} local bundle hook ownership problem(s); restore each recorded "
+            "entry and ownership record first (uninstall refuses while an edited entry still "
+            "runs the bundle's script), and keep your own changes in a separate hook entry"
+        ),
+        details=list(problems),
+    )
+
+
 def _check_local_bundle_hooks(
     deployment_root: Path,
     lock: LockFile,
@@ -1538,8 +1605,17 @@ def _check_local_bundle_hooks(
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
     from ..install.local_bundle_canvas import unadmitted_bundle_canvas
-    from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
+    from ..install.local_bundle_hook_trust import (
+        bundle_hook_ownership,
+        bundle_hook_recheck_targets,
+        read_bundle_hook_states,
+        unadmitted_bundle_hooks,
+    )
     from ..security.executables import resolve_project_exec_allow_map
+
+    # Hooks a bundle registered for a target the manifest does not name are
+    # re-checked too: every hook target of the scope.
+    targets = bundle_hook_recheck_targets(targets, root=deployment_root, user_scope=user_scope)
 
     def allow_provider():
         return resolve_project_exec_allow_map(
@@ -1550,10 +1626,19 @@ def _check_local_bundle_hooks(
         DeploymentLedgerCodec.from_lockfile(lock)
     )
     try:
-        unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
-        canvas = unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)
+        # Each hook config, sidecar and bundle record is read once per audit (#5211).
+        states = read_bundle_hook_states(deployment_root, targets)
+        problems = bundle_hook_ownership(deployment_root, targets, bundle_paths, states)
+        unadmitted = unadmitted_bundle_hooks(
+            deployment_root, targets, allow_provider, bundle_paths, states
+        )
+        canvas = unadmitted_bundle_canvas(
+            deployment_root, targets, allow_provider, bundle_paths, states.read
+        )
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
+    if problems:
+        return _bundle_hook_ownership_result(problems)
     if not unadmitted and not canvas:
         return CheckResult(
             name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"
@@ -1873,8 +1958,12 @@ def run_baseline_checks(
     if _run(_check_deployment_ledger_owners(lock)):
         return result
 
+    claim_targets = resolve_claim_targets(
+        project_root, lock, user_scope=user_scope, targets=resolved_targets
+    )
+
     # Check 4: Deployed files present
-    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)):
+    if _run(_check_deployed_files_present(deployment_root, lock, claim_targets)):
         return result
 
     # Check 5: No orphaned packages
@@ -1946,7 +2035,7 @@ def run_baseline_checks(
     # Check 8: Content integrity; 8b: local-bundle hooks still admitted (#4027)
     if (
         _run(
-            _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+            _check_content_integrity(deployment_root, lock, claim_targets, user_scope=user_scope)
             if content_integrity
             else CheckResult(name="content-integrity", passed=True, message="proven by the caller")
         )

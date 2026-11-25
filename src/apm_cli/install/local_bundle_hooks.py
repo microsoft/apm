@@ -285,7 +285,9 @@ def _record_per_file_approval(
         if Path(path).suffix == ".json" and Path(path).parent == hooks_dir
     ]
     sidecar = project_root / target.root_dir / _APM_HOOKS_SIDECAR
-    write_per_file_bundle_record(sidecar, slug, approval_key, hook_files)
+    write_per_file_bundle_record(
+        sidecar, slug, approval_key, hook_files, project_root=project_root, user_scope=user_scope
+    )
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:
@@ -300,3 +302,13 @@ def _warn(message: str, slug: str, diagnostics: Any, logger: Any) -> None:
         diagnostics.warn(message=message, package=slug)
     elif logger is not None:
         logger.warning(message)
+
+
+def hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
+    if approval_key is None:
+        return False
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from .local_bundle_handler import bundle_type_denied
+
+    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

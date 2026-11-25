@@ -473,9 +473,8 @@ def test_project_and_global_native_rules_do_not_cross_scope(
         cwd=project.root,
     )
     project_rules = project.root / ".claude" / "rules"
-    # At project scope, always-on instructions load from AGENTS.md (#3939);
-    # user scope (below) keeps native rules.
-    assert not (project_rules / "style.md").exists()
+    # No compiled AGENTS.md carries it yet, so the project keeps the rule (#5343).
+    assert (project_rules / "style.md").is_file()
     for path in project_rules.glob("*.md"):
         path.unlink()
 

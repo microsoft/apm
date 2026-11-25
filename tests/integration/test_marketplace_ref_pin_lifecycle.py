@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.marketplace.models import MarketplaceSource
+from apm_cli.marketplace.source_identity import catalog_pin_identity
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -35,7 +37,15 @@ _PLUGIN = "example-plugin"
 _BROKEN = "broken-plugin"
 _GHOST = "ghost-plugin"
 _FLAGS = ("--target", "codex", "--parallel-downloads", "0")
-_PIN_KEY = f"{_ALIAS}/{_PLUGIN}"
+_CATALOG_PATH = ".claude-plugin/marketplace.json"
+
+
+def _catalog_key(remote: str) -> str:
+    """The pin scope of a catalog: its origin and path, never the alias (#4966)."""
+    return catalog_pin_identity(MarketplaceSource(name=_ALIAS, url=remote, path=_CATALOG_PATH))
+
+
+_PIN_KEY = f"{_catalog_key(_REMOTE)}#{_PLUGIN}"
 
 
 def _evidence(result: CommandResult) -> str:
@@ -182,3 +192,113 @@ def test_mixed_success_marketplace_install_pins_only_the_installed_plugin(
     assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}, _evidence(
         result
     )
+
+
+def _catalog_repository(repositories: LocalGitRepositoryFactory, name: str, remote: str, ref: str):
+    repository = repositories.create(name)
+    packages = LocalPackageFactory(repository.worktree / "plugins")
+    package = packages.create(_PLUGIN, targets=("codex",))
+    packages.add_skill(package, _PLUGIN, f"---\nname: {_PLUGIN}\ndescription: d\n---\nBody\n")
+    (repository.worktree / ".claude-plugin").mkdir()
+    _publish(repositories, repository, remote, ref)
+    return repository
+
+
+def _publish(repositories: LocalGitRepositoryFactory, repository, remote: str, ref: str) -> None:
+    entry = _plugin_entry(_PLUGIN, f"plugins/{_PLUGIN}")
+    entry["source"] = {**entry["source"], "url": remote, "ref": ref}
+    (repository.worktree / _CATALOG_PATH).write_text(
+        json.dumps({"name": "catalog", "owner": {"name": "APM Test"}, "plugins": [entry]}),
+        encoding="utf-8",
+    )
+    commit = repositories.commit(repository, message=f"publish {ref}")
+    if ref != "main":
+        repositories.tag(repository, ref, commit)
+
+
+class _TwoCatalogs:
+    """Two catalogs that list the same plugin and version, and two consumer projects."""
+
+    def __init__(self, tmp_path: Path, apm_binary_path: Path) -> None:
+        isolated = IsolatedApmEnvironment.create(
+            tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+        )
+        self.repositories = LocalGitRepositoryFactory(
+            isolated.repository_root, env=isolated.subprocess_env()
+        )
+        self.remote_b = f"https://{_HOST}/other/catalog"
+        self.catalog = _catalog_repository(self.repositories, "catalog", _REMOTE, "main")
+        self.env = self.repositories.url_rewrite_subprocess_env_many(
+            (
+                (self.catalog, _REMOTE),
+                (
+                    _catalog_repository(self.repositories, "catalog-b", self.remote_b, "v1"),
+                    self.remote_b,
+                ),
+            )
+        )
+        self.pins = isolated.config_root / "cache" / "marketplace" / "version-pins.json"
+        projects = LocalPackageFactory(isolated.work_root)
+        self.first = projects.create("first", targets=("codex",)).root
+        self.second = projects.create("second", targets=("codex",)).root
+        self._runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=300)
+
+    def apm(self, cwd: Path, *args: str, expected: int = 0) -> CommandResult:
+        result = self._runner.run(args, cwd=cwd, env=self.env)
+        _assert_output_oracles(result)
+        assert result.returncode == expected, _evidence(result)
+        return result
+
+    def pinned(self) -> dict[str, str]:
+        return json.loads(self.pins.read_text(encoding="utf-8"))
+
+
+def test_removed_alias_re_added_for_another_catalog_installs_without_its_old_pins(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4966 (1): the catalog an alias names now owns the pins, not the alias."""
+    world = _TwoCatalogs(tmp_path, apm_binary_path)
+    world.apm(world.first, "marketplace", "add", _REMOTE, "--name", _ALIAS, "--ref", "main")
+    world.apm(world.first, "install", f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
+    assert world.pinned() == {_PIN_KEY: "main"}
+
+    world.apm(world.first, "marketplace", "remove", _ALIAS, "--yes")
+    assert world.pinned() == {_PIN_KEY: "main"}
+
+    world.apm(world.second, "marketplace", "add", world.remote_b, "--name", _ALIAS, "--ref", "main")
+    world.apm(world.second, "install", f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
+
+    assert (world.second / ".agents" / "skills" / _PLUGIN / "SKILL.md").is_file()
+    assert world.pinned() == {_PIN_KEY: "main", f"{_catalog_key(world.remote_b)}#{_PLUGIN}": "v1"}
+
+
+def test_removing_and_re_adding_a_catalog_still_refuses_its_changed_ref(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4966 (2): removing a marketplace does not weaken pinning for its catalog."""
+    world = _TwoCatalogs(tmp_path, apm_binary_path)
+    world.apm(world.first, "marketplace", "add", _REMOTE, "--name", _ALIAS, "--ref", "main")
+    world.apm(world.first, "install", f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
+    world.apm(world.first, "marketplace", "remove", _ALIAS, "--yes")
+    _publish(world.repositories, world.catalog, _REMOTE, "v2")
+
+    world.apm(world.second, "marketplace", "add", _REMOTE, "--name", "renamed", "--ref", "main")
+    refused = world.apm(world.second, "install", f"{_PLUGIN}@renamed", *_FLAGS, expected=1)
+
+    assert "ref changed: was 'main', now 'v2'" in refused.stdout + refused.stderr
+    assert world.pinned() == {_PIN_KEY: "main"}
+    assert not (world.second / ".agents" / "skills" / _PLUGIN).exists()
+
+
+def test_a_legacy_alias_pin_migrates_to_its_catalog(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4966 (3): an alias-keyed pin from an older APM keeps guarding the same catalog."""
+    world = _TwoCatalogs(tmp_path, apm_binary_path)
+    world.apm(world.first, "marketplace", "add", _REMOTE, "--name", _ALIAS, "--ref", "main")
+    world.pins.parent.mkdir(parents=True, exist_ok=True)
+    world.pins.write_text(json.dumps({f"{_ALIAS}/{_PLUGIN}": "v0"}), encoding="utf-8")
+
+    refused = world.apm(world.first, "install", f"{_PLUGIN}@{_ALIAS}", *_FLAGS, expected=1)
+    assert "ref changed: was 'v0', now 'main'" in refused.stdout + refused.stderr
+
+    world.apm(world.first, "marketplace", "remove", _ALIAS, "--yes")
+    assert world.pinned() == {_PIN_KEY: "v0"}

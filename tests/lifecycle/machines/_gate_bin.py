@@ -17,8 +17,10 @@ the claude target of the user scope through five gate levels: gate off
 ``denied-executable`` and ``unapproved-exec`` (decisions dropped from
 ``APM_HOME/config.json``). Every resolving install passes ``--trust-bin`` so
 the gate decision alone decides bin/. Every step runs I1-I9; installs and
-updates must leave exactly the model's deployed set, and ``install --mcp``
-leaves bin/ byte-identical (U7). A last segment runs under an org policy that
+updates must leave exactly the model's deployed set, and ``install --mcp``,
+``lock`` and ``compile`` leave bin/ byte-identical at every level (U7). Each
+level also runs update, approve or deny, and uninstall where they change what
+the gate decides (#4095 lane T-1). A last segment runs under an org policy that
 denies the plugin: a user-scope command discovers no org policy (#3703), so the
 steps that should retire or refuse bin/ are strict known cells (``KNOWN_DD``),
 and the other steps there are checked but credit no denied-dependency cell (the
@@ -258,21 +260,40 @@ def replay_bin(machine: GateBin) -> None:
     machine.run("update", "update", "--yes")
     machine.run("uninstall", "uninstall", SPEC)
     machine.run("install", *install, SPEC)
-    # approve under the open gate, then the manifest opts in (allowed).
+    # approve under the open gate, then the manifest opts in (allowed): read-only
+    # commands keep bin/, update keeps it, uninstall removes it and install redeploys it.
     machine.run("approve", "approve", SPEC)
     machine.gate_on()
     machine.run("mcp-install", *mcp)
-    # revoked-after-deploy: install --mcp keeps bin/ (U7); install retires it.
+    _keeping_bin(machine)
+    machine.run("update", "update", "--yes")
+    machine.run("uninstall", "uninstall", SPEC)
+    machine.run("install", *install, SPEC)
+    # revoked-after-deploy: install --mcp, lock and compile keep bin/ (U7); install
+    # retires it. Approved again and redeployed, the next deny is retired by update.
     machine.run("deny", "deny", SPEC)
     machine.run("mcp-install", *mcp)
+    _keeping_bin(machine)
     machine.run("install", *install)
+    machine.run("approve", "approve", SPEC)
+    machine.run("install", *install)
+    machine.run("deny", "deny", SPEC)
+    machine.run("update", "update", "--yes")
     machine.run("uninstall", "uninstall", SPEC)
-    # denied-executable: denied before any deploy.
+    # denied-executable: denied before any deploy; nothing deploys bin/, a repeated
+    # deny changes nothing, and uninstall then install again keep it out.
     machine.run("install", *install, SPEC)
     machine.run("mcp-install", *mcp)
+    _keeping_bin(machine)
+    machine.run("update", "update", "--yes")
+    machine.run("deny", "deny", SPEC)
+    machine.run("uninstall", "uninstall", SPEC)
+    machine.run("install", *install, SPEC)
     # unapproved-exec: the decision is gone.
     machine.revoke()
     machine.run("mcp-install", *mcp)
+    _keeping_bin(machine)
+    machine.run("update", "update", "--yes")
     machine.run("install", *install)
     machine.run("uninstall", "uninstall", SPEC)
     # denied-dependency: the org denies the plugin; user scope never sees it (#3703).
@@ -289,6 +310,12 @@ def replay_bin(machine: GateBin) -> None:
     machine.run("update", "update", "--yes")
     machine.run("install-frozen", *install, "--frozen")
     machine.run("uninstall", "uninstall", SPEC)
+
+
+def _keeping_bin(machine: GateBin) -> None:
+    """lock and compile resolve nothing: bin/ stays byte-identical at the current level."""
+    machine.run("lock", "lock")
+    machine.run("compile", "compile")
 
 
 def bin_cells() -> frozenset[str]:

@@ -209,6 +209,27 @@ def _project_compile_hint(target_names: list[str], families: frozenset[str], ver
     return f"Instructions {verb} for {targets}. {advice}"
 
 
+def _report_rules_moved_to_agents_md(ctx: InstallContext) -> None:
+    """Name each Claude rule this install retired because AGENTS.md now carries it (#5343)."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+    from apm_cli.utils.paths import portable_relpath
+
+    integrator = (getattr(ctx, "integrators", None) or {}).get("instruction")
+    carried = getattr(integrator, "agents_md_carried", None)
+    if not isinstance(carried, dict) or ctx.dry_run or not ctx.logger:
+        return
+    root = Path(ctx.project_root)
+    for rule, agents_md in sorted(carried.items()):
+        if rule.exists():
+            continue  # kept (edited by hand or not owned): nothing moved
+        ctx.logger.info(
+            f"Retired {printable_ascii_text(portable_relpath(rule, root))}: "
+            f"{printable_ascii_text(portable_relpath(agents_md, root))} now carries it "
+            "for Claude Code.",
+            symbol="info",
+        )
+
+
 def _hint_project_compile_needed(ctx: InstallContext) -> None:
     """Hint to run ``apm compile`` after installing packages with compile-only instructions.
 
@@ -385,6 +406,7 @@ def run(ctx: InstallContext) -> InstallResult:
     if ctx.scope is InstallScope.USER:
         _hint_global_root_context(ctx)
     elif ctx.scope is InstallScope.PROJECT:
+        _report_rules_moved_to_agents_md(ctx)
         _hint_project_compile_needed(ctx)
 
     _report_kept_overwrites(ctx)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -14,24 +15,77 @@ from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     has_symlink_component,
+    open_regular_file,
     validate_path_segments,
 )
 
 
-def read_hook_object(path: Path) -> dict[str, Any]:
-    """Read an optional native hook document without changing its contents."""
-    if not path.exists():
+def read_hook_object(path: Path, *, regular_only: bool = False) -> dict[str, Any]:
+    """Read an optional native hook document without changing its contents.
+
+    With *regular_only* (an APM-owned sidecar) the file is opened without
+    following a link and read only if it is a regular file (#5328): a link,
+    FIFO, socket or device raises ``OSError`` instead of being read or blocking.
+    """
+    if regular_only:
+        # Always through the safe opener: no exists-then-read window (#5328).
+        try:
+            with open_regular_file(path) as handle:
+                text = handle.read().decode("utf-8")
+        except FileNotFoundError:
+            return {}
+    elif not path.exists():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        text = path.read_text(encoding="utf-8")
+    data = json.loads(text)
     if not isinstance(data, dict):
         raise TypeError("native hook document must contain an object")
     return data
 
 
+def require_hook_event_lists(
+    hooks: dict, events, path: Path, project_root: Path, user_scope: bool = False
+) -> None:
+    """Ensure the merge target event, and every alias it clears, is a list (#5137).
+
+    The first of *events* is created when missing; a present event (or alias
+    spelling) that is not a list raises a ``ValueError`` naming the file and
+    that event, with the scope's remedy.
+    """
+    hooks.setdefault(events[0], [])
+    for event in events:
+        if event in hooks and not isinstance(hooks[event], list):
+            raise ValueError(malformed_hook_event(path, project_root, event, user_scope))
+
+
+def malformed_hook_event(
+    path: Path, project_root: Path, event: str, user_scope: bool = False
+) -> str:
+    """Name a hook event in a deployed config that is not a list of entries (#5137)."""
+    from apm_cli.core.remediation import HOOK_EVENT_MALFORMED
+    from apm_cli.utils.diagnostics import printable_ascii_text
+    from apm_cli.utils.paths import portable_relpath
+
+    try:
+        shown = portable_relpath(path, project_root)
+    except ValueError:
+        shown = path.as_posix()
+    remedy = (
+        HOOK_EVENT_MALFORMED.with_command("apm install -g") if user_scope else HOOK_EVENT_MALFORMED
+    )
+    # The event name comes from package and user files: never print control bytes.
+    return (
+        f"{printable_ascii_text(shown)}: hook event '{printable_ascii_text(event)}' is not a "
+        f"list of hook entries. {remedy.sentence()}"
+    )
+
+
 def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     """Restore sidecar ownership markers onto matching in-memory entries."""
     for event_name, sidecar_entries in sidecar_data.items():
-        if event_name not in hooks or not isinstance(sidecar_entries, list):
+        if not isinstance(sidecar_entries, list) or not isinstance(hooks.get(event_name), list):
+            # A missing or malformed event on disk holds no entry to mark (#5137).
             continue
         pool: dict[str, deque[str]] = {}
         for sidecar_entry in sidecar_entries:
@@ -100,6 +154,40 @@ def drop_source_entries(
             hooks[event_name] = kept
         else:
             del hooks[event_name]
+
+
+def _owned_entry(entry: Any) -> bool:
+    return isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+
+
+def _slot_sorted(items: list, owned: Callable[[Any], bool], key: Callable[[Any], str]) -> list:
+    """*items* with the owned ones stably sorted by *key* inside the slots they hold."""
+    ranked = iter(sorted((item for item in items if owned(item)), key=key))
+    return [next(ranked) if owned(item) else item for item in items]
+
+
+def canonical_hook_order(hooks: dict) -> None:
+    """Give APM's merged hook entries one order, whatever order packages were added (#5285).
+
+    In every event, APM-owned entries are stably sorted by ``_apm_source``
+    inside the slots they already hold, and events holding only APM entries
+    are sorted by name inside their key slots. User entries and events never
+    move, so a single, incremental, full or update install writes the same
+    bytes for the same set of packages.
+    """
+    for event_name, entries in hooks.items():
+        if isinstance(entries, list):
+            hooks[event_name] = _slot_sorted(entries, _owned_entry, lambda e: e["_apm_source"])
+
+    def apm_only(event_name: str) -> bool:
+        entries = hooks[event_name]
+        return isinstance(entries, list) and bool(entries) and all(map(_owned_entry, entries))
+
+    order = _slot_sorted(list(hooks), apm_only, str)
+    if order != list(hooks):
+        reordered = {name: hooks[name] for name in order}
+        hooks.clear()
+        hooks.update(reordered)
 
 
 def drop_dependency_owned_entries(hooks: dict) -> bool:
@@ -288,7 +376,7 @@ def apm_owned_hook_entry_pointers(config_path: Path, event_container_key: str) -
     """
     try:
         config = read_hook_object(config_path)
-        sidecar = read_hook_object(config_path.parent / "apm-hooks.json")
+        sidecar = read_hook_object(config_path.parent / "apm-hooks.json", regular_only=True)
     except (OSError, ValueError, TypeError):
         return frozenset()
     container = config.get(event_container_key)
@@ -372,6 +460,129 @@ def dependency_hook_source_marker(dependency_ref) -> str:
         modules_root = Path("apm_modules")
         return dependency_ref.get_install_path(modules_root).relative_to(modules_root).as_posix()
     return dependency_ref.get_canonical_dependency_string()
+
+
+def verified_apm_hook_files(project_root: Path, lock) -> frozenset[str]:
+    """Return the merged hook configs and sidecars APM provably owns (#5277).
+
+    ``unmanaged_files`` counts these as managed. Its guarantee is
+    attestation by committed records: a committer who can forge the lock or
+    the apm.yml approval can already add a ``deployed_files`` row, so content
+    is not re-bound here. A config and its ``apm-hooks.json`` sidecar count
+    only while ownership verifies:
+
+    - both are regular files reached through no link (a FIFO never blocks);
+    - both parse as strict JSON objects;
+    - every sidecar entry's ``_apm_source`` names a dependency *lock*
+      records, or a local bundle whose exact approval key apm.yml grants
+      ``hooks: true`` (and does not deny);
+    - each event of the config's hooks container holds exactly the sidecar's
+      entries, and no event the sidecar lacks (a user-authored hook leaves the
+      shared file unmanaged).
+
+    Keys outside the hooks container (a merged ``settings.json`` holds other
+    settings) are covered at file granularity. Anything else stays unmanaged
+    (fail closed).
+    """
+    from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    try:
+        sources = {
+            dependency_hook_source_marker(locked.to_dependency_ref())
+            for locked in lock.get_all_dependencies()
+        }
+        approved = _approved_bundle_hook_keys(project_root)
+    except (AttributeError, OSError, TypeError, ValueError, KeyError):
+        return frozenset()
+    managed: set[str] = set()
+    specs = merge_hook_config_projection_specs(list(KNOWN_TARGETS.values()))
+    for config_rel, (sidecar_rel, container_key) in specs.items():
+        if _hook_ownership_verifies(
+            project_root, config_rel, sidecar_rel, container_key, (sources, approved)
+        ):
+            managed.update((config_rel, sidecar_rel))
+    return frozenset(managed)
+
+
+def _approved_bundle_hook_keys(project_root: Path) -> frozenset[str]:
+    """Approval keys the committed apm.yml grants ``hooks: true`` and does not deny."""
+    from yaml import YAMLError
+
+    from apm_cli.security.executables import package_type_approved, parse_project_executables
+    from apm_cli.utils.yaml_io import load_yaml
+
+    path = manifest_file(project_root)
+    try:
+        data = load_yaml(path) if path.is_file() else None
+    except YAMLError:
+        return frozenset()
+    if not isinstance(data, dict):
+        return frozenset()
+    allow, deny, _alias = parse_project_executables(data)
+    return frozenset(
+        key
+        for key in allow
+        if package_type_approved(allow, (key,), "hooks")
+        and not package_type_approved(deny, (key,), "hooks")
+    )
+
+
+def _strict_object(project_root: Path, path: Path) -> dict[str, Any]:
+    """Parse *path* only as a regular file reached through no link; a FIFO never blocks."""
+    if has_symlink_component(project_root, path):
+        raise ValueError(f"linked hook file: {path.name}")
+    with open_regular_file(path) as handle:
+        raw = handle.read()
+    data = json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_non_json_constant,
+    )
+    if not isinstance(data, dict):
+        raise ValueError(f"not a JSON object: {path.name}")
+    return data
+
+
+def _content_key(entry: dict[str, Any]) -> str:
+    return json.dumps({k: v for k, v in entry.items() if k != "_apm_source"}, sort_keys=True)
+
+
+def _owned_by(entry: object, attesting: tuple[set[str], frozenset[str]]) -> bool:
+    """Whether *entry*'s marker names a locked dependency or an approved local bundle."""
+    sources, approved = attesting
+    marker = entry.get("_apm_source") if isinstance(entry, dict) else None
+    parsed = parse_local_bundle_hook_source(marker)
+    if parsed is not None:
+        return bool(parsed[0]) and parsed[1] is not None and parsed[1] in approved
+    return isinstance(marker, str) and marker in sources
+
+
+def _hook_ownership_verifies(
+    project_root: Path,
+    config_rel: str,
+    sidecar_rel: str,
+    container_key: str,
+    attesting: tuple[set[str], frozenset[str]],
+) -> bool:
+    try:
+        sidecar = _strict_object(project_root, project_root / sidecar_rel)
+        container = _strict_object(project_root, project_root / config_rel).get(container_key)
+    except (OSError, ValueError):
+        return False
+    if not sidecar or not isinstance(container, dict) or set(container) - set(sidecar):
+        return False
+    for event_name, owned in sidecar.items():
+        on_disk = container.get(event_name)
+        if not isinstance(owned, list) or not owned or not isinstance(on_disk, list):
+            return False
+        if not all(_owned_by(entry, attesting) for entry in owned):
+            return False
+        if not all(isinstance(entry, dict) for entry in on_disk):
+            return False
+        if Counter(map(_content_key, on_disk)) != Counter(map(_content_key, owned)):
+            return False
+    return True
 
 
 def lockfile_dependency_identities(
@@ -593,39 +804,65 @@ def legacy_source_marker_is_unambiguous(
 # deploys are recorded beside its hooks, with the same marker.
 PER_FILE_BUNDLE_RECORDS = "local-bundle-hooks"
 _RECORD_HOOK_FILES = "hook_files"
+_RECORD_FILE_HASHES = "file_hashes"
 BUNDLE_RECORD_HOOKS = "hooks"
 BUNDLE_RECORD_CANVAS = "canvas"
+# Bundle Markdown with frontmatter hooks is recorded in its own committed file
+# at the target root: a merged hook sidecar is rebuilt from config entries.
+BUNDLE_RECORD_MARKDOWN = "markdown"
+BUNDLE_MARKDOWN_RECORD_FILE = "apm-bundle-markdown-hooks.json"
 _RECORD_KINDS = {
     BUNDLE_RECORD_HOOKS: (PER_FILE_BUNDLE_RECORDS, _RECORD_HOOK_FILES),
     BUNDLE_RECORD_CANVAS: ("local-bundle-canvas", "canvas_files"),
+    BUNDLE_RECORD_MARKDOWN: ("local-bundle-markdown-hooks", "markdown_files"),
 }
 
 
 def per_file_bundle_records(
-    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
+    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS, read=read_hook_object
 ) -> list[dict[str, Any]]:
-    """Return the local-bundle approval records of *kind* a target sidecar holds."""
-    data = read_hook_object(sidecar_path)
+    """Return the local-bundle approval records of *kind* a target sidecar holds.
+
+    *read* reads the sidecar; an audit passes one that reads each file once (#5211).
+    """
+    data = read(sidecar_path, regular_only=True)  # APM's own record (#5328)
     records = data.get(_RECORD_KINDS[kind][0], [])
     if not isinstance(records, list):
         raise TypeError(f"local-bundle {kind} records must be a list")
     return [record for record in records if isinstance(record, dict)]
 
 
-def per_file_bundle_hook_keys(
+def per_file_bundle_file_hashes(
     sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS
+) -> dict[str, dict[str, str]]:
+    """Return ``slug -> {file: content hash}`` the *kind* records of a sidecar bind."""
+    found: dict[str, dict[str, str]] = {}
+    for record in per_file_bundle_records(sidecar_path, kind):
+        parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
+        hashes = record.get(_RECORD_FILE_HASHES)
+        if parsed is not None and isinstance(hashes, dict):
+            found[parsed[0]] = {str(k): str(v) for k, v in hashes.items()}
+    return found
+
+
+def per_file_bundle_hook_keys(
+    sidecar_path: Path, kind: str = BUNDLE_RECORD_HOOKS, read=read_hook_object
 ) -> dict[str, tuple[str | None, list[str]]]:
-    """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar."""
+    """Return ``slug -> (approval_key, files)`` for the *kind* records of a sidecar.
+
+    Raises:
+        TypeError: A bundle's record lists its files as anything but a list of
+            paths: a corrupted record is never read as "no files" (#5144).
+    """
     files_key = _RECORD_KINDS[kind][1]
     found: dict[str, tuple[str | None, list[str]]] = {}
-    for record in per_file_bundle_records(sidecar_path, kind):
+    for record in per_file_bundle_records(sidecar_path, kind, read):
         parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
         files = record.get(files_key)
         if parsed is not None:
-            found[parsed[0]] = (
-                parsed[1],
-                [str(item) for item in files] if isinstance(files, list) else [],
-            )
+            if not isinstance(files, list) or not all(isinstance(item, str) for item in files):
+                raise TypeError(f"local-bundle {kind} record {files_key} must be a list of paths")
+            found[parsed[0]] = (parsed[1], list(files))
     return found
 
 
@@ -635,29 +872,42 @@ def write_per_file_bundle_record(
     approval_key: str | None,
     hook_files: list[str],
     kind: str = BUNDLE_RECORD_HOOKS,
+    project_root: Path | None = None,
+    user_scope: bool = False,
+    file_hashes: dict[str, str] | None = None,
 ) -> None:
-    """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record."""
+    """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record.
+
+    The sidecar is written through :func:`write_hook_sidecar` (#5039);
+    *project_root* marks an install write, as there. *file_hashes* binds each
+    file to the content the key admitted (#5254).
+    """
     records_key, files_key = _RECORD_KINDS[kind]
+    # A linked sidecar is no APM record (#5328): it is replaced, never read through.
+    existing = sidecar_path.exists() and not sidecar_path.is_symlink()
     kept = [
         record
-        for record in (per_file_bundle_records(sidecar_path, kind) if sidecar_path.exists() else [])
+        for record in (per_file_bundle_records(sidecar_path, kind) if existing else [])
         if record.get("_apm_source") not in LocalBundleMarkers(bundle_id)
     ]
     if hook_files:
-        kept.append(
-            {
-                "_apm_source": local_bundle_hook_source_marker(bundle_id, approval_key),
-                files_key: sorted(hook_files),
+        record: dict[str, Any] = {
+            "_apm_source": local_bundle_hook_source_marker(bundle_id, approval_key),
+            files_key: sorted(hook_files),
+        }
+        if file_hashes:
+            record[_RECORD_FILE_HASHES] = {
+                path: file_hashes[path] for path in sorted(hook_files) if path in file_hashes
             }
-        )
-    data = read_hook_object(sidecar_path) if sidecar_path.exists() else {}
+        kept.append(record)
+    data = read_hook_object(sidecar_path, regular_only=True) if existing else {}
     if kept:
         data[records_key] = kept
     else:
         data.pop(records_key, None)
     if data:
         write_seam.mkdir(sidecar_path.parent, parents=True, exist_ok=True)
-        write_seam.write_text(sidecar_path, json.dumps(data, indent=2) + "\n")
+        write_hook_sidecar(sidecar_path, data, project_root, user_scope)
     elif sidecar_path.exists():
         remove_hook_sidecar(sidecar_path)
 

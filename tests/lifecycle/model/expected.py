@@ -34,6 +34,12 @@ def exit_contract(command: str) -> frozenset[int]:
     return EXIT_CONTRACTS.get(command, DEFAULT_EXIT_CONTRACT)
 
 
+# Primitive kinds only some targets can carry. bin/ deploys only for a Claude target:
+# loose bin/ through exec_gate.plugin_bin_deployable (target.name == "claude"), a whole
+# plugin under .agents/plugins enabled for Claude Code (claude_plugins/admission.py).
+KIND_TARGETS: Mapping[str, frozenset[str]] = {"bin": frozenset({"claude"})}
+
+
 def expected_deployed(
     model: ModelState, kinds: Mapping[str, Collection[str]]
 ) -> frozenset[tuple[str, str, str]]:
@@ -46,6 +52,7 @@ def expected_deployed(
         if kind in UNGATED_KINDS
         or (model.gate(package, kind) in ("allowed", "none") and not model.org_denies(kind))
         for target in model.targets
+        if target in KIND_TARGETS.get(kind, (target,))
     )
 
 

@@ -12,7 +12,8 @@ Ports four of the canonical owner decisions in
 * ``transport-platform-url-path-security`` -- ``utils/path_security.py`` owns
   symlink-component containment, filesystem-aware (case-insensitive) path
   containment and strict percent-encoded URL-path decoding (legacy
-  symlink-component guard + AC10a).
+  symlink-component guard + AC10a). The uninstall in-use hook cwd check
+  (``install/local_bundle_hook_cwd.py``) decides containment through it (#5310).
 * ``transport-platform-windows-stable-path`` -- ``install.ps1`` owns the
   Windows ``current/apm.exe`` stable path (legacy AC8 /
   check_windows_stable_path_owner).
@@ -1725,10 +1726,22 @@ _RID_URL_PATH = "transport-platform-url-path-security"
 _PATH_SECURITY_OWNER = "src/apm_cli/utils/path_security.py"
 
 
-_SYMLINK_DEF = re.compile(r"^def has_symlink_component\(")
+_SYMLINK_DEF = re.compile(r"^def (has_symlink_component|first_symlink_component)\(")
 
 
 _UNQUOTE = re.compile(r"unquote(_to_bytes)?\(")
+
+
+# The bundle-script-in-use check resolves a hook handler's cwd through
+# ensure_path_within; neither module may compute containment itself (#5310).
+_HOOK_CWD_CONTAINMENT = "src/apm_cli/install/local_bundle_hook_cwd.py"
+_HOOK_CWD_CONSUMER = "src/apm_cli/install/local_bundle_hook_trust.py"
+_NO_LOCAL_CONTAINMENT: tuple[tuple[str, str, int, str], ...] = (
+    ("sub", "realpath(", 0, "eq"),
+    ("sub", ".resolve(", 0, "eq"),
+    ("sub", "samefile(", 0, "eq"),
+    ("sub", "commonpath(", 0, "eq"),
+)
 
 
 _URL_PATH_DECODER_CONSUMERS: tuple[str, ...] = (
@@ -1771,6 +1784,38 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
         )
     )
 
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _HOOK_CWD_CONTAINMENT,
+            (("sub", "ensure_path_within(spelled, root)", 1, "eq"), *_NO_LOCAL_CONTAINMENT),
+            "The hook cwd in-use check must decide link containment through "
+            "utils/path_security.ensure_path_within",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _HOOK_CWD_CONSUMER,
+            (("sub", "runs_through_cwd(document, project_root, scripts)", 1, "eq"),),
+            "The bundle in-use check must resolve a hook cwd through install/local_bundle_hook_cwd.py",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _HOOK_CWD_CONSUMER,
+            _NO_LOCAL_CONTAINMENT,
+            "The bundle in-use check must not compute path containment itself",
+        )
+    )
+
     # Symlink-component containment: owner defines it exactly once, no duplicates.
     findings.extend(
         _count_checks(
@@ -1778,8 +1823,22 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             inv,
             _RID_URL_PATH,
             _PATH_SECURITY_OWNER,
-            (("re", r"^def has_symlink_component\(", 1, "eq"),),
-            "has_symlink_component must be owned by utils/path_security.py",
+            (
+                ("re", r"^def has_symlink_component\(", 1, "eq"),
+                ("re", r"^def first_symlink_component\(", 1, "eq"),
+            ),
+            "has_symlink_component and first_symlink_component must be owned by "
+            "utils/path_security.py",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_URL_PATH,
+            _PATH_SECURITY_OWNER,
+            ("return first_symlink_component(base_dir, path) is not None",),
+            "has_symlink_component must decide through first_symlink_component",
         )
     )
     findings.extend(

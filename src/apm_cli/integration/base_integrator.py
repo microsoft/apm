@@ -22,7 +22,8 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
-from apm_cli.utils.paths import stored_alias
+from apm_cli.utils.paths import is_within, relative_to, stored_alias
+from apm_cli.utils.realpath import resolve_path
 
 if TYPE_CHECKING:
     from apm_cli.core.deployment_ledger import OverwriteGate
@@ -290,6 +291,10 @@ class BaseIntegrator:
     # it out of a hardcoded literal buried inside the predicate.
     _LF_NORMALIZED_DEPLOY = False
 
+    # How a path two packages deploy is settled, as this integrator applies it.
+    # ``None`` = not declared: a caller predicting the final writer refuses.
+    SHARED_PATH_RULE: str | None = None
+
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
 
@@ -310,12 +315,13 @@ class BaseIntegrator:
         """Keep only files admitted by the canonical deployment source plan."""
         if source_plan is None:
             return files
-        from apm_cli.utils.paths import portable_relpath
+        from apm_cli.utils.paths import portable_relpaths
 
+        relatives = portable_relpaths(files, source_plan.source_root)
         return [
             path
-            for path in files
-            if source_plan.includes(portable_relpath(path, source_plan.source_root))
+            for path, relative in zip(files, relatives, strict=True)
+            if source_plan.includes(relative)
         ]
 
     # ------------------------------------------------------------------
@@ -563,7 +569,7 @@ class BaseIntegrator:
         for directory, filenames in self.admitted_source_listing(source, ignore):
             for name in filenames:
                 source_file = Path(directory) / name
-                target_file = destination / source_file.relative_to(source)
+                target_file = destination / relative_to(source_file, source)
                 if has_symlink_component(destination.parent, target_file, raise_on_error=True):
                     raise PathTraversalError(
                         f"Skill destination {target_file} contains a symlink -- refusing to deploy"
@@ -1131,9 +1137,9 @@ class BaseIntegrator:
         try:
             if has_symlink_component(project_root, target.parent):
                 return False
-            root = resolved_project_root or project_root.resolve()
+            root = resolved_project_root or resolve_path(project_root)
             containment_target = target.parent if allow_final_symlink else target
-            if not containment_target.resolve().is_relative_to(root):
+            if not is_within(resolve_path(containment_target), root):
                 return False
         except (ValueError, OSError):
             return False
@@ -1392,8 +1398,8 @@ class BaseIntegrator:
         as ``HookIntegrator._is_root_local_package``).
         """
         try:
-            resolved_install = Path(package_info.install_path).resolve()
-            if resolved_install == Path(project_root).resolve():
+            resolved_install = resolve_path(Path(package_info.install_path))
+            if resolved_install == resolve_path(Path(project_root)):
                 return True
             root_local = getattr(package_info, "root_local_project_root", None)
             if root_local is not None:
@@ -1404,6 +1410,8 @@ class BaseIntegrator:
 
     def init_link_resolver(self, package_info, project_root: Path) -> None:
         """Initialise and register the link resolver for a package."""
+        from apm_cli.utils.realpath import resolve_path
+
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
             install_path = Path(package_info.install_path)
@@ -1422,7 +1430,7 @@ class BaseIntegrator:
             #   Generic patterns like ``**/*.instructions.md`` would
             #   otherwise traverse every file in the repo even when
             #   the user only has a handful of primitives under .apm/.
-            if install_path.resolve() == home_root.resolve():
+            if resolve_path(install_path) == resolve_path(home_root):
                 home_apm_root = install_path / ".apm"
                 scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
                 narrowed_local = False
@@ -1451,7 +1459,7 @@ class BaseIntegrator:
             # .apm/ and .github/. Skip only when scan_root was narrowed
             # to ~/.apm/ (user-scope $HOME) so we do not let asset links
             # escape the .apm/ boundary on $HOME packages.
-            if install_path.resolve() != home_root.resolve() and install_path.is_dir():
+            if resolve_path(install_path) != resolve_path(home_root) and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
                     self.link_resolver.deployment_package_root = Path(
@@ -1600,6 +1608,8 @@ class BaseIntegrator:
         Returns:
             De-duplicated list of matching ``Path`` objects.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         results: list[Path] = []
         seen: set = set()
 
@@ -1628,7 +1638,7 @@ class BaseIntegrator:
                         continue
                 except OSError:
                     continue
-                resolved = f.resolve()
+                resolved = resolve_path(f)
                 # Defense-in-depth containment guard: skip files whose
                 # resolved path escapes the package root.  Belt-and-
                 # suspenders against any future regression in the
@@ -1636,8 +1646,8 @@ class BaseIntegrator:
                 # for the canonical predicate; we inline the check here to stay
                 # loop-fast and avoid raising on every malicious entry.
                 try:
-                    pkg_resolved = package_path.resolve()
-                    if not resolved.is_relative_to(pkg_resolved):
+                    pkg_resolved = resolve_path(package_path)
+                    if not is_within(resolved, pkg_resolved):
                         continue
                 except (ValueError, OSError):
                     continue

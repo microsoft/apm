@@ -9,12 +9,15 @@ on one lockfile row per anchored directory.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
+from typing import TypeVar
 
 from ..models.dependency.reference import DependencyReference
 from ..utils.paths import portable_relpath
+
+_T = TypeVar("_T")
 
 
 def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
@@ -78,3 +81,45 @@ def transitive_local_identity(
         declaring_parent=declaring_parent,
         anchored_local_path=portable_anchor_identity(anchored, root),
     )
+
+
+def recorded_declaring_edge(first: _T, ranked: _T, local_path: Callable[[_T], str | None]) -> _T:
+    """The declaring edge a local diamond node records: the one rule (#5386).
+
+    *first* is the shallowest edge the walk met, *ranked* the recorded parent's
+    (nearest, lowest key: the parent ``resolved_by`` names). The node takes the
+    ranked parent's edge, so ``resolved_by`` and ``declaring_parent`` name one
+    parent whatever the manifest order. An edge that names another package
+    directory than the first edge (an alias spelling) keeps the first edge:
+    install has already copied the package to the first edge's slot. Install,
+    ``apm prune`` and ``apm uninstall`` all record a diamond through this rule.
+    """
+    first_path, ranked_path = local_path(first), local_path(ranked)
+    if first_path and ranked_path and Path(first_path).name == Path(ranked_path).name:
+        return ranked
+    return first
+
+
+def with_declaring_edge(
+    node_ref: DependencyReference, edge_ref: DependencyReference
+) -> DependencyReference:
+    """*node_ref* (its first edge) carrying *edge_ref*, its recorded parent's edge,
+    when :func:`recorded_declaring_edge` picks that edge.
+
+    The anchored directory, and so the node identity, is the same for every such edge.
+    """
+    if (
+        not node_ref.is_local
+        or not edge_ref.declaring_parent
+        or node_ref.anchored_local_path != edge_ref.anchored_local_path
+        or recorded_declaring_edge(node_ref, edge_ref, lambda ref: ref.local_path) is node_ref
+    ):
+        return node_ref
+    reparented = replace(
+        node_ref, declaring_parent=edge_ref.declaring_parent, local_path=edge_ref.local_path
+    )
+    # Keep the non-field state download callbacks annotate (``resolved_reference``).
+    for name, value in vars(node_ref).items():
+        if name not in vars(reparented):
+            setattr(reparented, name, value)
+    return reparented

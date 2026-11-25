@@ -44,12 +44,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
 from apm_cli.install import journal_modes as _modes
+from apm_cli.install.deploy_replay_state import _holds_apm_state
 from apm_cli.install.deploy_state import ABSENT as _ABSENT
-from apm_cli.install.deploy_state import OTHER as _OTHER
-from apm_cli.install.deploy_state import ensure_listable as _ensure_listable
 from apm_cli.install.deploy_state import entry_state as _entry
 from apm_cli.install.deploy_state import path_state as _state
 from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
+from apm_cli.install.deploy_state import valid_state as _valid_state
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
@@ -119,9 +119,12 @@ class DeployJournal:
         # With a deploy root every unit is also written to the store's
         # manifest, so the next install can replay a journal a kill abandoned.
         self.root = Path(os.path.abspath(root)) if root is not None else None
+        self.contain = self.root  # rollback-only containment; a fast apply sets its project
         # The metadata workspace (lockfile directory) whose ledger vouches for it.
         self.workspace = Path(os.path.abspath(workspace or root or store_parent))
         self.store: Path | None = None
+        # Names this journal in the config file records' first-touch digests (#5051).
+        self.token = secrets.token_hex(16)
         self._units: list[_Unit] = []
         self._recorded: dict[Path, int] = {}
         self._lock = threading.Lock()
@@ -137,7 +140,7 @@ class DeployJournal:
 
     def _store(self) -> Path:
         if self.store is None:
-            self.store_parent.mkdir(parents=True, exist_ok=True)
+            _modes.private_dir(self.store_parent)
             self.store = Path(tempfile.mkdtemp(prefix=_STORE_PREFIX, dir=self.store_parent))
             if self.root is not None:
                 header = {
@@ -145,6 +148,7 @@ class DeployJournal:
                     "version": _VERSION,
                     "root": str(self.root),
                     "workspace": str(self.workspace),
+                    "token": self.token,
                 }
                 self._append_line(header)
         return self.store
@@ -152,8 +156,7 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        with open(self.store / _MANIFEST, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, sort_keys=True) + "\n")
+        _modes.append_held(self, self.store / _MANIFEST, json.dumps(line, sort_keys=True) + "\n")
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -283,16 +286,28 @@ class DeployJournal:
         with self._lock:
             units = list(reversed(self._units))
         for unit in units:
+            if self._crosses_link(unit.path):
+                issues.append((unit.path, "kept: a parent directory is a symbolic link"))
+                continue
             try:
                 self._restore_unit(unit)
             except OSError as exc:
                 issues.append((unit.path, f"could not restore: {exc}"))
-        remove_empty_directories(a for unit in units for a in unit.absent_ancestors)
+        remove_empty_directories(
+            a for unit in units for a in unit.absent_ancestors if not self._crosses_link(a)
+        )
         if issues and self.store is not None:
             issues.append((self._retain(), "pre-install copies retained here for recovery"))
         else:
             self.discard()
         return issues
+
+    def _crosses_link(self, path: Path) -> bool:
+        """Whether a directory between *path* and its deploy root (or APM home) is a link."""
+        for base in (self.contain, self.store_parent.parent):
+            if base is not None and path.parent.is_relative_to(base):
+                return has_symlink_component(base, path.parent)
+        return False
 
     def _retain(self) -> Path:
         """Rename the store so no later install reaps the copies a user still needs."""
@@ -332,6 +347,7 @@ class DeployJournal:
 
     def discard(self) -> None:
         """Delete the stored copies and the empty store parent."""
+        _modes.close_held(self)
         store, self.store = self.store, None
         if store is None:
             return
@@ -341,17 +357,17 @@ class DeployJournal:
 
 
 def lockfile_identity(text: str) -> str:
-    """Identify a lockfile document by its content, not its formatting.
-
-    A staged document the commit skipped as unchanged, or wrote with other
-    line endings, has the identity of the lockfile on disk.
-    """
+    """Identify a lockfile by content: other line endings keep the on-disk identity."""
     import yaml
 
+    from apm_cli.deps.lockfile_container import parse_lockfile_text
     from apm_cli.utils.yaml_io import load_yaml_str
 
     try:
-        canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
+        try:  # Owner's memoized parse; refused or non-JSON-native text keeps the old identity.
+            canonical = json.dumps(parse_lockfile_text(text), sort_keys=True)
+        except Exception:
+            canonical = json.dumps(load_yaml_str(text), sort_keys=True, default=str)
     except (yaml.YAMLError, ValueError, TypeError, RecursionError):
         canonical = text.replace("\r\n", "\n")
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -377,11 +393,20 @@ class LedgerUnavailable(Exception):
 class JournalReplayError(Exception):
     """An abandoned journal was kept: replay could not prove or finish it (#4863)."""
 
-    def __init__(self, store: Path, issues: list[tuple[str, str]], *, applied: bool) -> None:
+    def __init__(
+        self,
+        store: Path,
+        issues: list[tuple[str, str]],
+        *,
+        applied: bool,
+        home: Path | None = None,
+    ) -> None:
         super().__init__(f"abandoned deploy journal kept at {store}")
         self.store = store
         self.issues = issues
         self.applied = applied
+        # Set when only APM_HOME's group write refused: the store is left to replay (#5385).
+        self.home = home
 
 
 @dataclass(frozen=True)
@@ -403,10 +428,14 @@ class _Replay:
     mode: int | dict[str, int] | None = None
 
 
-def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
+def _read_manifest(
+    store: Path, *, allow_group_home: bool = False
+) -> tuple[dict[str, Any], list[Any]]:
     """Parse ``journal.jsonl``; raise ``ValueError`` when it is not a journal."""
+    # The store is this user's alone (#5134).
+    _modes.require_private_store(store, allow_group_home=allow_group_home)
     try:
-        text = (store / _MANIFEST).read_text(encoding="utf-8")
+        text = _modes.read_private_journal(store / _MANIFEST)
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"journal manifest unreadable: {exc}") from exc
     try:
@@ -460,28 +489,6 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
     return units, events, commit
 
 
-def _valid_state(state: Any, *, entry: bool) -> bool:
-    """Whether *state* has the shape :func:`_state` (or :func:`_entry`) records."""
-    if entry:
-        return isinstance(state, str)
-    if not isinstance(state, dict):
-        return False
-    if state in (_ABSENT, _OTHER):
-        return True
-    if set(state) == {"link"}:
-        return isinstance(state["link"], str)
-    if set(state) == {"file", "mode"}:
-        return isinstance(state["file"], str) and type(state["mode"]) is int
-    if set(state) == {"dir", "mode"}:
-        entries = state["dir"]
-        return (
-            isinstance(entries, dict)
-            and all(isinstance(k, str) and isinstance(v, str) for k, v in entries.items())
-            and type(state["mode"]) is int
-        )
-    return False
-
-
 def _pending(line: dict[str, Any]) -> tuple[str, str | None, Any]:
     """A write APM began: ``("pending", <expected hash or None>, <last seal or None>)``."""
     expected = line.get("expected")
@@ -525,6 +532,7 @@ class _Bases:
 
     root: Path
     receipts: Path
+    journal: str | None = None  # the abandoned journal's token (#5051)
 
 
 class _Unproven(Exception):
@@ -578,7 +586,7 @@ def _validate_unit(
         try:
             _check_vouched(rel, kind, expected, ledger)
         except _Unproven:
-            if not _shared_config_vouched(rel, path, kind, copy, events, ledger):
+            if not _shared_config_vouched(rel, path, kind, copy, events, ledger, bases.journal):
                 raise
     mode = _modes.verified_mode(line.get("mode"), kind, copy)
     if mode is None:
@@ -605,6 +613,7 @@ def _shared_config_vouched(
     copy: Path,
     events: Mapping[str, Any] | None,
     ledger: Mapping[str, str | None],
+    journal: str | None = None,
 ) -> bool:
     """A file the ledger never claims, restorable from the config file records (#5009).
 
@@ -631,7 +640,7 @@ def _shared_config_vouched(
             prior = _read_no_follow(copy)
         except OSError:
             return False
-        return vouches_for_current_bytes(path, prior)
+        return vouches_for_current_bytes(path, prior, journal=journal)
     return True  # a later write: _decide keeps and names it, never replaces it
 
 
@@ -717,15 +726,15 @@ def _apply(unit: _Replay) -> None:
     if unit.copy is None:
         raise OSError("no journal copy to restore from")
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Beside its destination, so it gets every recorded mode before the rename.
-    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"
+    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"  # moded before the rename
     try:
         _modes.stage_private(unit.copy, staged, unit.kind, _read_no_follow)
         written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
         if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
-        _modes.apply_entry_modes(staged, unit.mode)
-        _modes.apply_own_mode(staged, unit.mode)
+        mode = _modes.for_destination(path, unit.mode, unit.copy)  # umask if recreated
+        _modes.apply_entry_modes(staged, mode)
+        _modes.apply_own_mode(staged, mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
@@ -751,7 +760,7 @@ def _keep(store: Path) -> Path:
 
 _KEEP_CHANGED = "it changed after the interrupted install"
 _KEEP_WIDER = "its recorded mode is wider than it has now"
-_KEEP_ACL = "it carries a POSIX ACL"
+_KEEP_ACL = "it carries a Windows ACL" if os.name == "nt" else "it carries a POSIX ACL"
 
 
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
@@ -784,73 +793,6 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
     return apply, kept
 
 
-def _holds_apm_state(unit: _Replay) -> bool:
-    """Whether the path holds only what APM put there (see :func:`_decide`)."""
-    _ensure_listable(unit.path)
-    current = _state(unit.path)
-    whole = unit.events.get("")
-    sealed = whole[2] if isinstance(whole, tuple) else whole
-    if current in (_ABSENT, unit.prior, sealed):
-        return True
-    if isinstance(whole, tuple):
-        was_dir = "dir" in unit.prior or (isinstance(sealed, dict) and "dir" in sealed)
-        if whole[1] == _ABSENT_EXPECTED and "dir" in current and was_dir:
-            # A removal of a directory killed partway leaves part of the tree (#5087).
-            return _dir_holds_apm_state(unit, current, sealed)
-        if not _matches_expected(current, whole[1]):
-            return False
-        if "dir" not in current or whole[1] is None:
-            return True
-    if "dir" not in current:
-        return False
-    return _dir_holds_apm_state(unit, current, sealed)
-
-
-_ABSENT_EXPECTED = "absent"
-
-
-def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
-    """A write APM began and never sealed left *current* (``None``: cannot tell)."""
-    if expected is None:
-        return True
-    if expected == "dir":
-        return "dir" in current
-    return current.get("file") == expected
-
-
-def _dir_holds_apm_state(unit: _Replay, current: Mapping[str, Any], whole: Any) -> bool:
-    """The directory's own mode and every entry below it are prior or APM's."""
-    prior = unit.prior.get("dir", {})
-    sealed = whole.get("dir", {}) if isinstance(whole, dict) else {}
-    modes = {unit.prior.get("mode"), whole.get("mode") if isinstance(whole, dict) else None}
-    if modes != {None} and current.get("mode") not in modes:
-        return False
-    entries: Mapping[str, str] = current["dir"]
-    accounted, unknown = set(), set()
-    for rel, fingerprint in entries.items():
-        event = unit.events.get(rel)
-        pending = isinstance(event, tuple)
-        if fingerprint in (prior.get(rel), sealed.get(rel), event[2] if pending else event) or (
-            pending and _entry_matches_expected(fingerprint, event[1])
-        ):
-            accounted.add(rel)
-        elif rel not in prior and rel not in sealed and event is None:
-            unknown.add(rel)
-    # A directory with no evidence of its own is APM's when APM wrote below it.
-    for rel in sorted(unknown, key=len, reverse=True):
-        if entries[rel].startswith("dir:") and any(a.startswith(f"{rel}/") for a in accounted):
-            accounted.add(rel)
-    return accounted == set(entries)
-
-
-def _entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
-    if expected is None:
-        return True
-    if expected == "dir":
-        return fingerprint.startswith("dir:")
-    return fingerprint.rsplit(":", 1)[0] == expected
-
-
 def _replay_store(
     store: Path,
     bases: _Bases,
@@ -859,7 +801,12 @@ def _replay_store(
 ) -> ReplayOutcome:
     """Replay one abandoned store, or raise ``JournalReplayError`` after keeping it."""
     try:
-        lines, seals, commit = _parse(_read_manifest(store)[1])
+        header, body = _read_manifest(store)
+        lines, seals, commit = _parse(body)
+    except _modes.HomeGroupWritable as exc:
+        # Left as it is, never retained: it replays once the group write is removed.
+        issues = [(rel, str(exc)) for rel in _deploy_paths(store)] or [(str(store), str(exc))]
+        raise JournalReplayError(store, issues, applied=False, home=exc.home) from None
     except ValueError as exc:
         raise JournalReplayError(_keep(store), [(str(store), str(exc))], applied=False) from None
     if commit is not None and commit == committed():
@@ -870,6 +817,8 @@ def _replay_store(
         vouched = ledger()
     except LedgerUnavailable as exc:
         raise JournalReplayError(_keep(store), [exc.issue], applied=False) from None
+    token = header.get("token")
+    bases = replace(bases, journal=token if isinstance(token, str) else None)
     units, issues = _validated(lines, seals, store, bases, vouched)
     if issues:
         raise JournalReplayError(_keep(store), issues, applied=False)
@@ -887,6 +836,21 @@ def _replay_store(
         return ReplayOutcome(len(apply), tuple(kept), (_keep(store),))
     shutil.rmtree(store, ignore_errors=True)
     return ReplayOutcome(len(apply))
+
+
+def _deploy_paths(store: Path) -> list[str]:
+    """The deploy-root paths *store* journals, read only to name them (#5385)."""
+    try:
+        _header, body = _read_manifest(store, allow_group_home=True)
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        return []
+    return [
+        line["path"]
+        for line in body
+        if isinstance(line, dict)
+        and line.get("base") == "root"
+        and isinstance(line.get("path"), str)
+    ]
 
 
 def _validated(
@@ -920,8 +884,9 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     """``(deploy root, workspace)`` an abandoned store names, or ``None`` if unreadable."""
     # RecursionError: a deeply nested header is unreadable; replay keeps and names it.
     with contextlib.suppress(OSError, ValueError, UnicodeDecodeError, RecursionError):
-        with open(store / _MANIFEST, encoding="utf-8") as handle:
-            header = json.loads(handle.readline())
+        # Validated before any open (#5134); identity only, so group write is reported later.
+        _modes.require_private_store(store, allow_group_home=True)
+        header = json.loads(_modes.read_private_journal(store / _MANIFEST, first_line=True))
         if isinstance(header, dict):
             root, workspace = header.get("root"), header.get("workspace")
             if isinstance(root, str) and isinstance(workspace, str):

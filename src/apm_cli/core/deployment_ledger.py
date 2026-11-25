@@ -37,6 +37,7 @@ from apm_cli.utils.path_security import (
     resolve_for_containment,
     resolved_relative_within,
 )
+from apm_cli.utils.realpath import resolve_path
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -344,39 +345,17 @@ class DeploymentMaterializationSession:
             or (data["root_identity"] != self._root_identity() and not moved(data))
         )
 
-    def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
-        return DeploymentLedgerCodec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, candidate_resolved=True)  # fmt: skip
+    def _encode(
+        self, candidate: Path, target: TargetProfile, root: Path | None = None
+    ) -> DeploymentLocator:
+        return DeploymentLedgerCodec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, candidate_resolved=True, resolved_root=root)  # fmt: skip
 
-    def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
-        candidate = resolve_for_containment(path)
-        for target in targets:
-            if not target.supports("skills"):
-                continue
-            skills_root = resolve_for_containment(target.skills_deploy_path(self.root))
-            if resolved_relative_within(candidate, skills_root) is not None:
-                return self._encode(candidate, target)
-        return None
+    def _locator(self, path: Path, targets: Sequence[TargetProfile], roots=None, candidate=None) -> DeploymentLocator | None:  # fmt: skip
+        return _deployment_queries.skills_locator(self, path, targets, roots, candidate)
 
-    def _write_locator(
-        self, path: Path, targets: Sequence[TargetProfile]
-    ) -> DeploymentLocator | None:
+    def _write_locator(self, path: Path, targets: Sequence[TargetProfile], roots=None, candidate=None) -> DeploymentLocator | None:  # fmt: skip
         """Locate a final-rendered write of any file primitive inside a target's roots."""
-        locator = self._locator(path, targets)
-        if locator is not None:
-            return locator
-        for target in targets:
-            roots = [target.deploy_path(self.root)]
-            if target.resolved_deploy_root is None:
-                roots.extend(
-                    self.root / mapping.deploy_root
-                    for mapping in target.primitives.values()
-                    if mapping.deploy_root
-                )
-            candidate = resolve_for_containment(path)
-            for root in roots:
-                if resolved_relative_within(candidate, resolve_for_containment(root)) is not None:
-                    return self._encode(candidate, target)
-        return None
+        return _deployment_queries.write_locator(self, path, targets, roots, candidate)
 
     @staticmethod
     def receipt_owner(package_info: Any) -> str:
@@ -591,15 +570,17 @@ class DeploymentMaterializationSession:
         if not written:
             return
         prepared: list[tuple[DeploymentRecord, str, str]] = []
+        roots = _deployment_queries.CallRoots()  # this call only: each root resolved once
         for path, content_hash in written.items():
-            locator = self._write_locator(path, targets)
+            candidate = resolve_for_containment(path)
+            locator = self._write_locator(path, targets, roots, candidate)
             if locator is None or path.is_symlink() or not is_canonical_bundle_hash(content_hash):
                 raise ValueError(f"Cannot record unverified materialization: {path}")
             prepared.append(
                 (
                     DeploymentRecord(locator, (owner,), owner, content_hash),
-                    path.resolve().as_posix(),
-                    deployed_path_entry(path, self.root, targets),
+                    resolve_path(path).as_posix(),
+                    deployed_path_entry(path, self.root, targets, candidate, roots(self.root)),
                 )
             )
         for record, physical, value in prepared:
@@ -1744,10 +1725,12 @@ class DeploymentLedgerCodec(RowProjection):
         runtime: str | None = None,
         scope: InstallScope,
         candidate_resolved: bool = False,
+        resolved_root: Path | None = None,
     ) -> DeploymentLocator:
         """Encode a path without forcing external roots into project strings.
 
-        ``candidate_resolved``: *path* was just resolved; roots are always resolved live.
+        ``candidate_resolved``: *path* was just resolved; *resolved_root* is
+        *project_root* resolved within the same caller's call, else resolved here.
         """
         scope_value = getattr(scope, "value", str(scope))
         if isinstance(path, str) and "://" in path:
@@ -1759,7 +1742,7 @@ class DeploymentLedgerCodec(RowProjection):
                 scope=scope_value,
             )
 
-        root = resolve_for_containment(project_root)
+        root = resolve_for_containment(project_root) if resolved_root is None else resolved_root
         candidate = Path(path) if candidate_resolved else resolve_for_containment(Path(path))
         relative = resolved_relative_within(candidate, root)
         if relative is not None:

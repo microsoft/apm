@@ -511,3 +511,182 @@ def test_a_failed_cleanup_still_moves_earlier_directories_back(tmp_path: Path) -
 
     assert (modules / "_local" / "a" / "apm.yml").is_file()
     assert not (modules / "_local" / "h1").exists()
+
+
+@pytest.mark.parametrize("name", [".apm-reanchor-fresh-e", ".apm-reanchor-aside-e"])
+def test_a_package_named_like_a_staging_path_survives_rollback_and_commit(
+    tmp_path: Path, name: str
+) -> None:
+    """#5102: only a staged swap's own paths are discarded, never a package by its name."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import (
+        _restore_reanchored_dirs,
+        discard_set_aside_copies,
+    )
+
+    modules = tmp_path / "apm_modules"
+    package = _package(modules, name)
+    before = _tree(modules)
+    target = modules / "_local" / "h1" / name
+
+    moved = move_materializations(((package, target),), modules)
+    discard_set_aside_copies(moved, modules, SimpleNamespace(warning=print))
+    assert (target / "apm.yml").is_file()
+
+    assert _restore_reanchored_dirs(moved, modules) == []
+    assert _tree(modules) == before
+
+
+@pytest.mark.parametrize("prefix", [".apm-reanchor-fresh-", ".apm-reanchor-aside-"])
+def test_a_dangling_link_at_a_staging_path_keeps_the_plain_move(
+    tmp_path: Path, prefix: str
+) -> None:
+    """#5102: a dangling symlink where a fresh copy would be staged is never written through."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import _fresh_copy_moves
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    target = modules / "_local" / "h1" / "e"
+    outside = tmp_path / "outside"
+    (current.parent / f"{prefix}e").symlink_to(outside, target_is_directory=True)
+    plan = SimpleNamespace(moves=((current, target),), fresh=((current, None, True, None),))
+    staged: list[Path] = []
+
+    assert _fresh_copy_moves(plan, modules, staged) == ((current, target),)
+    assert staged == []
+    assert not outside.exists()
+    assert (current.parent / f"{prefix}e").is_symlink()
+
+
+class _StuckStage(type(Path())):
+    """A path whose staged copy cannot be inspected, so it cannot be removed."""
+
+    def exists(self, *args, **kwargs) -> bool:
+        if self.name.startswith(".apm-reanchor-fresh-"):
+            raise OSError("the staged copy is busy")
+        return super().exists(*args, **kwargs)
+
+
+def test_a_staged_copy_that_cannot_be_removed_is_reported_and_nothing_commits(
+    tmp_path: Path,
+) -> None:
+    """#5102: a failed staging whose leftover cannot be removed refuses and names it."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        _move_reanchored_dirs,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    modules = tmp_path / "apm_modules"
+    current = _StuckStage(_package(modules, "e"))
+    target = modules / "_local" / "h1" / "e"
+    missing = DependencyReference.parse("./vendor/missing")
+    plan = LocalReanchorPlan(
+        renames={"old": "new"}, moves=((current, target),), fresh=((current, missing, True, None),)
+    )
+    errors: list[str] = []
+    logger = SimpleNamespace(error=errors.append, progress=errors.append)
+
+    with pytest.raises(SystemExit):
+        _move_reanchored_dirs(SimpleNamespace(reanchor=plan), modules, logger)
+
+    assert "apm_modules/_local/.apm-reanchor-fresh-e" in " ".join(errors), errors
+    assert (current / "apm.yml").is_file()
+    assert not target.exists()
+
+
+def test_a_fresh_swap_rolled_back_after_the_save_restores_the_original_copy(
+    tmp_path: Path,
+) -> None:
+    """#5213: a staged fresh copy (changed .git/HEAD), then binding raises: all restored."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import (
+        _persist_lock_then_resync_native,
+        _StillNeededRepair,
+    )
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        snapshot_for_rollback,
+    )
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    (current / ".git").mkdir()
+    # Bytes, not text: write_text would add CR on Windows and change the HEADs compared.
+    (current / ".git/HEAD").write_bytes(b"ref: refs/heads/main\n")
+    source = tmp_path / "vendor/e"
+    source.mkdir(parents=True)
+    (source / "apm.yml").write_bytes((current / "apm.yml").read_bytes())
+    (source / ".git").mkdir()
+    (source / ".git/HEAD").write_bytes(b"ref: refs/heads/other\n")
+    manifest, lock = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(
+            renames={"./vendor/e": "local:vendor/e"},
+            moves=((current, modules / "_local" / "h1" / "e"),),
+            fresh=((current, DependencyReference.parse("./vendor/e"), True, None),),
+        ),
+        (manifest, lock),
+    )
+    before = (_tree(modules), manifest.read_bytes(), lock.read_bytes())
+    manifest.write_text("name: changed\n", encoding="utf-8")
+    target = modules / "_local" / "h1" / "e"
+    observed: list[tuple[bytes | None, bytes | None, bytes]] = []
+
+    def fail_after_the_swap(*_args, **_kwargs):
+        # Recorded, not asserted: the rollback handler would turn a raise here into an exit.
+        aside = modules / "_local" / ".apm-reanchor-aside-e" / ".git/HEAD"
+        observed.append(
+            (
+                (target / ".git/HEAD").read_bytes() if (target / ".git/HEAD").is_file() else None,
+                aside.read_bytes() if aside.is_file() else None,
+                lock.read_bytes(),
+            )
+        )
+        raise RuntimeError("binding failed")
+
+    with pytest.raises(SystemExit) as exc:
+        _persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=LockFile(),
+            lockfile_path=lock,
+            logger=MagicMock(),
+            integration_cleanup=IntegrationCleanupOutcome(
+                counts={},
+                deployed_files={},
+                failed_paths=[],
+                error_count=0,
+                materialization_session=MagicMock(
+                    bind_committed_claims=MagicMock(side_effect=fail_after_the_swap)
+                ),
+            ),
+            deploy_root=tmp_path,
+            modules_dir=modules,
+            scope=None,
+            native_before=None,
+            still_needed_repairs=_StillNeededRepair({}, {}, {}, frozenset(), plan),
+        )
+
+    # The swap ran before the failure: the fresh HEAD was in place, the old one aside,
+    # and the lock was already saved; only then was everything rolled back.
+    assert len(observed) == 1, observed
+    fresh_head, aside_head, saved_lock = observed[0]
+    assert fresh_head == b"ref: refs/heads/other\n"
+    assert aside_head == b"ref: refs/heads/main\n"
+    assert saved_lock != before[2]
+    assert exc.value.code == 1
+    assert (_tree(modules), manifest.read_bytes(), lock.read_bytes()) == before
+    assert not [p.name for p in (modules / "_local").iterdir() if p.name.startswith(".apm-")]
+    assert not (modules / "_local" / "h1").exists()

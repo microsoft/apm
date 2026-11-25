@@ -27,9 +27,7 @@ from apm_cli.integration.skill_adoption import (
     tree_equals_install_output,
 )
 from apm_cli.integration.skill_bundle_routes import promoted_skill_name
-from apm_cli.integration.skill_package_routing import (
-    get_effective_type,
-)
+from apm_cli.integration.skill_package_routing import get_effective_type
 from apm_cli.integration.skill_package_routing import (
     should_compile_instructions as _should_compile_instructions,
 )
@@ -51,6 +49,7 @@ from apm_cli.models.dependency.subsets import (
     skill_subset_filter_tokens,
     skill_subset_selects_all,
 )
+from apm_cli.utils.paths import relative_to
 
 __all__ = [
     "SkillIntegrationResult",
@@ -359,6 +358,8 @@ class SkillIntegrator(BaseIntegrator):
 
     selected_skill_sources = staticmethod(selected_skill_sources)
     find_unmanaged_conflicts = find_unmanaged_conflicts
+    # A skill another package deployed is replaced: the last installed wins.
+    SHARED_PATH_RULE = "last-installed-wins"
     preflight_skill_selection = staticmethod(_preflight_selection)
 
     def __init__(self) -> None:
@@ -563,10 +564,10 @@ class SkillIntegrator(BaseIntegrator):
             source_root = plan.source_root
             physical_root = destination.parent.resolve()
             self._skill_completed_roots.setdefault(physical_root, set()).add(
-                source.relative_to(source_root).as_posix()
+                relative_to(source, source_root).as_posix()
             )
             self._skill_completed_files.setdefault(physical_root, set()).update(
-                (source / path.relative_to(destination)).relative_to(source_root).as_posix()
+                relative_to(source / relative_to(path, destination), source_root).as_posix()
                 for path in copied
             )
         return copied

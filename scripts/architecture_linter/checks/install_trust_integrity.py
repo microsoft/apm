@@ -360,6 +360,8 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "def local_bundle_hook_source_marker(bundle_id: str, approval_key: str | None = None)",
         "def parse_local_bundle_hook_source(",
         "def write_per_file_bundle_record(",
+        # The bundle record's sidecar write keeps the config file records current (#5039).
+        "write_hook_sidecar(sidecar_path, data, project_root, user_scope)",
     ),
     _HOOK_INTEGRATOR: (
         "local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
@@ -390,14 +392,20 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "path = contained_bundle_path(root, value, prefixes)",
     ),
     "src/apm_cli/install/services.py": (
-        "record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)",
+        # Recording the canvas is an install write at the install's scope (#5042).
+        "        record_bundle_canvas(",
+        "project_root, targets, str(slug), approval_key, deployed_files, user_scope=user_scope",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/prune.py": ("reconcile_scope_bundle_hooks(",),
     _CI_CHECKS: (
-        "unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)",
-        "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
+        # One read of every hook config, sidecar and bundle record serves both checks (#5211).
+        "states = read_bundle_hook_states(deployment_root, targets)",
+        "problems = bundle_hook_ownership(deployment_root, targets, bundle_paths, states)",
+        "unadmitted = unadmitted_bundle_hooks(",
+        "canvas = unadmitted_bundle_canvas(",
+        "deployment_root, targets, allow_provider, bundle_paths, states.read",
     ),
     "src/apm_cli/install/local_bundle_hooks.py": (
         "package_info.local_bundle_approval = approval_key",
@@ -405,7 +413,13 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
     ),
 }
 # The approval record is read and written only in hook_ownership.py.
-_MARKER_TOKENS = ('"local-bundle::', "LOCAL_BUNDLE_HOOK_SOURCE_PREFIX")
+_MARKER_TOKENS = (
+    '"local-bundle::',
+    "LOCAL_BUNDLE_HOOK_SOURCE_PREFIX",
+    # The bundle Markdown hook record (#5254): its key and file are written only there.
+    '"local-bundle-markdown-hooks"',
+    '"apm-bundle-markdown-hooks.json"',
+)
 
 
 def check_local_bundle_hook_trust(provider: FactsProvider) -> tuple[Violation, ...]:

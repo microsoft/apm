@@ -189,6 +189,12 @@ ORPHANED_PACKAGES = _entry(
     "orphaned-packages", "apm install", "remove packages apm.yml no longer declares"
 )
 RESYNC_DEPLOYED = _entry("drift-resync", "apm install", "re-sync deployed files with the lockfile")
+CLAUDE_MARKETPLACE_TRUST = _entry(
+    "claude-marketplace-trust",
+    "apm install",
+    "list the project's marketplace for Claude Code",
+    before="open the folder in Claude and accept the trust prompt",
+)
 RESYNC_UNRECORDED = _entry(
     "drift-unrecorded",
     "apm install",
@@ -253,6 +259,12 @@ HOOK_PLUGIN_ROOT_UNRESOLVED = _entry(
     "redeploy the hook with the resolved path",
     before="ensure the quote marks match and wrap the complete reference and path in "
     "balanced double quotes",
+)
+HOOK_EVENT_MALFORMED = _entry(
+    "hook-event-malformed",
+    "apm install",
+    "merge the package's hooks into it",
+    before="fix or remove the event",
 )
 HOOK_PATH_ESCAPES_PACKAGE = _entry(
     "hook-path-escapes-package",
@@ -432,7 +444,8 @@ MARKETPLACE_ORIGIN_RESTORE = _entry(
     "marketplace-origin-restore",
     "apm marketplace add {source} --name {name}",
     "keep the locked marketplace (add --ref or --path if the original registration used them)",
-    before="verify that source first",
+    # A rebound name may be credential-bound, so it is freed before the re-add (#5264).
+    before="verify that source first, then run 'apm marketplace remove {name} --yes'",
 )
 MARKETPLACE_ORIGIN_SWITCH = _entry(
     "marketplace-origin-switch",
@@ -735,6 +748,14 @@ PRUNE_PARTIAL = _entry(
     "finish the filesystem cleanup",
     then="run 'apm audit'",
 )
+PRUNE_REPLACED_PARENT = _entry(
+    "prune-replaced-parent",
+    "apm install",
+    "rebuild the lockfile",
+    before="remove the replaced dependency's replace entry from apm.yml, or keep the "
+    "package that declares it",
+    then="run 'apm prune'",
+)
 PRUNE_NATIVE_GATE_UNCHECKED = _entry(
     "prune-native-gate-unchecked",
     "apm prune",
@@ -991,9 +1012,8 @@ PROTOCOL_FALLBACK_DISALLOWED = _entry(
 CLAUDE_AGENTS_MD_BLOCKED = _entry(
     "claude-agents-md-blocked",
     "apm install",
-    "move always-on and directory instructions from .claude/rules/ into AGENTS.md",
+    "retire the .claude/rules/ copies a compiled AGENTS.md already carries",
     before="{fix}",
-    then="run 'apm compile'",
 )
 CLAUDE_DIRECTORY_INSTRUCTION_SINGLE_FILE = _entry(
     "claude-directory-instruction-single-file",
@@ -1442,6 +1462,11 @@ REPLAY_CACHE_CONTENT_STALE = _entry(
     "replay-cache-content-stale",
     "apm install",
     "refresh the apm_modules cache to the locked content",
+)
+CACHED_CHECKOUT_TAMPERED = _entry(
+    "cached-checkout-tampered",
+    "apm install",
+    "rebuild the cached copy from the locked commit",
 )
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",

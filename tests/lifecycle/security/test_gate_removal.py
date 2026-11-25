@@ -108,6 +108,9 @@ _PROJECT_HOME_ALLOWED = (
     ".apm/scripts-trust.json.lock",
     ".apm/logs",
     ".apm/cache/marketplace",
+    # Claude Code's marketplace registry and APM's record of its entry (#5176).
+    ".claude/plugins/known_marketplaces.json",
+    ".apm/claude-known-marketplaces.json",
 )
 # Commands after which nothing the model forbids may stay deployed (I4).
 # ``unpack`` never deploys an executable, so it refuses instead of removing.

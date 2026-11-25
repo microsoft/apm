@@ -13,9 +13,17 @@ The pin file lives at ``~/.apm/cache/marketplace/version-pins.json``
 and has the structure::
 
     {
-      "marketplace/plugin/1.0.0": "v1.0.0",
-      "marketplace/plugin/2.0.0": "v2.0.0"
+      "github.com/acme/catalog:marketplace.json#plugin/1.0.0": "v1.0.0",
+      "github.com/acme/catalog:marketplace.json#plugin/2.0.0": "v2.0.0"
     }
+
+A pin is scoped to the catalog it was read from
+(:func:`~.source_identity.catalog_pin_identity`), never to the machine-local
+alias, so an alias re-registered for another catalog starts without pins and
+removing a marketplace keeps the pins of its catalog (#4966). Pins written by
+an older APM are keyed ``alias/plugin/version``; they are read as belonging to
+the catalog the alias's registration currently names and move to that catalog's key when the
+alias is re-registered or removed, or when the pin is next recorded.
 
 Reads fail closed: a pins file that exists but cannot be read or is not a
 JSON object raises :class:`RefPinStoreError`, so ref-swap detection is
@@ -34,6 +42,9 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
 from ..core.remediation import MARKETPLACE_REF_SWAP_ACCEPT
 from .errors import MarketplaceError
@@ -51,6 +62,17 @@ class RefPinStoreError(MarketplaceError):
             f"Cannot read the marketplace version pins at {path}: {reason}. "
             "Marketplace installs need them to detect a changed plugin ref. "
             "Restore the file, or delete it to start a new record."
+        )
+
+
+class RefPinWriteError(RefPinStoreError):
+    """The version-pins file could not be written; its recorded pins are kept."""
+
+    def __init__(self, path: str, reason: str):
+        MarketplaceError.__init__(
+            self,
+            f"Cannot write the marketplace version pins at {path} ({reason}): "
+            "fix its permissions or free space and retry. Nothing was changed.",
         )
 
 
@@ -87,14 +109,21 @@ def _pins_path(pins_dir: str | None = None) -> str:
     return os.path.join(os.fspath(get_apm_home()), "cache", "marketplace", _PINS_FILENAME)
 
 
-def _pin_key(marketplace_name: str, plugin_name: str, version: str = "") -> str:
+def _pin_key(marketplace_name: str, plugin_name: str, version: str = "", catalog: str = "") -> str:
     """Build the canonical dict key for a marketplace/plugin/version triple.
+
+    With *catalog*, the key is scoped to that catalog identity; without it,
+    the legacy alias-scoped key is returned.
 
     The *version* parameter corresponds to the plugin's declared ``version``
     field from the standard marketplace spec.  Including version in the key
     ensures that legitimate version bumps (new ``version`` value) create
     separate pin entries and never trigger false-positive ref-swap warnings.
     """
+    # A catalog identity is kept verbatim: its path case can name another catalog.
+    plugin = f"{plugin_name}/{version}" if version else plugin_name
+    if catalog:
+        return f"{catalog}#{plugin.lower()}"
     base = f"{marketplace_name}/{plugin_name}".lower()
     if version:
         return f"{base}/{version}".lower()
@@ -141,15 +170,64 @@ def load_ref_pins(
         raise RefPinStoreError(path, type(exc).__name__) from exc
     if not isinstance(data, dict):
         raise RefPinStoreError(path, "not a JSON object")
-    return data
+    return _normalized_keys(data)
 
 
-def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
+def _normalized_keys(pins: dict) -> dict:
+    """Move catalog pins of an older key form to the normal key; a normal key wins (#5169)."""
+    from .source_identity import pin_identity_key
+
+    def normal(key: str) -> str:
+        catalog, sep, plugin = key.rpartition("#")
+        return f"{pin_identity_key(catalog)}#{plugin}" if sep else key
+
+    out = {key: ref for key, ref in pins.items() if normal(key) == key}
+    for key, ref in pins.items():
+        out.setdefault(normal(key), ref)
+    return out
+
+
+@contextmanager
+def _pins_mutation(pins_dir: str | None, *, strict: bool = False) -> Iterator[bool]:
+    """Hold the cross-process pins lock around one load-modify-save (#5169).
+
+    Both writers, the install commit and the registry's legacy-pin adoption,
+    take it, so neither overwrites the other's write. Yields whether the lock
+    is held: an advisory writer skips its write when it is not, so it never
+    fails a committed install; a *strict* writer raises
+    :class:`RefPinWriteError` instead.
+    """
+    from apm_cli.config import user_state_writes_suppressed
+
+    from ..cache.locking import shard_lock
+
+    if user_state_writes_suppressed():
+        yield False  # a preview writes nothing
+        return
+    path = Path(_pins_path(pins_dir))
+    lock = shard_lock(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock.acquire()
+    except OSError as exc:  # filelock's Timeout is an OSError too
+        if strict:
+            raise RefPinWriteError(str(path), type(exc).__name__) from exc
+        logger.debug("Skipped a version-pins write: the pins lock is unavailable: %s", exc)
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        lock.release()
+
+
+def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = False) -> None:
     """Persist *pins* to disk atomically.
 
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
-    logged and swallowed (advisory system). A preview writes nothing.
+    logged and swallowed (advisory system), unless *strict*, which raises
+    :class:`RefPinWriteError`. A preview writes nothing.
     """
     from apm_cli.config import user_state_writes_suppressed
 
@@ -163,6 +241,8 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
             json.dump(pins, fh, indent=2)
         os.replace(tmp_path, path)
     except OSError as exc:
+        if strict:
+            raise RefPinWriteError(path, type(exc).__name__) from exc
         logger.debug("Failed to save version-pins: %s", exc)
 
 
@@ -177,6 +257,8 @@ def check_ref_pin(
     ref: str,
     version: str = "",
     pins_dir: str | None = None,
+    *,
+    catalog: str = "",
 ) -> str | None:
     """Check whether *ref* matches the previously-recorded pin.
 
@@ -190,8 +272,10 @@ def check_ref_pin(
         plugin/version or the ref matches.
     """
     pins = load_ref_pins(pins_dir)
-    key = _pin_key(marketplace_name, plugin_name, version)
-    previous_ref = pins.get(key)
+    previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version, catalog))
+    if previous_ref is None and catalog and _owns_legacy_pins(marketplace_name, catalog):
+        # A legacy alias pin belongs to the catalog the alias's registration names.
+        previous_ref = pins.get(_pin_key(marketplace_name, plugin_name, version))
     if previous_ref is None:
         return None
     if not isinstance(previous_ref, str):
@@ -207,6 +291,8 @@ def record_ref_pin(
     ref: str,
     version: str = "",
     pins_dir: str | None = None,
+    *,
+    catalog: str = "",
 ) -> None:
     """Store a plugin-to-ref mapping in the pin cache.
 
@@ -214,10 +300,60 @@ def record_ref_pin(
     Overwrites any existing pin for the same plugin/version (advisory
     system -- we always record the current ref even if it changed).
     """
-    pins = load_ref_pins(pins_dir)
-    key = _pin_key(marketplace_name, plugin_name, version)
-    pins[key] = ref
-    save_ref_pins(pins, pins_dir)
+    with _pins_mutation(pins_dir) as held:
+        if not held:
+            return
+        pins = load_ref_pins(pins_dir)
+        _put(pins, marketplace_name, plugin_name, version, catalog, ref)
+        save_ref_pins(pins, pins_dir)
+
+
+def _owns_legacy_pins(marketplace_name: str, catalog: str) -> bool:
+    """Whether *marketplace_name*'s persisted registration names *catalog*.
+
+    Legacy pins are keyed by the alias of a registration; a project map that
+    shadows the alias with another catalog never reads or consumes them.
+    """
+    from .registry import get_registered_marketplaces
+    from .source_identity import catalog_pin_identity
+
+    for source in get_registered_marketplaces():
+        if source.name.lower() == marketplace_name.lower():
+            try:
+                return catalog_pin_identity(source) == catalog
+            except ValueError:
+                return False
+    return False
+
+
+def _put(pins: dict, marketplace: str, plugin: str, version: str, catalog: str, ref: str) -> None:
+    pins[_pin_key(marketplace, plugin, version, catalog)] = ref
+    if catalog and _owns_legacy_pins(marketplace, catalog):
+        pins.pop(_pin_key(marketplace, plugin, version), None)
+
+
+def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) -> None:
+    """Move *alias*'s legacy pins to *catalog*, the catalog the alias names now.
+
+    Called before an alias is re-registered or removed, so its pins stay with
+    that catalog and are never read for another one (#4966). A pin already
+    recorded for the catalog wins over a legacy one. A failed write raises
+    :class:`RefPinWriteError`, so the registry change does not happen.
+    """
+    prefix = f"{alias.lower()}/"
+    with _pins_mutation(pins_dir, strict=True) as held:
+        if not held:
+            return  # a preview writes nothing
+        pins = load_ref_pins(pins_dir)
+        # A catalog-scoped key always holds "#"; an alias (a hostname, say) can
+        # prefix one, but only alias-scoped keys are legacy.
+        legacy = [key for key in pins if "#" not in key and key.lower().startswith(prefix)]
+        if not legacy:
+            return
+        for key in legacy:
+            ref = pins.pop(key)
+            pins.setdefault(f"{catalog}#{key[len(prefix) :].lower()}", ref)
+        save_ref_pins(pins, pins_dir, strict=True)
 
 
 # ------------------------------------------------------------------
@@ -229,13 +365,20 @@ class RefPinStage:
     """Ref pins resolved during one install attempt, written only on commit."""
 
     def __init__(self) -> None:
-        self._pins: dict[tuple[str, str, str], str] = {}
+        self._pins: dict[tuple[str, str, str], tuple[str, str]] = {}
         self._lock = threading.Lock()
 
-    def add(self, marketplace_name: str, plugin_name: str, ref: str, version: str = "") -> None:
+    def add(
+        self,
+        marketplace_name: str,
+        plugin_name: str,
+        ref: str,
+        version: str = "",
+        catalog: str = "",
+    ) -> None:
         """Stage one plugin-to-ref mapping for :meth:`commit`."""
         with self._lock:
-            self._pins[(marketplace_name, plugin_name, version)] = ref
+            self._pins[(marketplace_name, plugin_name, version)] = (ref, catalog)
 
     def keys(self) -> frozenset[tuple[str, str, str]]:
         """Return the ``(marketplace, plugin, version)`` keys staged so far."""
@@ -255,10 +398,13 @@ class RefPinStage:
         self._close()
         if not staged:
             return
-        pins = load_ref_pins(pins_dir)
-        for (marketplace_name, plugin_name, version), ref in staged.items():
-            pins[_pin_key(marketplace_name, plugin_name, version)] = ref
-        save_ref_pins(pins, pins_dir)
+        with _pins_mutation(pins_dir) as held:
+            if not held:
+                return
+            pins = load_ref_pins(pins_dir)
+            for (marketplace_name, plugin_name, version), (ref, catalog) in staged.items():
+                _put(pins, marketplace_name, plugin_name, version, catalog, ref)
+            save_ref_pins(pins, pins_dir)
 
     def discard(self) -> None:
         """Drop every staged pin and close this stage."""
@@ -291,12 +437,13 @@ def stage_ref_pin(
     plugin_name: str,
     ref: str,
     version: str = "",
+    catalog: str = "",
 ) -> None:
     """Stage a pin for the open install attempt; no attempt means no write."""
     with _stage_lock:
         stage = _active_stage
     if stage is not None:
-        stage.add(marketplace_name, plugin_name, ref, version)
+        stage.add(marketplace_name, plugin_name, ref, version, catalog)
 
 
 def enforce_ref_pin(
@@ -307,6 +454,7 @@ def enforce_ref_pin(
     pins_dir: str | None = None,
     *,
     accept_change: bool = False,
+    catalog: str = "",
 ) -> str | None:
     """Refuse a ref that contradicts the recorded pin; otherwise stage it.
 
@@ -317,11 +465,13 @@ def enforce_ref_pin(
     Returns:
         The previously pinned ref when an accepted change replaces it, else ``None``.
     """
-    previous_ref = check_ref_pin(marketplace_name, plugin_name, ref, version, pins_dir)
+    previous_ref = check_ref_pin(
+        marketplace_name, plugin_name, ref, version, pins_dir, catalog=catalog
+    )
     if previous_ref is not None and not accept_change:
-        key = _pin_key(marketplace_name, plugin_name, version)
+        key = _pin_key(marketplace_name, plugin_name, version, catalog)
         raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
-    stage_ref_pin(marketplace_name, plugin_name, ref, version)
+    stage_ref_pin(marketplace_name, plugin_name, ref, version, catalog)
     return previous_ref
 
 

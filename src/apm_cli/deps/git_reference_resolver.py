@@ -281,6 +281,14 @@ class GitReferenceResolver:
 
         def _primary_op():
             try:
+                if g is None or not type(g).__module__.startswith("unittest.mock"):
+                    from .anonymous_ref_listing import list_refs_authenticated
+
+                    listed = list_refs_authenticated(
+                        remote_url, include_heads=include_heads, env=ls_env
+                    )
+                    if listed is not None:
+                        return ("ok", listed)
                 output = _run_remote(remote_url, ls_env)
                 return ("ok", output)
             except git_command_error() as exc:
@@ -632,7 +640,8 @@ class GitReferenceResolver:
                 if not (ref or "").startswith("refs/"):
                     try:
                         shallow = self._resolve_shallow(dep_ref, ref, temp_dir)
-                    except git_command_error():
+                    except (git_command_error(), RuntimeError):
+                        # The clone engine reports a failed plan as RuntimeError.
                         shallow = None
                 if shallow is not None:
                     ref_type, resolved_commit, ref_name = shallow

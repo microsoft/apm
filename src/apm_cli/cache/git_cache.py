@@ -66,6 +66,10 @@ class CachePruneError(OSError):
         super().__init__(f"Pruned {pruned} SHA group(s); {len(failures)} failed.")
 
 
+class CachedCheckoutTamperedError(RuntimeError):
+    """A read-only cache holds a checkout that does not match its commit."""
+
+
 class IncompleteCheckoutError(RuntimeError):
     """A checkout exited 0 but left tracked files unmaterialized (#3071).
 
@@ -77,6 +81,86 @@ class IncompleteCheckoutError(RuntimeError):
     def __init__(self, message: str, *, stderr: str = "") -> None:
         super().__init__(message)
         self.stderr = stderr
+
+
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def _oid(value: str, width: int) -> str | None:
+    return value if len(value) == width and set(value) <= _HEX_DIGITS else None
+
+
+def _packed_branch_tips(text: str, width: int) -> dict[str, str] | None:
+    """Branch entries of a packed-refs text, or None unless every line is well formed."""
+    tips: dict[str, str] = {}
+    previous: str | None = None
+    if text and not text.endswith("\n"):
+        return None  # an unterminated last line
+    for number, line in enumerate(text.split("\n")[:-1]):
+        if number == 0 and line.startswith("# pack-refs with:"):
+            continue
+        if line.startswith("^"):
+            # A peel line follows one tag entry; a branch that peels names no commit.
+            if previous is None or previous.startswith("refs/heads/") or not _oid(line[1:], width):
+                return None
+            previous = None
+            continue
+        oid, sep, name = line.partition(" ")
+        if not sep or _oid(oid, width) is None or not name.startswith("refs/") or " " in name:
+            return None
+        previous = name
+        if name.startswith("refs/heads/"):
+            tips[name] = oid
+    return tips
+
+
+def _branch_tips(git_dir: Path, width: int) -> set[str] | None:
+    """Branch tips of *git_dir* as git resolves them (loose over packed), or None if unusual."""
+    if (git_dir / "reftable").exists():
+        return None
+    tips: dict[str, str] = {}
+    packed = git_dir / "packed-refs"
+    if packed.exists():
+        found = _packed_branch_tips(packed.read_text(encoding="ascii"), width)
+        if found is None:
+            return None
+        tips.update(found)
+    heads = git_dir / "refs" / "heads"
+    for ref in heads.rglob("*") if heads.is_dir() else ():
+        if ref.is_symlink() or ref.name.endswith(".lock"):
+            return None
+        if ref.is_dir():
+            continue
+        name = "/".join(("refs", "heads", *ref.relative_to(heads).parts))
+        text = ref.read_text(encoding="ascii")
+        if not text.endswith("\n") or text.count("\n") != 1:
+            return None
+        if text.startswith("ref: "):
+            tips.pop(name, None)  # names no commit itself; a branch target is read on its own
+            continue
+        oid = _oid(text[:-1], width)
+        if oid is None:
+            return None
+        tips[name] = oid
+    return set(tips.values())
+
+
+def _is_ref_tip(git_dir: Path, sha: str) -> bool:
+    """Whether a branch of the fresh clone *git_dir* points at *sha* (read, not run).
+
+    Only a positive answer is used (a branch tip is a commit the clone holds).
+    Refs resolve as git resolves them: a loose ref wins over its packed entry,
+    and tags, peel lines and symbolic refs name nothing. Anything unreadable,
+    malformed or unusual answers False, and the caller asks git.
+    """
+    sha = sha.lower()
+    if _oid(sha, len(sha)) is None or len(sha) not in (40, 64):
+        return False
+    try:
+        tips = _branch_tips(git_dir, len(sha))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return tips is not None and sha in tips
 
 
 def _safe_git_args() -> list[str]:
@@ -348,6 +432,7 @@ class GitCache:
         locked_sha: str | None = None,
         env: dict[str, str] | None = None,
         sparse_paths: list[str] | None = None,
+        label: str | None = None,
     ) -> Path:
         """Return path to a cached checkout for the given repo+ref.
 
@@ -361,32 +446,44 @@ class GitCache:
                 directories using ``git sparse-checkout --cone``. The
                 shard is keyed by ``(sha, sparse_paths_variant)`` so
                 full and sparse variants of the same SHA coexist.
+            label: The package name messages use for this checkout.
 
         Returns:
             Path to the checkout directory, verified against its commit
             (``cache/checkout_verify.py``). A checkout that fails is rebuilt
             once from a fresh fetch (its bare is discarded too, since the bare
-            may have supplied the bytes), then refused.
+            may have supplied the bytes), then refused. A read-only cache
+            never rebuilds: it raises :class:`CachedCheckoutTamperedError`.
         """
         from ..utils.git_env import git_subprocess_env
-        from .checkout_verify import verify_checkout
+        from .checkout_verify import inprocess_verified, verify_checkout
 
         for attempt in range(2):
             checkout = self._get_checkout(
                 url, ref, locked_sha=locked_sha, env=env, sparse_paths=sparse_paths
             )
             sha = checkout.parent.name
+            if not sparse_paths and inprocess_verified(checkout, sha, use="verify"):
+                # The fresh landing: every byte was hashed to its object id as written.
+                return checkout
             verify_env = git_subprocess_env(env)
             cone = bool(sparse_paths)
             if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):
                 return checkout
+            copy = _cached_copy_name(label, url, sha)
             if self._read_only:
-                raise LookupError("cached checkout does not match its commit")
+                from ..core.remediation import CACHED_CHECKOUT_TAMPERED
+
+                # A read-only reader (audit) reports a tampered cache; it never repairs it.
+                raise CachedCheckoutTamperedError(
+                    f"Cached copy of {copy} does not match its commit; a read-only command "
+                    f"does not repair the cache. {CACHED_CHECKOUT_TAMPERED.sentence()}"
+                )
             if attempt == 0:
                 from ..utils.console import _rich_warning
 
                 _rich_warning(
-                    f"Cached copy of {_sanitize_url(url)} @ {sha[:12]} failed verification "
+                    f"Cached copy of {copy} failed verification "
                     "against its commit; rebuilding it from a fresh fetch.",
                     symbol="warning",
                 )
@@ -399,8 +496,8 @@ class GitCache:
                 ),
             )
         raise RuntimeError(
-            f"Cached checkout for {_sanitize_url(url)} @ {sha[:12]} does not match its commit "
-            "even after a fresh fetch; refusing it"
+            f"Cached checkout for {_cached_copy_name(label, url, sha)} does not match its "
+            "commit even after a fresh fetch; refusing it"
         )
 
     def _get_checkout(
@@ -460,6 +557,10 @@ class GitCache:
         # so only the trees + the blobs reachable from the sparse cone are
         # downloaded. Full-tree callers keep the legacy non-partial bare.
         use_partial = bool(sparse_paths)
+        if not use_partial and not self._refresh:
+            landed = self._inprocess_checkout(url, shard_key, sha, env=env)
+            if landed is not None:
+                return landed
         self._ensure_bare_repo(url, shard_key, sha, env=env, partial=use_partial)
         return self._create_checkout(
             url,
@@ -469,6 +570,35 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _inprocess_checkout(
+        self, url: str, shard_key: str, sha: str, *, env: dict[str, str] | None
+    ) -> Path | None:
+        """Land a full checkout fetched in-process, or ``None`` to run git."""
+        from ..utils.file_ops import robust_rmtree
+        from .checkout_verify import register_inprocess_manifest
+        from .inprocess_fetch import fetch_worktree
+
+        sha_parent = self._checkouts_root / shard_key / sha
+        ensure_path_within(sha_parent, self._checkouts_root)
+        sha_parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(sha_parent), 0o700)
+        final_dir = sha_parent / _variant_key(None)
+        lock = shard_lock(final_dir)
+        with lock:
+            if final_dir.exists():
+                return None
+            staged = stage_path(final_dir)
+            ensure_path_within(staged, self._checkouts_root)
+            staged.mkdir(parents=True, exist_ok=True)
+            os.chmod(str(staged), 0o700)
+            files = fetch_worktree(url, sha, staged, env, _checkout_materialization_pins())
+            if files is None or not atomic_land(staged, final_dir, lock):
+                robust_rmtree(staged, ignore_errors=True)
+                return None
+        register_inprocess_manifest(final_dir, sha, files)
+        _log.debug("In-process fetch: %s @ %s", _sanitize_url(url), sha[:12])
+        return self._record_checkout_access(final_dir)
 
     def _read_only_checkout(
         self,
@@ -798,6 +928,8 @@ class GitCache:
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
+        if _is_ref_tip(staged, sha):
+            return  # a ref of the clone names it, so the commit is present
         try:
             probe = run_git_text(
                 [
@@ -1011,6 +1143,37 @@ class GitCache:
                         env=subprocess_env,
                         extra_git_args=_safe_git_args(),
                     )
+                # PERF LEVER C (W3d C1-C12, research): the pinned worktree from the
+                # bare's pack in process; None means nothing was written, run git.
+                inprocess_files = None
+                if not sparse_paths and not promisor_url:
+                    from .pack_objects import materialize_tree
+
+                    inprocess_files = materialize_tree(staged, sha, env or os.environ)
+            except (RuntimeError, ValueError):
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise
+            except (subprocess.SubprocessError, OSError) as exc:
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise RuntimeError(
+                    f"Failed to create checkout for {_sanitize_url(url)} @ {sha[:12]}: {exc}"
+                ) from exc
+            if inprocess_files is not None:
+                from .checkout_verify import register_inprocess_manifest
+
+                if not atomic_land(staged, final_dir, lock):
+                    from ..utils.file_ops import robust_rmtree
+
+                    robust_rmtree(staged, ignore_errors=True)
+                    raise RuntimeError(f"Race landing {_sanitize_url(url)} @ {sha[:12]}")
+                register_inprocess_manifest(final_dir, sha, inprocess_files)
+                _log.debug("In-process checkout: %s @ %s", _sanitize_url(url), sha[:12])
+                return final_dir
+            try:
                 # Checkout the specific SHA.
                 checkout = run_git_text(
                     [
@@ -1307,7 +1470,7 @@ class GitCache:
             for entry in os.scandir(str(self._db_root)):
                 if entry.is_dir(follow_symlinks=False) and not entry.name.endswith(".lock"):
                     db_count += 1
-                    total_size += _dir_size(Path(entry.path))
+                    total_size += dir_size(Path(entry.path))
                 elif entry.name.endswith(".ref") and entry.is_file(follow_symlinks=False):
                     total_size += entry.stat(follow_symlinks=False).st_size
 
@@ -1317,7 +1480,7 @@ class GitCache:
                     for sha_entry in os.scandir(shard_entry.path):
                         if sha_entry.is_dir(follow_symlinks=False):
                             checkout_count += 1
-                            total_size += _dir_size(Path(sha_entry.path))
+                            total_size += dir_size(Path(sha_entry.path))
 
         return {
             "db_count": db_count,
@@ -1392,13 +1555,15 @@ def _names_shard(shard: str):
 
 
 def _same_path(value: str, path: Path) -> bool:
+    from apm_cli.utils.realpath import resolve_path
+
     try:
-        return Path(value).resolve() == path.resolve()
+        return resolve_path(Path(value)) == resolve_path(path)
     except (OSError, ValueError, RuntimeError):
         return False
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     """Calculate total size of a directory (non-recursive symlink-safe)."""
     total = 0
     try:
@@ -1413,6 +1578,27 @@ def _dir_size(path: Path) -> int:
     except OSError:
         pass
     return total
+
+
+def raise_if_tampered(exc: BaseException) -> None:
+    """Re-raise the read-only cache's tamper report found in *exc*'s chain (#5159).
+
+    A reader that falls back to a fresh clone on any cache failure calls this
+    first, so a tampered cache is reported instead of cloned past.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, CachedCheckoutTamperedError):
+            raise current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+
+
+def _cached_copy_name(label: str | None, url: str, sha: str) -> str:
+    """``<package> (<url> @ <sha12>)``, or ``<url> @ <sha12>`` without a package name."""
+    where = f"{_sanitize_url(url)} @ {sha[:12]}"
+    return f"{label} ({where})" if label else where
 
 
 def _sanitize_url(value: str) -> str:

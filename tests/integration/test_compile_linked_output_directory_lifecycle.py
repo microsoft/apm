@@ -1,0 +1,158 @@
+"""Compile keeps compiled output inside the project when a deploy directory is a link.
+
+``apm compile`` writes ``.github/copilot-instructions.md`` for the Copilot
+target. When ``.github`` is a symlink to a directory outside the project,
+compile refuses, exits non-zero and leaves the link target byte-identical,
+matching the install-time refusal for linked deploy directories.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from tests.integration._containment_kit import (
+    build_containment_kit,
+    output,
+    snapshot,
+)
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows"),
+    pytest.mark.e2e,
+    pytest.mark.promise("P-OWN-compiled-output-writes"),
+]
+
+_GLOBAL_RULE = "---\ndescription: Global rule\n---\nGlobal body.\n"
+_DOCS_RULE = '---\napplyTo: "docs/**"\ndescription: Docs rule\n---\nDocs body.\n'
+
+
+def _write_compile_project(project: Path) -> None:
+    (project / "apm.yml").write_text(
+        "name: consumer\nversion: 0.0.1\ntargets: [copilot]\n", encoding="utf-8"
+    )
+    rule = project / ".apm/instructions/global.instructions.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text(_GLOBAL_RULE, encoding="utf-8")
+
+
+@pytest.mark.parametrize("link_kind", ["absolute", "relative", "dangling"])
+def test_compile_refuses_linked_github_directory(
+    tmp_path: Path, apm_binary_path: Path, link_kind: str
+) -> None:
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    _write_compile_project(kit.project)
+    (kit.outside / "existing.md").write_text("outside content\n", encoding="utf-8")
+    link = kit.project / ".github"
+    link_target = {
+        "absolute": str(kit.outside),
+        "relative": "../outside",
+        "dangling": str(kit.outside / "missing"),
+    }[link_kind]
+    os.symlink(link_target, link, target_is_directory=True)
+    before = snapshot(kit.outside)
+
+    result = kit.run("compile")
+
+    assert result.returncode != 0, output(result)
+    assert "Refusing deployment through a symlinked path component" in output(result)
+    assert ".github/copilot-instructions.md" in output(result)
+    assert snapshot(kit.outside) == before
+    assert not (kit.outside / "missing").exists()
+    assert link.is_symlink()
+
+
+@pytest.mark.parametrize("link_scope", ["outside", "inside"])
+def test_compile_refuses_distributed_output_through_linked_directory(
+    tmp_path: Path, apm_binary_path: Path, link_scope: str
+) -> None:
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    (kit.project / "apm.yml").write_text(
+        "name: consumer\nversion: 0.0.1\ntargets: [copilot]\n", encoding="utf-8"
+    )
+    rule = kit.project / ".apm/instructions/docs.instructions.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text(_DOCS_RULE, encoding="utf-8")
+    linked_dir = kit.outside if link_scope == "outside" else kit.project / "real-docs"
+    linked_dir.mkdir(exist_ok=True)
+    (linked_dir / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    os.symlink(linked_dir, kit.project / "docs", target_is_directory=True)
+    before = snapshot(linked_dir)
+
+    result = kit.run("compile")
+
+    assert result.returncode != 0, output(result)
+    assert snapshot(linked_dir) == before
+    assert not (linked_dir / "AGENTS.md").exists()
+    if link_scope == "inside":
+        assert "Refusing deployment through a symlinked path component: docs/AGENTS.md" in (
+            output(result)
+        )
+
+
+def test_compile_writes_into_regular_github_directory(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    _write_compile_project(kit.project)
+
+    result = kit.run("compile")
+
+    assert result.returncode == 0, output(result)
+    written = kit.project / ".github/copilot-instructions.md"
+    assert "Global body." in written.read_text(encoding="utf-8")
+    assert snapshot(kit.outside) == {}
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO")
+@pytest.mark.parametrize(
+    ("output_rel", "args"),
+    [
+        ("AGENTS.md", ("compile",)),
+        (".github/copilot-instructions.md", ("compile",)),
+        (".github/copilot-instructions.md", ("compile", "--target", "codex")),
+        ("AGENTS.md", ("compile", "--single-agents")),
+    ],
+    ids=["distributed", "copilot-root", "copilot-root-cleanup", "single-agents"],
+)
+@pytest.mark.parametrize("via_link", [False, True], ids=["fifo", "link-to-fifo"])
+def test_compile_refuses_a_fifo_at_an_output_path_without_blocking(
+    tmp_path: Path, apm_binary_path: Path, output_rel: str, args: tuple[str, ...], via_link: bool
+) -> None:
+    """A FIFO at an output path, or a link to one, is refused by name; compile never
+    reads or replaces it (#5187)."""
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    _write_compile_project(kit.project)
+    output_path = kit.project / output_rel
+    output_path.parent.mkdir(exist_ok=True)
+    fifo = kit.project / "pipe" if via_link else output_path
+    os.mkfifo(fifo)
+    if via_link:
+        output_path.symlink_to(fifo)
+    env = kit.isolated.subprocess_env(overrides={"NO_COLOR": "1"})
+
+    result = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=30).run(
+        args, cwd=kit.project, env=env, scenario_id="compile-fifo-output"
+    )
+
+    assert fifo.is_fifo()
+    assert output_path.is_symlink() is via_link
+    if via_link and args != ("compile", "--single-agents") and output_rel == "AGENTS.md":
+        # A linked root AGENTS.md is a hand-authored file: retained, never read.
+        assert result.returncode == 0, output(result)
+        assert "retained 1 hand-authored context file" in output(result), output(result)
+        return
+    if via_link and "--target" in args:
+        # Stale cleanup never reads or removes a link: it is retained.
+        assert result.returncode == 0, output(result)
+        assert "symbolic links are not removed" in output(result), output(result)
+        return
+    assert result.returncode != 0, output(result)
+    assert f"{output_rel} is not a regular file" in output(result), output(result)

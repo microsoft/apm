@@ -17,6 +17,7 @@ classification and output are unchanged. No credential is ever sent.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -62,6 +63,11 @@ _FALLBACK_ENV = (
     "GIT_HTTP_USER_AGENT",
     "SSL_CERT_DIR",
 )
+
+# The trust source "git's schannel" (Windows certificate store, revocation checked),
+# in place of a CA file; never a path.
+OS_TRUST = "<os-trust:schannel>"
+_OS_SESSION_MEMO = "anonymous-listing-os-trust-session"
 
 _session_lock = threading.Lock()
 _sessions: dict[str, object] = {}
@@ -240,7 +246,14 @@ def _proxy(env: Mapping[str, str]) -> str | None:
 
 def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
     """The CA file git would trust (GIT_SSL_CAINFO > http.sslCAInfo > SSL_CERT_FILE)."""
-    backend = config.get(_BACKEND_KEY, "").lower()
+    raw_backend = config.get(_BACKEND_KEY, "")
+    backend = raw_backend.lower()
+    if backend == "schannel":
+        # git tests strcmp("schannel") but curl matches any case: "Schannel" is
+        # schannel verifying against the CA file, which is git's to decide.
+        if raw_backend != "schannel":
+            raise _Fallback("http.sslBackend is not spelled 'schannel'")
+        return _schannel_trust()
     if backend not in ("", "openssl"):
         raise _Fallback("non-default TLS backend")
     for path in (env.get("GIT_SSL_CAINFO"), config.get(_CA_KEY), env.get("SSL_CERT_FILE")):
@@ -249,6 +262,83 @@ def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
                 raise _Fallback("CA file is not a regular file")
             return path
     return _system_ca()
+
+
+def _schannel_trust() -> str:
+    """:data:`OS_TRUST`: git's schannel trusts exactly the Windows store (W3d SC2).
+
+    Under schannel git clears curl's CA file unless ``http.schannelUseSSLCAInfo``
+    is set (git http.c), so ``http.sslCAInfo``, ``GIT_SSL_CAINFO`` and
+    ``SSL_CERT_FILE`` never apply and are never loaded here (SC1). Every other
+    ``http.*`` key (``schannelUseSSLCAInfo``, ``schannelCheckRevoke``,
+    ``sslCAPath``, ...) already falls back in ``_classify``.
+    """
+    if os.name != "nt":
+        raise _Fallback("schannel outside Windows")
+    _require_locked_truststore()
+    return OS_TRUST
+
+
+_TRUSTSTORE_FLOOR = (0, 10, 5)
+
+
+def _require_locked_truststore() -> None:
+    """W3d TS2: truststore < 0.10.5 can verify while a concurrent handshake has
+    relaxed the shared context, so an older or unknown version is git's."""
+    import truststore
+
+    try:
+        version = tuple(int(part) for part in str(truststore.__version__).split(".")[:3])
+    except (AttributeError, ValueError):
+        raise _Fallback("truststore version is unknown") from None
+    if version < _TRUSTSTORE_FLOOR:
+        raise _Fallback(f"truststore {truststore.__version__} predates the 0.10.5 lock")
+
+
+def requests_verify(ca: str) -> str | bool:
+    """The ``verify=`` for *ca*: the file, or ``True`` for the OS store context."""
+    return True if ca == OS_TRUST else ca
+
+
+def os_trust_context() -> ssl.SSLContext:
+    """git schannel's trust: the Windows store only, hostname and revocation checked.
+
+    W3d SC1/SC5: no extra anchors (urllib3's CA bundle load is a no-op), host
+    name and certificate required, and revocation checked for the whole chain:
+    curl's schannel default checks the chain except the root, so this rejects
+    a superset of what git rejects, and any failure falls back to git.
+    """
+    import truststore
+
+    class _WindowsStoreOnly(truststore.SSLContext):
+        def load_verify_locations(self, *args, **kwargs) -> None:
+            return None
+
+        def load_default_certs(self, *args, **kwargs) -> None:
+            return None
+
+        def set_default_verify_paths(self) -> None:
+            return None
+
+    context = _WindowsStoreOnly(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.verify_flags |= ssl.VERIFY_CRL_CHECK_CHAIN
+    return context
+
+
+def _os_trust_session():
+    """One keep-alive OS-trust session per command (SC8), dropped with its memos."""
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    memo = invocation_memo(_OS_SESSION_MEMO)
+    if memo is None:
+        return _session_with_context(os_trust_context())
+    with _session_lock:
+        session = memo.get("session")
+        if session is None:
+            session = memo["session"] = _session_with_context(os_trust_context())
+        return session
 
 
 def _system_ca() -> str:
@@ -306,42 +396,48 @@ def _git_trust_context(ca: str) -> ssl.SSLContext:
     return context
 
 
+def _session_with_context(context):
+    """A credential-free pooled session whose direct and proxied TLS use only *context*."""
+    import http.cookiejar
+
+    from requests.adapters import HTTPAdapter
+
+    from apm_cli.utils.http_credentials import CredentialScopedSession
+    from apm_cli.version import get_version
+
+    class _PinnedTrustAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            kwargs["ssl_context"] = context
+            return super().init_poolmanager(*args, **kwargs)
+
+        def proxy_manager_for(self, proxy, **proxy_kwargs):
+            proxy_kwargs["ssl_context"] = context
+            return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+    session = CredentialScopedSession(ambient_credentials=False)
+    session.trust_env = False
+    session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+    session.headers.clear()
+    session.headers.update(
+        {
+            "User-Agent": f"apm/{get_version()}",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "Pragma": "no-cache",
+        }
+    )
+    session.mount("https://", _PinnedTrustAdapter(pool_connections=4, pool_maxsize=16))
+    return session
+
+
 def _session_for_refs(ca: str):
     """One pooled session per CA, whose direct and proxied TLS use only *ca*."""
+    if ca == OS_TRUST:
+        return _os_trust_session()
     with _session_lock:
         session = _sessions.get(ca)
         if session is None:
-            import http.cookiejar
-
-            from requests.adapters import HTTPAdapter
-
-            from apm_cli.utils.http_credentials import CredentialScopedSession
-            from apm_cli.version import get_version
-
-            context = _git_trust_context(ca)
-
-            class _GitTrustAdapter(HTTPAdapter):
-                def init_poolmanager(self, *args, **kwargs):
-                    kwargs["ssl_context"] = context
-                    return super().init_poolmanager(*args, **kwargs)
-
-                def proxy_manager_for(self, proxy, **proxy_kwargs):
-                    proxy_kwargs["ssl_context"] = context
-                    return super().proxy_manager_for(proxy, **proxy_kwargs)
-
-            session = CredentialScopedSession(ambient_credentials=False)
-            session.trust_env = False
-            session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
-            session.headers.clear()
-            session.headers.update(
-                {
-                    "User-Agent": f"apm/{get_version()}",
-                    "Accept": "*/*",
-                    "Accept-Encoding": "identity",
-                    "Pragma": "no-cache",
-                }
-            )
-            session.mount("https://", _GitTrustAdapter(pool_connections=4, pool_maxsize=16))
+            session = _session_with_context(_git_trust_context(ca))
             _sessions[ca] = session
         return session
 
@@ -459,8 +555,20 @@ def parse_advertisement(data: bytes, prefixes: tuple[str, ...]) -> str:
     return "".join(lines)
 
 
-def _fetch(refs_url: str, proxy: str | None, ca: str, holder: dict) -> bytes:
-    from apm_cli.utils.http_credentials import origin_bounded_request
+def _fetch(
+    refs_url: str, proxy: str | None, ca: str, holder: dict, credential: str | None = None
+) -> bytes:
+    from apm_cli.cache.inprocess_fetch import _rate_limited, trip_if_rate_limited
+    from apm_cli.utils.http_credentials import (
+        origin_bounded_request,
+        per_request_credential_headers,
+    )
+
+    # Another listing or fetch may have tripped the breaker during this one's checks.
+    if _rate_limited():
+        raise _Fallback("rate limited earlier in this command")
+    # Per request only (never session.headers), exact origin, no redirect hop.
+    headers = per_request_credential_headers(credential) if credential else None
 
     deadline = time.monotonic() + _DEADLINE_SECONDS
     # max_hops=0: any redirect raises RedirectRefusedError and falls back.
@@ -472,11 +580,16 @@ def _fetch(refs_url: str, proxy: str | None, ca: str, holder: dict) -> bytes:
         max_hops=0,
         ambient_credentials=False,
         proxies={"https": proxy} if proxy else {},
-        verify=ca,
+        verify=requests_verify(ca),
         timeout=_TIMEOUT,
         stream=True,
+        **({"headers": headers} if headers else {}),
     ) as response:
         holder["response"] = response
+        if trip_if_rate_limited(response.status_code, response.headers):
+            raise _Fallback(f"rate limited (HTTP {response.status_code})")
+        if response.headers.get("WWW-Authenticate") is not None:
+            raise _Fallback("auth challenge")
         if response.status_code != 200:
             raise _Fallback(f"HTTP {response.status_code}")
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
@@ -494,7 +607,11 @@ def _abort(response) -> None:
 
 
 def _fetch_within_deadline(
-    refs_url: str, proxy: str | None, ca: str, budget: float = _DEADLINE_SECONDS
+    refs_url: str,
+    proxy: str | None,
+    ca: str,
+    budget: float = _DEADLINE_SECONDS,
+    credential: str | None = None,
 ) -> bytes:
     """The advertisement body, or ``_Fallback`` on any error or past the budget.
 
@@ -506,7 +623,7 @@ def _fetch_within_deadline(
 
     def run() -> None:
         try:
-            holder["data"] = _fetch(refs_url, proxy, ca, holder)
+            holder["data"] = _fetch(refs_url, proxy, ca, holder, credential)
         except Exception as exc:
             holder["error"] = exc
 
@@ -527,12 +644,48 @@ def _fetch_within_deadline(
 
 
 def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, str]) -> str | None:
+    """``git ls-remote --tags [--heads] <url>`` stdout for an anonymous attempt, or ``None``."""
+    return _list_refs(url, include_heads=include_heads, env=env)
+
+
+def list_refs_authenticated(url: str, *, include_heads: bool, env: Mapping[str, str]) -> str | None:
+    """The same listing with AuthResolver's managed github-basic header, or ``None`` (run git).
+
+    RESEARCH (lever 1): A''s ``_split_managed_auth`` takes only the header
+    AuthResolver writes; the gates see the token-free env; the header goes on
+    the request only and is dropped after it.
+    """
+    from apm_cli.cache.inprocess_fetch import _Refuse, _split_managed_auth
+
+    try:
+        line, stripped = _split_managed_auth(env)
+    except _Refuse as reason:
+        _log.debug("authenticated ref listing falls back to git: %s", reason)
+        return None
+    if line is None:
+        return None
+    from apm_cli.utils.http_credentials import credential_header_value
+
+    value = credential_header_value(line)
+    try:
+        return _list_refs(url, include_heads=include_heads, env=stripped, credential=value)
+    finally:
+        del line, value
+
+
+def _list_refs(
+    url: str, *, include_heads: bool, env: Mapping[str, str], credential: str | None = None
+) -> str | None:
     """``git ls-remote --tags [--heads] <url>`` stdout for an anonymous attempt, or ``None``.
 
     ``None`` means "run git": the caller's existing anonymous ``git ls-remote``
     then runs with *env* exactly as before.
     """
+    from apm_cli.cache.inprocess_fetch import _rate_limited
+
     try:
+        if _rate_limited():
+            raise _Fallback("rate limited earlier in this command")
         path = _repository_path(url)
         for name in _FALLBACK_ENV:
             if env.get(name):
@@ -550,8 +703,90 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
         verify = _verify(child_env, config)
         prefixes = ("refs/tags/", "refs/heads/") if include_heads else ("refs/tags/",)
         refs_url = f"https://{_GITHUB_HOST}{path}/info/refs?service=git-upload-pack"
-        data = _fetch_within_deadline(refs_url, proxy, verify)
+        data = _fetch_within_deadline(refs_url, proxy, verify, credential=credential)
         return parse_advertisement(data, prefixes)
     except _Fallback as reason:
         _log.debug("anonymous ref listing falls back to git: %s", reason)
         return None
+
+
+# ``-c`` keys whose values cannot change an https ref advertisement request
+# (hooks, fsmonitor, submodules, checkout line endings and links).
+_INERT_BASE_KEYS = ("core.hookspath", "core.fsmonitor", "submodule.recurse", "core.longpaths")
+
+
+def _inert_git_arg_keys() -> frozenset[str]:
+    from apm_cli.utils.git_env import git_line_ending_pin_entries, git_symlink_pin_entry
+
+    pins = (key for key, _value in (*git_line_ending_pin_entries(), git_symlink_pin_entry()))
+    return frozenset((*_INERT_BASE_KEYS, *(key.lower() for key in pins)))
+
+
+_BRANCH_AND_TAG_PATTERNS = ("refs/heads/*", "refs/tags/*")
+_listing_lock = threading.Lock()
+
+
+def _inert(git_args) -> bool:
+    args = list(git_args)
+    if len(args) % 2:
+        return False
+    inert = _inert_git_arg_keys()
+    for flag, value in zip(args[::2], args[1::2], strict=True):
+        if flag != "-c" or value.partition("=")[0].lower() not in inert:
+            return False
+    return True
+
+
+def _listing_key(url: str, env: Mapping[str, str] | None, git_args) -> str:
+    """Digest of everything that can change the answer: the URL, the full git
+    env (config, credentials, proxy, TLS) and the extra git args."""
+    scope = sorted((os.environ if env is None else env).items())
+    material = repr((url, env is None, scope, list(git_args)))
+    return hashlib.sha256(material.encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def branch_and_tag_refs(
+    url: str,
+    *,
+    env: Mapping[str, str] | None,
+    timeout: int,
+    git_args=(),
+    memo: dict | None = None,
+):
+    """``git ls-remote <url> refs/heads/* refs/tags/*``, answered in process when possible.
+
+    Answers from the in-process anonymous listing when git's request is
+    provably identical, else runs ``git ls-remote`` exactly as before. With
+    *memo* (the caller's one-attempt scope, never process-wide) a successful
+    answer is reused for the same URL, env and git args; failures are never
+    reused. Env and args are part of the key, so an answer obtained under one
+    credential context never answers another.
+    """
+    import subprocess
+
+    from apm_cli.utils.git_env import git_remote_refs
+
+    key = _listing_key(url, env, git_args)
+    if memo is not None:
+        with _listing_lock:
+            cached = memo.get(key)
+        if cached is not None:
+            return cached
+    # env=None makes git build its env from the process; only an explicit
+    # env can be judged for equivalence.
+    eligible = env is not None and _inert(git_args)
+    listed = list_refs_anonymously(url, include_heads=True, env=env) if eligible else None
+    if listed is not None:
+        result = subprocess.CompletedProcess(["git", "ls-remote", url], 0, listed, "")
+    else:
+        result = git_remote_refs(
+            url,
+            *_BRANCH_AND_TAG_PATTERNS,
+            env=None if env is None else dict(env),
+            timeout=timeout,
+            git_args=git_args,
+        )
+    if memo is not None and result.returncode == 0:
+        with _listing_lock:
+            memo.setdefault(key, result)
+    return result

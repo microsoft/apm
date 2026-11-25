@@ -409,23 +409,26 @@ def skill_tree_baselines(
 _NON_SKILL_MEMBERS = frozenset({"bin", ".claude-plugin"})
 
 
-def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple[Any, Path, bool]]:
-    """Yield (profile, skills root, legacy layout) for skill targets outside this install."""
+def _inactive_skill_roots(
+    integrator: Any, project_root: Path, holds: Callable[[Path], bool] = lambda _root: True
+) -> Iterator[tuple[Any, Path, bool]]:
+    """Yield (profile, skills root, legacy layout) for skill targets outside this install.
+
+    Only roots *holds* admits are resolved and yielded, so a caller that
+    skips roots without its entry pays no resolution for them.
+    """
     from apm_cli.install.helpers.reconciliation_scope import (
         _scoped_known_targets_for_reconciliation,
     )
     from apm_cli.integration.skill_layout import resolve_skill_layout
+    from apm_cli.utils.realpath import resolve_path
 
     targets = list(integrator._skill_targets or ())
     # A harness a native plugin route serves is not outside this install (#5036).
     active_names = {target.name for target in targets} | set(
         getattr(integrator, "_skill_native_harnesses", frozenset())
     )
-    active_roots = {
-        target.skills_deploy_path(project_root).resolve()
-        for target in targets
-        if target.supports("skills")
-    }
+    active_roots: set[Path] | None = None
     profiles = _scoped_known_targets_for_reconciliation(
         user_scope=integrator.install_user_scope(), active_targets=targets, declared_targets=None
     )
@@ -439,7 +442,15 @@ def _inactive_skill_roots(integrator: Any, project_root: Path) -> Iterator[tuple
             if legacy and candidate is profile:
                 continue
             root = candidate.skills_deploy_path(project_root)
-            if root.resolve() not in active_roots:
+            if not holds(root):
+                continue
+            if active_roots is None:
+                active_roots = {
+                    resolve_path(target.skills_deploy_path(project_root))
+                    for target in targets
+                    if target.supports("skills")
+                }
+            if resolve_path(root) not in active_roots:
                 yield candidate, root, legacy
 
 
@@ -469,7 +480,9 @@ def report_stale_kept_copies(
     user_scope = integrator.install_user_scope()
     lockfile_root = get_apm_dir(InstallScope.USER) if user_scope else project_root
     _, recorded_owners = integrator._ownership_maps(lockfile_root)
-    for profile, root, legacy in _inactive_skill_roots(integrator, project_root):
+    for profile, root, legacy in _inactive_skill_roots(
+        integrator, project_root, lambda root: (root / destination.name).is_dir()
+    ):
         kept = root / destination.name
         if not kept.is_dir() or kept in integrator._stale_kept_reported:
             continue

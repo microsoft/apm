@@ -137,11 +137,11 @@ def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Pa
         if not BaseIntegrator.validate_deploy_path(rel, root, allowed_prefixes=prefixes):
             raise Decline(f"path outside the target roots {rel!r}")
     path = root / rel
-    current = root
-    for part in rel.split("/")[:-1]:
-        current = current / part
-        if current.is_symlink():
-            raise Decline("symlink in a deployed path")
+    from apm_cli.utils.path_security import has_symlink_component
+
+    # The owner also treats a Windows directory junction as a link (#5229).
+    if has_symlink_component(root, path.parent):
+        raise Decline("symlink in a deployed path")
     return path
 
 
@@ -212,6 +212,20 @@ def _plan_files(
                 # escape sequences can encode: such bytes take the full run.
                 raise Decline("non-ASCII deployed content")
     return writes
+
+
+def _refuse_claude_carried_rules(project_root: Path, targets: Any) -> None:
+    """Decline when a Claude rule may be left to a compiled AGENTS.md (#5343).
+
+    The lock records only the rules install wrote, so a deleted carrier would
+    otherwise leave Claude with no copy; the full run restores the rule.
+    """
+    from apm_cli.compilation.claude_agents_md import compiled_agents_md_may_carry
+
+    if any(
+        getattr(t, "compile_family", None) == "claude" for t in targets
+    ) and compiled_agents_md_may_carry(project_root):
+        raise Decline("claude rules may depend on a compiled AGENTS.md")
 
 
 def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]]:
@@ -355,17 +369,24 @@ class _Created:
     directories: tuple[Path, ...]
 
 
-def _undo_created(created: list[_Created]) -> list[tuple[Path, str]]:
+def _undo_created(created: list[_Created], root: Path) -> list[tuple[Path, str]]:
     """Remove what this apply created, newest first, only while it is still that object.
 
     A file someone else put at the same path (after a lost no-replace race, or
     in place of ours) is kept, and so is any directory that is no longer empty.
+    A path below a directory that became a link under *root* is kept and
+    reported, never removed through the link (#5207).
     """
     from apm_cli.install.deploy_snapshot import remove_empty_directories
+    from apm_cli.utils.path_security import has_symlink_component
 
+    linked = "kept: a parent directory is a symbolic link"
     issues: list[tuple[Path, str]] = []
     for entry in reversed(created):
         if entry.path is None:
+            continue
+        if has_symlink_component(root, entry.path.parent):
+            issues.append((entry.path, linked))
             continue
         try:
             info = os.lstat(entry.path)
@@ -377,7 +398,10 @@ def _undo_created(created: list[_Created]) -> list[tuple[Path, str]]:
             os.unlink(entry.path)
         except OSError as exc:
             issues.append((entry.path, f"could not remove: {exc}"))
-    remove_empty_directories(d for entry in created for d in entry.directories)
+    directories = {d for entry in created for d in entry.directories}
+    crossing = {d for d in directories if has_symlink_component(root, d)}
+    issues.extend((d, linked) for d in sorted(crossing) if os.path.lexists(d))
+    remove_empty_directories(directories - crossing)
     return issues
 
 
@@ -525,6 +549,11 @@ def _refuse_native_plugins(project_root: Path, lock: Any) -> None:
     if os.path.lexists(ledger_path_for(project_root / APM_MODULES_DIR)):
         # Codex registrations APM owns: the full run refreshes or retires them.
         raise Decline("codex native registrations")
+    from apm_cli.native_plugins.claude_marketplaces import project_release_pending
+
+    if project_release_pending(project_root):
+        # A Claude registry entry a failed uninstall left: the full run releases it (#5258).
+        raise Decline("claude marketplace registration")
     plugins = {PackageType.AGENT_PLUGIN.value, PackageType.MARKETPLACE_PLUGIN.value}
     if any(getattr(dep, "package_type", None) in plugins for dep in lock.dependencies.values()):
         raise Decline("plugin package")
@@ -621,7 +650,7 @@ def _commit(
     staging = ResolutionStagingSession(modules)
     created: list[_Created] = []
     try:
-        with held_output() as held, journaled_apply() as journal:
+        with held_output() as held, journaled_apply(project_root) as journal:
             # The services phase may rewrite the lock outside the write seam.
             journal.record(get_lockfile_path(project_root))
             # A killed run's inactive staging roots go silently, as at the full
@@ -652,13 +681,16 @@ def _commit(
     except BaseException as exc:
         # The journal has put every deployed path back; the packages go next.
         prior = exc.issues if isinstance(exc, ApplyRestoreIncomplete) else []
-        issues = [*prior, *_undo_created(created), *staging.rollback()]
+        issues = [*prior, *_undo_created(created, project_root), *staging.rollback()]
         if issues:
             raise ApplyRestoreIncomplete(issues) from exc
         if isinstance(exc, Decline) or not isinstance(exc, Exception):
             raise  # an interrupt is restored, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc
     staging.commit()
+    # Scratch staging alone must not leave an apm_modules the full run would
+    # not create, e.g. for a project with only MCP servers (#5159, I2).
+    staging.remove_created_modules_dir()
     return held
 
 
@@ -739,6 +771,7 @@ def try_apply(
         _root, user_scope, targets = resolve_audit_scope(project_root, lock)
         if user_scope or not targets:
             raise Decline("scope")
+        _refuse_claude_carried_rules(project_root, targets)
         from apm_cli.cache.deploy_store import DeployStore
 
         session = DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)
@@ -801,6 +834,11 @@ def try_apply(
         if files or packages
         else "no-op (desired state already deployed)"
     )
+    if not (files or packages):
+        from apm_cli.install import verdict_record
+
+        # An applied diff holds its service output, so only a no-op is recorded (#4977).
+        verdict_record.note_verified_noop()
     return True
 
 

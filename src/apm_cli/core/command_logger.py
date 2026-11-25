@@ -59,6 +59,17 @@ def _strip_source_prefix(source: str) -> str:
     return source.removeprefix("org:").removeprefix("url:")
 
 
+def format_policy_age(age_seconds: int) -> str:
+    """A cached policy's age as the policy line prints it (``42s``, ``5m``, ``3h``).
+
+    The verified-state record renders the same token at replay (install/verdict_record.py).
+    """
+    if age_seconds < 60:
+        return f"{age_seconds}s"
+    minutes = age_seconds // 60
+    return f"{minutes}m" if minutes < 60 else f"{minutes // 60}h"
+
+
 @dataclass
 class _ValidationOutcome:
     """Result of package validation before install."""
@@ -879,13 +890,7 @@ class InstallLogger(CommandLogger):
         if cached:
             cache_detail = "cached"
             if age_seconds is not None:
-                if age_seconds < 60:
-                    cache_detail += f", fetched {age_seconds}s ago"
-                else:
-                    minutes = age_seconds // 60
-                    unit = "m" if minutes < 60 else "h"
-                    value = minutes if minutes < 60 else minutes // 60
-                    cache_detail += f", fetched {value}{unit} ago"
+                cache_detail += f", fetched {format_policy_age(age_seconds)} ago"
             parts.append(f"({cache_detail})")
         parts.append(f"-- enforcement={enforcement}")
 

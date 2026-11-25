@@ -295,8 +295,12 @@ def routes_unscoped_to_registry(dep: Any) -> bool:
     cannot drift apart.
 
     Objects that lack an ``is_local`` attribute are treated as local (returns
-    False) -- fail-closed for unknown dep types.
+    False) -- fail-closed for unknown dep types. A marketplace declaration
+    (``{name, marketplace}``) resolves through its catalog, which names its
+    own registry and version, so the default registry never claims it (#5256).
     """
+    if getattr(dep, "is_marketplace", False) is True:
+        return False
     return getattr(dep, "source", None) not in {"git", "registry"} and not getattr(
         dep, "is_local", True
     )
@@ -711,6 +715,8 @@ class APMPackage:
         Raises:
             ValueError: If interpreted manifest fields are invalid.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         data = dict(manifest_data)
         from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
 
@@ -732,7 +738,7 @@ class APMPackage:
         from apm_cli.core.scope import manifest_file
 
         source_manifest = manifest_path or manifest_file(package_path)
-        resolved_source = source_path.resolve() if source_path is not None else None
+        resolved_source = resolve_path(source_path) if source_path is not None else None
 
         from .manifest_contract import negotiate_manifest_contract
 
@@ -927,11 +933,13 @@ class APMPackage:
         different anchors for relative ``local_path`` dependencies each get
         their own package instance.
         """
+        from apm_cli.utils.realpath import resolve_path
+
         if not apm_yml_path.exists():
             raise FileNotFoundError(f"apm.yml not found: {apm_yml_path}")
 
-        resolved = apm_yml_path.resolve()
-        resolved_source = source_path.resolve() if source_path is not None else None
+        resolved = resolve_path(apm_yml_path)
+        resolved_source = resolve_path(source_path) if source_path is not None else None
         cache_key = (resolved, resolved_source, create_config)
         cached = _apm_yml_cache.get(cache_key)
         if cached is not None:
@@ -1137,6 +1145,8 @@ class PackageInfo:
     deployment_package_root: Path | None = None
     # (replay output root, live deploy root): audit replay renders links live (#3901)
     deployment_frame: tuple[Path, Path] | None = None
+    # The lockfile's deployed files for a replayed dependency (#5343).
+    replay_recorded_files: frozenset[str] = frozenset()
     local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)
     local_bundle_approval: str | None = None  # The key that admitted those hooks (#4027)
     # Verbatim licence copies APM added after materialization (#3556); see

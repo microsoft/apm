@@ -37,6 +37,7 @@ from .claude_agents_md import (
     without_directory_instructions,
 )
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
+from .config_file import apply_compilation_section
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
     BUILD_ID_PLACEHOLDER,
@@ -48,6 +49,7 @@ from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .managed_section import ManagedSectionError
+from .output_writer import output_error_message, refuse_unsafe_output
 from .root_context_protection import (
     _build_expected_rule_filenames,
     _get_deployed_instruction_filenames,
@@ -184,10 +186,11 @@ class CompilationConfig:
         return (self.agents_md_start_marker, self.agents_md_end_marker)
 
     @classmethod
-    def from_apm_yml(cls, **overrides) -> "CompilationConfig":
+    def from_apm_yml(cls, project_root: Path | None = None, **overrides) -> "CompilationConfig":
         """Create configuration from apm.yml with command-line overrides.
 
         Args:
+            project_root: Directory holding apm.yml (default: the working directory).
             **overrides: Command-line arguments that override config file values.
 
         Returns:
@@ -199,62 +202,16 @@ class CompilationConfig:
         try:
             from ..core.scope import manifest_file
 
-            if manifest_file(Path(".")).exists():
+            manifest = manifest_file(Path(".") if project_root is None else Path(project_root))
+            if manifest.exists():
                 from ..utils.yaml_io import load_yaml
 
-                apm_config = load_yaml("apm.yml") or {}
+                apm_config = load_yaml(manifest) or {}
 
                 # Look for compilation section
                 compilation_config = apm_config.get("compilation", {})
 
-                # Apply config file values
-                if "output" in compilation_config:
-                    config.output_path = compilation_config["output"]
-                if "chatmode" in compilation_config:
-                    config.chatmode = compilation_config["chatmode"]
-                if "resolve_links" in compilation_config:
-                    config.resolve_links = compilation_config["resolve_links"]
-                # architecture-authority-exempt: compilation-target-field
-                if "target" in compilation_config:
-                    # architecture-authority-exempt: compilation-target-field
-                    config.target = compilation_config["target"]
-
-                # Distributed compilation settings (Task 7)
-                if "strategy" in compilation_config:
-                    config.strategy = compilation_config["strategy"]
-                if "single_file" in compilation_config:
-                    # Legacy config support - if single_file is True, override strategy
-                    if compilation_config["single_file"]:
-                        config.strategy = "single-file"
-                        config.single_agents = True
-
-                # Placement settings
-                placement_config = compilation_config.get("placement", {})
-                if "min_instructions_per_file" in placement_config:
-                    config.min_instructions_per_file = placement_config["min_instructions_per_file"]
-
-                # Source attribution
-                if "source_attribution" in compilation_config:
-                    config.source_attribution = compilation_config["source_attribution"]
-
-                # Directory exclusion patterns
-                if "exclude" in compilation_config:
-                    exclude_patterns = compilation_config["exclude"]
-                    if isinstance(exclude_patterns, list):
-                        config.exclude = exclude_patterns
-                    elif isinstance(exclude_patterns, str):
-                        # Support single pattern as string
-                        config.exclude = [exclude_patterns]
-
-                # Managed-section mode (issue #1540)
-                agents_md_config = compilation_config.get("agents_md", {})
-                if "mode" in agents_md_config:
-                    config.agents_md_mode = agents_md_config["mode"]
-                if "start_marker" in agents_md_config:
-                    config.agents_md_start_marker = agents_md_config["start_marker"]
-                if "end_marker" in agents_md_config:
-                    config.agents_md_end_marker = agents_md_config["end_marker"]
-
+                apply_compilation_section(config, compilation_config)
         except Exception as exc:
             _logger.debug("Config loading failed, using defaults: %s", exc)
 
@@ -812,7 +769,7 @@ class AgentsCompiler:
             from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
             try:
-                CompiledOutputWriter().write_many(
+                CompiledOutputWriter(self.base_dir).write_many(
                     pending_outputs,
                     preserve_line_endings=preserve_line_endings,
                 )
@@ -879,6 +836,9 @@ class AgentsCompiler:
         # Write output file (constitution injection handled externally in CLI)
         output_file = self.base_dir / config.output_path
         output_path = str(output_file)
+        refuse_unsafe_output(
+            output_file, self.base_dir, managed=config.agents_md_mode == "managed_section"
+        )
         write_blocked = (
             config.agents_md_mode != "managed_section"
             and self._hand_authored_root_context_blocks_write(output_file)
@@ -1125,7 +1085,7 @@ class AgentsCompiler:
         critical_security_found = False
         from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
-        writer = CompiledOutputWriter()
+        writer = CompiledOutputWriter(self.base_dir)
         pending_outputs: dict[Path, str] = {}
         for claude_path, content in claude_result.content_map.items():
             final_content = content
@@ -1304,7 +1264,7 @@ class AgentsCompiler:
         files_written = 0
         from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
-        writer = CompiledOutputWriter()
+        writer = CompiledOutputWriter(self.base_dir)
         try:
             writer.write_many(gemini_result.content_map)
             files_written = len(gemini_result.content_map)
@@ -1565,9 +1525,10 @@ class AgentsCompiler:
         # write vs unchanged). Reading the file here is safe in dry-run mode
         # because we never mutate it.
         try:
+            refuse_unsafe_output(output_path, self.base_dir, managed=False)
             existing = output_path.read_text(encoding="utf-8") if output_path.exists() else None
         except OSError as exc:
-            message = f"Failed to read {output_path}: {exc}"
+            message = output_error_message("Failed to read", output_path, exc)
             self.errors.append(message)
             result.errors.append(message)
             result.success = False
@@ -1603,7 +1564,7 @@ class AgentsCompiler:
         try:
             from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
-            verdict = CompiledOutputWriter().write(output_path, content)
+            verdict = CompiledOutputWriter(self.base_dir).write(output_path, content)
             actionable = verdict.critical_count + verdict.warning_count
             if actionable:
                 result.warnings.append(
@@ -1692,6 +1653,7 @@ class AgentsCompiler:
             return result
 
         try:
+            refuse_unsafe_output(output_path, self.base_dir, managed=False)
             existing = output_path.read_text(encoding="utf-8")
             if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
                 result.stats.setdefault("copilot_root_instructions_removed", 0)
@@ -1720,7 +1682,7 @@ class AgentsCompiler:
             result.stats["copilot_root_instructions_removed"] = 1
             return result
         except (OSError, PathTraversalError) as exc:
-            message = f"Failed to remove stale {output_path}: {exc}"
+            message = output_error_message("Failed to remove stale", output_path, exc)
             self.errors.append(message)
             result.errors.append(message)
             result.success = False
@@ -1737,7 +1699,7 @@ class AgentsCompiler:
         from .output_writer import CompiledOutputWriter
 
         try:
-            CompiledOutputWriter().write(Path(output_path), content)
+            CompiledOutputWriter(self.base_dir).write(Path(output_path), content)
         except OSError as e:
             self.errors.append(f"Failed to write output file {output_path}: {e!s}")
 
@@ -1760,7 +1722,7 @@ class AgentsCompiler:
         target = Path(output_path)
         content = self._prepare_output_content_with_config(output_path, content, config)
         try:
-            CompiledOutputWriter().write(
+            CompiledOutputWriter(self.base_dir).write(
                 target,
                 content,
                 preserve_line_endings=config.agents_md_mode == "managed_section"
@@ -1773,7 +1735,7 @@ class AgentsCompiler:
         self, output_path: str, content: str, config: "CompilationConfig"
     ) -> str:
         """Build managed-section or full content without mutating disk."""
-        from .managed_section import ManagedSectionError, apply_managed_section
+        from .managed_section import apply_managed_section
 
         if config.agents_md_mode == "managed_section":
             target = Path(output_path)
@@ -1855,10 +1817,9 @@ class AgentsCompiler:
             and self._hand_authored_root_context_blocks_write(agents_path)
         ):
             return None
-        if config.agents_md_mode == "managed_section" and agents_path.is_symlink():
-            raise ManagedSectionError(
-                f"{agents_path} is a symlink. Managed-section output must be a regular file."
-            )
+        refuse_unsafe_output(
+            agents_path, self.base_dir, managed=config.agents_md_mode == "managed_section"
+        )
         try:
             ensure_path_within(agents_path, self.base_dir)
 
@@ -1944,7 +1905,7 @@ class AgentsCompiler:
         if prepared_content is None:
             return
 
-        CompiledOutputWriter().write(
+        CompiledOutputWriter(self.base_dir).write(
             agents_path,
             prepared_content,
             preserve_line_endings=config.agents_md_mode == "managed_section"

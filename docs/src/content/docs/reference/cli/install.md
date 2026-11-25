@@ -398,6 +398,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   exit `1`; fix the reported files in the package source and reinstall. Use
   `--force` only after reviewing the findings.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
+- **Malformed hook events.** A deployed hook config (for example `.claude/settings.json`) whose event is not a list of entries, such as `"PreToolUse": null`, is left as written. When a package must merge hooks into that event, install fails naming the file and the event; fix or remove the event, then run `apm install` again.
 - **Unresolved hook roots.** A hook command that leaves a supported `${PLUGIN_ROOT}` alias unresolved emits a warning naming the package and a concrete repair. Balance quotes around the complete package-relative path, keep it inside the package, then run `apm install` again. See [Hooks and commands](../../../producer/write-primitives/#hooks-and-commands) for accepted quoting forms.
 - **Declared plugin components.** Every path explicitly listed under a recognized plugin manifest's `agents`, `skills`, `commands`, or `hooks` field must resolve inside that plugin root. A missing or escaping path fails before deployment and lockfile commit; remove the declaration or add the component, then reinstall. Omitted fields and empty lists remain valid.
 - **Default registry routing.** When a default registry is configured (project `registries.default` in `apm.yml` or `registry.<name>.default true` in `$APM_HOME/config.json`), unscoped `owner/repo#ref` shorthand deps passed to `apm install` route to the registry instead of GitHub. A `#<version>` selector is required; omitting it exits `1`. The selector may be a semver range (`^1.0.0`), an exact version (`1.2.3`), or a non-semver label (`main`, `stable`, `v1.4.2`) -- the registry exact-matches non-semver selectors against its published version list. GitHub probe is skipped for these deps; use the `git:` URL form in `apm.yml` to force the GitHub path (e.g., `- git: https://github.com/owner/repo.git`).
@@ -500,9 +501,17 @@ the same hook merge a source install uses, once the exact bundle key printed by
 `apm install` is approved in `executables.allow`; until then they are skipped
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
-policy and retires the hooks when it no longer holds; `apm audit --ci` reports
-them first. Canvas extensions a bundle deploys (with the `canvas` experimental
-flag) follow the same approval, re-check and retirement; a reinstall retires
+policy and retires those `hooks.json` entries and `hooks/` scripts when it no
+longer holds, in every hook target of the scope, including one the bundle was
+installed into with `--target`; `apm audit --ci` reports them first. A bundle Markdown file, such
+as a command `.md` or a `SKILL.md`, whose frontmatter declares `hooks` (or cannot
+be read) waits for the same approval: it is skipped and named until the key is
+approved. The approval is recorded in `apm-bundle-markdown-hooks.json` at the
+target root (commit it with the deployed files). When it is later revoked or
+denied, or no record names a deployed file, the next `apm install`, `apm update`
+or `apm prune` retires the file (one you edited, or without a lockfile hash, is
+kept and named); `apm audit --ci` does not report them yet. Canvas extensions a
+bundle deploys (with the `canvas` experimental flag) follow the same approval, re-check and retirement; a reinstall retires
 the extensions the new bundle content no longer ships. Retiring one bundle's
 extensions never removes another bundle's or anything outside the target's
 extensions directory, and an extension you edited is kept.

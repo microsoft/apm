@@ -12,9 +12,13 @@ Fixtures: ``tree-10``, ``tree-50``, ``tree-200`` (scaling curve),
 ``monorepo-4`` (several ``apm.yml`` roots) and ``real`` (curated public
 packages on github.com, real network). Enterprise shapes: ``tree-N-multi``
 (packages spread over GitHub, GHE Cloud, GitLab and Azure DevOps),
-``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
+``tree-N-ghe`` / ``tree-N-gitlab`` (every package on one non-github.com host,
+so installs take the git path), ``tree-N-mcp`` (a stdio MCP server in every package) and the ``-policy``
 suffix on any offline fixture (the project's git remote points at an org
-whose blocking policy is served, so discovery and enforcement run). Offline fixtures are served by a local
+whose blocking policy is served, so discovery and enforcement run). On Windows,
+offline fixtures model the default Git for Windows TLS config (schannel, the
+mirror CA in the machine Root store, a served CRL); an ``-openssl`` suffix
+runs the secondary OpenSSL cell. Offline fixtures are served by a local
 mirror whose RTT is injected per round trip (``--rtt 0,30,100``).
 
 Examples::
@@ -31,6 +35,7 @@ A sample counts only when the 1-min load average is under ``--max-load``
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import json
 import math
@@ -44,7 +49,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -63,6 +68,7 @@ from tests.fixtures.perf import (  # noqa: E402
     isolated_environment,
     serve_offline,
 )
+from tests.fixtures.perf.counters import read_spawn_log  # noqa: E402
 from tests.fixtures.perf.generator import consumer_manifest, remove_tree, write_lf  # noqa: E402
 from tests.fixtures.perf.offline import POLICY_ORG  # noqa: E402
 
@@ -76,6 +82,8 @@ NETWORK_JOURNEYS = (
     "install-frozen-warm",
     "install-global-cold",
     "install-global-warm",
+    "install-cold-auth",
+    "install-warm-auth",
     "update",
     "uninstall",
     "outdated",
@@ -123,13 +131,27 @@ class Fixture:
     real: bool = False
     stats: dict = field(default_factory=dict)
     policy: bool = False
+    # Windows git TLS for offline fixtures: "system" (default Git for Windows,
+    # schannel) or "openssl" (an ``-openssl`` suffix; a secondary cell).
+    tls_mode: str = "system"
 
 
 _POLICY_SUFFIX = "-policy"
+_OPENSSL_SUFFIX = "-openssl"
 
 
 def prepare_fixture(name: str, work: Path) -> Fixture:
-    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy."""
+    """Fixture *name*; a ``-policy`` suffix puts the project under the served org policy.
+
+    An ``-openssl`` suffix (last) runs Windows git over OpenSSL with the mirror CA
+    file instead of the default Git for Windows TLS config.
+    """
+    if name.endswith(_OPENSSL_SUFFIX) and name != _OPENSSL_SUFFIX:
+        fixture = prepare_fixture(name[: -len(_OPENSSL_SUFFIX)], work)
+        if fixture.real:
+            raise SystemExit(f"{name!r}: the openssl variant needs an offline fixture")
+        fixture.name, fixture.tls_mode = name, "openssl"
+        return fixture
     if name.endswith(_POLICY_SUFFIX) and name != _POLICY_SUFFIX:
         fixture = _prepare_fixture(name[: -len(_POLICY_SUFFIX)], work)
         if fixture.real:
@@ -229,7 +251,11 @@ def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
         with counting_tunnel() as tunnel:
             yield _RealWorld(isolated, env, tunnel)
         return
-    with serve_offline(fixture.trees, directory, policy=fixture.policy) as world:
+    with serve_offline(
+        fixture.trees, directory, policy=fixture.policy, tls_mode=fixture.tls_mode
+    ) as world:
+        if world.tls:
+            fixture.stats["git_tls"] = world.tls
         yield world
 
 
@@ -475,6 +501,7 @@ class Context:
         return [self.project / root for root in self.fixture.roots]
 
     spawn_log: Path | None = None
+    count_fs: bool = False
     # Setup reuse: the installed state survives a no-op sample, and the
     # committed lockfiles are captured once per fixture (generation is seeded).
     is_installed: bool = False
@@ -502,6 +529,8 @@ class Context:
         if self.spawn_log is not None:
             env["APM_PERF_SPAWN_LOG"] = str(self.spawn_log)
             env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
+            if self.count_fs:
+                env["APM_PERF_COUNT_FS"] = "1"
         with (
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
@@ -511,8 +540,9 @@ class Context:
             )
             out.seek(0)
             err.seek(0)
-            tail = out.read()[-3000:].decode(errors="replace") + "\n"
-            tail += err.read()[-3000:].decode(errors="replace")
+            # Redact before slicing: a token cut at the boundary leaves no fragment.
+            tail = _redact(out.read().decode(errors="replace"))[-3000:] + "\n"
+            tail += _redact(err.read().decode(errors="replace"))[-3000:]
         return returncode, tail, cpu
 
     def checked(self, argv: list[str], cwd: Path) -> None:
@@ -520,7 +550,7 @@ class Context:
         if result.returncode != 0:
             raise RuntimeError(
                 f"setup `apm {' '.join(argv)}` failed ({result.returncode}) in {cwd}:\n"
-                f"{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
+                f"{_redact(result.stdout)[-3000:]}\n{_redact(result.stderr)[-3000:]}"
             )
 
     # state helpers (untimed)
@@ -672,10 +702,18 @@ class Journey:
     name: str
     setup: Callable[[Context], None]
     steps: Callable[[Context], list[Step]]
+    # Extra child environment for this journey only (setup, timed steps, profile).
+    env: tuple[tuple[str, str], ...] = ()
 
 
 def _noop(_ctx: Context) -> None:
     return None
+
+
+_AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
+# The CI job's read-only token for real-network authenticated cells. Taken out of
+# the environment at import, so no world (and no anonymous cell) inherits it.
+_BENCH_REAL_TOKEN = os.environ.pop("APM_BENCH_REAL_TOKEN", "")
 
 
 JOURNEYS: dict[str, Journey] = {
@@ -685,6 +723,11 @@ JOURNEYS: dict[str, Journey] = {
         Journey("boot-help", _noop, lambda c: [(["--help"], c.elsewhere)]),
         Journey("install-cold", _setup_cold, lambda c: _per_root(c, ["install"])),
         Journey("install-warm", _setup_warm, lambda c: _per_root(c, ["install"])),
+        # Authenticated users (private repos, GHE, ADO, GitLab, or a token to
+        # avoid the anonymous rate limit) take the token-first git CLI path: a
+        # fixed placeholder token the offline mirror accepts, auth first.
+        Journey("install-cold-auth", _setup_cold, lambda c: _per_root(c, ["install"]), _AUTH),
+        Journey("install-warm-auth", _setup_warm, lambda c: _per_root(c, ["install"]), _AUTH),
         Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
         Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
@@ -753,21 +796,14 @@ class Sample:
     spawns: dict = field(default_factory=dict)
     modules: int = 0
     routes: dict = field(default_factory=dict)
+    git_verbs: dict = field(default_factory=dict)
+    fs: dict = field(default_factory=dict)
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
     """Spawns by executable summed over every Python process, plus the max module count."""
-    if path is None or not path.is_file():
-        return {}, 0
-    spawns: dict[str, int] = {}
-    modules = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        record = json.loads(line)
-        modules = max(modules, record["modules"])
-        for name, count in record["spawns"].items():
-            spawns[name] = spawns.get(name, 0) + count
-    path.unlink()
-    return dict(sorted(spawns.items())), modules
+    counters = read_spawn_log(path)
+    return counters["spawns"], counters["modules"]
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
@@ -787,9 +823,11 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
             output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
-    spawns, modules = _read_spawn_log(ctx.spawn_log)
+    counters = read_spawn_log(ctx.spawn_log)
+    spawns, modules = counters["spawns"], counters["modules"]
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
     return sample, output
 
@@ -815,7 +853,8 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             check=False,
         )
         if result.returncode != 0 or not target.is_file():
-            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
+            stderr = _redact(result.stderr.decode(errors="replace"))[-500:]
+            print(f"[!] cProfile run failed for {journey.name}: {stderr}")
             return None
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
@@ -825,14 +864,78 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     return str(prof)
 
 
+@contextlib.contextmanager
+def _journey_env(ctx: Context, journey: Journey):
+    """Overlay *journey*'s extra environment on the world's child env, then restore it."""
+    env = ctx.world.env
+    saved = {key: env.get(key) for key, _value in journey.env}
+    env.update(journey.env)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+
+
+def _refuse_real_auth(_ctx: Context) -> None:
+    raise RuntimeError(
+        "authenticated journeys on the real fixture need the caller's GITHUB_APM_PAT"
+    )
+
+
+def _for_world(ctx: Context, journey: Journey) -> Journey:
+    """*journey* as run against this world.
+
+    The placeholder token only works against the offline mirror. On real
+    github.com the authenticated journeys use ``APM_BENCH_REAL_TOKEN`` (the CI
+    job's read-only ``GITHUB_TOKEN``) or the caller's own ``GITHUB_APM_PAT``
+    (copied by ``_RealWorld``); without one the journey fails instead of
+    measuring a rejected token. The anonymous journeys never get the bench token.
+    """
+    if not ctx.fixture.real or all(key != "GITHUB_APM_PAT" for key, _ in journey.env):
+        return journey
+    token = _real_token(ctx)
+    if not token:
+        return replace(journey, setup=_refuse_real_auth)
+    env = tuple((key, token if key == "GITHUB_APM_PAT" else value) for key, value in journey.env)
+    return replace(journey, env=env)
+
+
+def _real_token(ctx: Context) -> str:
+    return _BENCH_REAL_TOKEN or ctx.world.env.get("GITHUB_APM_PAT", "")
+
+
+def _redact(text: str) -> str:
+    """*text* without the bench token (error tails land in uploaded artifacts).
+
+    Covers the raw token and the Basic credential git sends for it
+    (``x-access-token:<token>``, plain and base64).
+    """
+    if not _BENCH_REAL_TOKEN or not text:
+        return text
+    basic = f"x-access-token:{_BENCH_REAL_TOKEN}"
+    for secret in (base64.b64encode(basic.encode()).decode(), basic, _BENCH_REAL_TOKEN):
+        text = text.replace(secret, "***")
+    return text
+
+
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
+    journey = _for_world(ctx, journey)
+    with _journey_env(ctx, journey):
+        return _measure(ctx, journey, args)
+
+
+def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     samples: list[Sample] = []
     error = ""
     for _ in range(args.runs):
         try:
             journey.setup(ctx)
         except RuntimeError as exc:
-            error = str(exc)
+            error = _redact(str(exc))
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
@@ -842,7 +945,7 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         sample.load_ok = load < args.max_load
         samples.append(sample)
         if sample.returncode != 0:
-            error = output
+            error = _redact(output)
             break
     valid = [s for s in samples if s.load_ok and s.returncode == 0]
     if not valid and not error:
@@ -867,6 +970,8 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "spawns": ok[-1].spawns if ok else {},
         "modules": ok[-1].modules if ok else 0,
         "routes": ok[-1].routes if ok else {},
+        "git_verbs": ok[-1].git_verbs if ok else {},
+        "fs": ok[-1].fs if ok else {},
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
@@ -958,6 +1063,7 @@ def run(args: argparse.Namespace) -> dict:
             ctx.work.mkdir(parents=True, exist_ok=True)
             if args.counts:
                 ctx.spawn_log = ctx.work / "spawns.jsonl"
+                ctx.count_fs = args.count_fs
             ctx.fresh_project()
             for rtt_index, rtt in enumerate(rtts):
                 world.rtt_ms = rtt
@@ -1245,6 +1351,12 @@ def main(argv: list[str] | None = None) -> int:
         "--counts",
         action="store_true",
         help="count subprocess spawns and imported modules of each apm child",
+    )
+    run_parser.add_argument(
+        "--count-fs",
+        action="store_true",
+        help="with --counts, also count files written, lockfile reads, realpath/stat "
+        "calls and hashing (adds CPU: counts only, never compare its timings)",
     )
     run_parser.add_argument(
         "--preset",

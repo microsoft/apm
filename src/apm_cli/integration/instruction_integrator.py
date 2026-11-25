@@ -33,6 +33,7 @@ from apm_cli.utils.patterns import (
     yaml_globs_scalar,
     yaml_plain_scalar,
 )
+from apm_cli.utils.realpath import resolve_path
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
@@ -111,6 +112,12 @@ class InstructionIntegrator(BaseIntegrator):
         self.agents_md_routed: set[str] = set()
         # Routed sources no compiled AGENTS.md carries yet (new or changed).
         self.agents_md_stale: set[str] = set()
+        # Rule path -> the compiled AGENTS.md that now carries it, for each rule
+        # on disk this install stops writing (#5343); finalize names the moves.
+        self.agents_md_carried: dict[Path, Path] = {}
+        # Claude rule path -> (identity, label, content) the first package wrote
+        # this install; install order is declaration order, so it wins (#5343).
+        self._claude_rule_writers: dict[Path, tuple[str, str, str]] = {}
         # One compiled-coverage snapshot per project root for this install.
         self._compiled_coverage: dict[Path, Any] = {}
         # Routing verdicts per root and directory for this install (#4787).
@@ -314,9 +321,9 @@ class InstructionIntegrator(BaseIntegrator):
     ) -> tuple[str, str, str, str, str]:
         """Return the per-package, per-target identity for a prepared rule plan."""
         return (
-            str(package_path.resolve()),
-            str(project_root.resolve()),
-            str(deploy_dir.resolve()),
+            str(resolve_path(package_path)),
+            str(resolve_path(project_root)),
+            str(resolve_path(deploy_dir)),
             extension,
             fmt,
         )
@@ -581,6 +588,12 @@ class InstructionIntegrator(BaseIntegrator):
                 )
 
             rel_path = portable_relpath(target_path, project_root)
+            claude_rule = target.compile_family == "claude"
+            if claude_rule and self._claude_rule_taken(
+                target_path, rel_path, source_file, new_content, package_info, diagnostics
+            ):
+                files_skipped += 1
+                continue
 
             # Compare against the rendered output, not the source: rule-dir
             # formats transform content, so a source-based adopt never matches
@@ -597,6 +610,23 @@ class InstructionIntegrator(BaseIntegrator):
                 target_paths,
                 expected_content=new_content,
             )
+            # Written, adopted or already identical in the real pass (never a
+            # planning pass, which may be skipped): this package holds the path.
+            if (
+                claude_rule
+                and self._overwrite_plan is None
+                and (
+                    not skip
+                    or adopted
+                    or self.is_content_identical_to_text(
+                        target_path, new_content, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+                    )
+                )
+            ):
+                self._claude_rule_writers.setdefault(
+                    target_path,
+                    (_package_identity(package_info), _package_label(package_info), new_content),
+                )
             if skip:
                 if adopted:
                     files_adopted += 1
@@ -623,6 +653,43 @@ class InstructionIntegrator(BaseIntegrator):
             files_adopted=files_adopted,
         )
 
+    def _claude_rule_taken(
+        self,
+        target_path: Path,
+        rel_path: str,
+        source_file: Path,
+        content,
+        package_info,
+        diagnostics,
+    ) -> bool:
+        """Whether an earlier-declared package already wrote a different rule here (#5343).
+
+        Two packages can ship instructions that render to one ``.claude/rules/``
+        path. The first one integrated (declared first) keeps it, the later one
+        is skipped, and the user is told both names so no instruction is lost
+        silently. The project's own instruction always wins, as a deliberate
+        local override, in install and replay alike.
+        """
+        from apm_cli.utils.diagnostics import printable_ascii_text
+
+        identity = _package_identity(package_info)
+        package = _package_label(package_info)
+        if identity == ".":
+            self._claude_rule_writers[target_path] = (identity, package, content)
+            return False
+        winner = self._claude_rule_writers.get(target_path)
+        if winner is None or winner[0] == identity or winner[2] == content:
+            return False
+        if diagnostics is not None and winner[0] != ".":
+            name = source_file.name.removesuffix(".instructions.md")
+            kept, skipped = printable_ascii_text(winner[1]), printable_ascii_text(package)
+            diagnostics.warn(
+                f"{printable_ascii_text(rel_path)}: {kept} and {skipped} both ship an "
+                f"instruction named '{printable_ascii_text(name)}'; kept {kept}'s (declared "
+                f"first), skipped {skipped}'s. Rename one of the instruction files."
+            )
+        return True
+
     def _claude_rule_sources(
         self,
         target: TargetProfile,
@@ -632,13 +699,19 @@ class InstructionIntegrator(BaseIntegrator):
         project_root: Path,
         scope,
         diagnostics,
+        *,
+        all_routed: bool = False,
     ) -> list[Path]:
-        """Drop project instructions Claude loads from AGENTS.md (#3939).
+        """Drop project instructions Claude already loads from AGENTS.md (#3939).
 
-        Always-on and single-directory instructions reach Claude Code through
-        the compiled ``AGENTS.md`` that ``CLAUDE.md`` imports, so only the
-        remaining path-scoped instructions become ``.claude/rules/`` files.
-        Routed sources are recorded so install can ask for ``apm compile``.
+        Always-on and single-directory instructions route to the compiled
+        ``AGENTS.md`` that ``CLAUDE.md`` imports, but each one is dropped from
+        ``.claude/rules/`` only once a compiled file Claude loads carries its
+        exact scope and body; until then its rule stays (#5343). Routed
+        sources are recorded so install can ask for ``apm compile``. With
+        *all_routed* (pack), every routed source is dropped, carried or not.
+        Drift replay keeps a carried rule the live root still has and the
+        lockfile records for this package, since only install retires it.
         User scope and projects with a blocking hand-authored root file keep
         every instruction in ``.claude/rules/``. Drift replay writes to a
         scratch root, so scope and the blocker come from the live root it replays.
@@ -679,17 +752,36 @@ class InstructionIntegrator(BaseIntegrator):
                 self._claude_blocker_warned.add(warned)
                 diagnostics.warn(claude_agents_md_blocker_warning(blocker))
             return instruction_files
+        if all_routed:
+            return [source for source in instruction_files if source not in routed]
         self.agents_md_routed.update(source.name for source in routed)
         coverage = self._compiled_coverage.setdefault(live_root, CompiledCoverage(live_root))
+        mapping = target.primitives["instructions"]
+        carried = set()
         for source in routed:
             prepared = prepared_instructions[source]
             apply_to = self._parse_frontmatter(prepared.content)[0].get("applyTo")
-            if not coverage.has(apply_to, prepared.body):
+            agents_md = coverage.carrier(apply_to, prepared.body)
+            if agents_md is None:
                 self.agents_md_stale.add(source.name)
-        return [source for source in instruction_files if source not in routed]
+                continue
+            stem = source.name.removesuffix(".instructions.md")
+            rule = live_root / target.root_dir / mapping.subdir / f"{stem}{mapping.extension}"
+            if frame is not None:
+                # Drift replay: retiring a recorded rule is install's step, so
+                # a compile in between is not drift (#5343).
+                recorded = getattr(package_info, "replay_recorded_files", frozenset())
+                if rule.is_file() and portable_relpath(rule, live_root) in recorded:
+                    continue
+            elif rule.is_file():
+                self.agents_md_carried[rule] = agents_md
+            carried.add(source)
+        # Never drop without a replacement (#5343): a routed rule stays, in the
+        # 0.37 layout, until a compiled AGENTS.md Claude loads carries it.
+        return [source for source in instruction_files if source not in carried]
 
     def render_agents_md_routed_rules(
-        self, package_info, project_root: Path, source_plan
+        self, package_info, project_root: Path, source_plan, *, every_rule: bool = False
     ) -> dict[str, str]:
         """Render the ``.claude/rules/`` files Claude routing left undeployed.
 
@@ -697,7 +789,8 @@ class InstructionIntegrator(BaseIntegrator):
         not compile, so a pack still carries each instruction that #3939 routed
         to ``AGENTS.md`` as the rule a pre-#3939 install deployed. Routing and
         rendering reuse this integrator's install decision and projection.
-        Returns ``{project-relative rule path: content}``.
+        With *every_rule*, every Claude rule the package ships renders, routed
+        or not. Returns ``{project-relative rule path: content}``.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -710,9 +803,20 @@ class InstructionIntegrator(BaseIntegrator):
             return {}
         self.init_link_resolver(package_info, project_root)
         prepared = {source: self._prepare_instruction(source) for source in sources}
-        kept = set(
-            self._claude_rule_sources(
-                target, sources, prepared, package_info, project_root, None, None
+        kept = (
+            set()
+            if every_rule
+            else set(
+                self._claude_rule_sources(
+                    target,
+                    sources,
+                    prepared,
+                    package_info,
+                    project_root,
+                    None,
+                    None,
+                    all_routed=True,
+                )
             )
         )
         routed = [source for source in sources if source not in kept]
@@ -1077,6 +1181,23 @@ class InstructionIntegrator(BaseIntegrator):
         )
 
 
+def _package_identity(package_info) -> str:
+    """A stable identity for *package_info*: its dependency key, or ``.`` for the project."""
+    dependency_ref = getattr(package_info, "dependency_ref", None)
+    if dependency_ref is not None:
+        return dependency_ref.get_unique_key()
+    if getattr(getattr(package_info, "package", None), "name", None) == "_local":
+        return "."
+    return str(getattr(package_info, "install_path", "") or "")
+
+
+def _package_label(package_info) -> str:
+    """The name the user knows *package_info* by, for collision messages."""
+    package = getattr(package_info, "package", None)
+    name = getattr(package, "name", "") or ""
+    return name or Path(getattr(package_info, "install_path", "") or ".").name
+
+
 def routed_claude_rule_renders(
     lockfile,
     project_root: Path,
@@ -1085,8 +1206,12 @@ def routed_claude_rule_renders(
     include_local: bool,
     verified: bool = False,
     dependency_keys: Collection[str] | None = None,
+    every_rule: bool = False,
 ) -> dict[str, dict[str, str]]:
     """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
+
+    With *every_rule*, each dependency's every Claude rule renders, so pack can
+    find two dependencies whose same-named instructions collide (#5343).
 
     Each locked dependency installed under *modules_root* is rendered through
     :meth:`InstructionIntegrator.render_agents_md_routed_rules`: the
@@ -1112,7 +1237,9 @@ def routed_claude_rule_renders(
     from apm_cli.models.apm_package import APMPackage, PackageInfo
 
     rules: dict[str, dict[str, str]] = {}
-    for dep in lockfile.get_all_dependencies():
+    # The "." self entry is the project's own content, never a dependency under
+    # apm_modules: it has no install path to render from (#5336).
+    for dep in lockfile.get_package_dependencies():
         if dep.source == "local" and not include_local:
             continue
         if dependency_keys is not None and dep.get_unique_key() not in dependency_keys:
@@ -1154,7 +1281,7 @@ def routed_claude_rule_renders(
             skip_bin=True,
         )
         rendered = InstructionIntegrator().render_agents_md_routed_rules(
-            package_info, project_root, source_plan
+            package_info, project_root, source_plan, every_rule=every_rule
         )
         if verified:
             deployed = set(dep.deployed_files)

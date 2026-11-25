@@ -424,12 +424,15 @@ def carry_kept_loose_into_replay(
     live = {target.name: target for target in live_targets}
     hashed = getattr(lock_dep, "deployed_file_hashes", None) or {}
     kept = plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope, live_targets=live)
+    # Only the parked harnesses selected these claims, so only they frame them (#5162).
+    harnesses = plan.claude_native.harnesses if plan.claude_native is not None else frozenset()
+    framing = [target for name, target in live.items() if name in harnesses]
     for value in kept:
         if value not in hashed:
             continue  # only bytes the lock binds by hash stand in for the replay
         try:
             live_root, replay_root, relative = _replay_frame(
-                value, live.values(), deploy_root, scratch_root
+                value, framing, deploy_root, scratch_root
             )
             validate_path_segments(relative, context="kept lock claim", reject_empty=True)
             live_file = ensure_path_within(live_root / relative, live_root)
@@ -452,6 +455,9 @@ def _replay_frame(
     from apm_cli.install.audit_target_roots import external_replay_root
 
     if Path(value).is_absolute():
+        # Among the harnesses that selected the claim, the deepest enclosing
+        # root frames it, whatever the target order.
+        frames = []
         for target in live_targets:
             root = target.managed_deploy_root
             if root is None:
@@ -460,6 +466,25 @@ def _replay_frame(
                 relative = Path(value).relative_to(root)
             except ValueError:
                 continue
-            return root, external_replay_root(scratch_root, target), relative.as_posix()
-        raise PathTraversalError(f"kept lock claim {value!r} is outside every target root")
+            frames.append((len(root.parts), root, target, relative))
+        if not frames:
+            raise PathTraversalError(f"kept lock claim {value!r} is outside every target root")
+        _depth, root, target, relative = max(frames, key=lambda frame: frame[0])
+        return root, external_replay_root(scratch_root, target), relative.as_posix()
     return deploy_root, scratch_root, value
+
+
+def finish_replayed_package(
+    result: dict, lock_dep: Any, frame: tuple, config: Any, live_targets: Iterable[TargetProfile]
+) -> None:
+    """Carry kept loose files into the replay, then report the package's output (#5048).
+
+    *frame* is ``(package key, deploy root, scratch root)``; ``config.on_package``
+    reads each package's own output before a later package overwrites it.
+    """
+    dep_key, deploy_root, scratch_root = frame
+    carry_kept_loose_into_replay(
+        result, lock_dep, deploy_root, scratch_root, config.user_scope, live_targets
+    )
+    if config.on_package is not None:
+        config.on_package(dep_key, list(result.get("deployed_files") or ()), scratch_root)

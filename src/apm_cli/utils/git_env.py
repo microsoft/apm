@@ -6,15 +6,12 @@ APM is invoked from within a git repository's hook or worktree).
 
 Preserved variables (user-controlled config for proxy/auth):
 - GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS, SSH_ASKPASS
-- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT
-- GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
+- GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT, GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
 
 Git state variables stripped after external-process sanitization:
-- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE
-- GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
-- GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
-- GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
-- GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
+- GIT_DIR, GIT_CONFIG, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR
+- GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_INDEX_VERSION, GIT_CEILING_DIRECTORIES
+- GIT_DISCOVERY_ACROSS_FILESYSTEM, GIT_REPLACE_REF_BASE, GIT_GRAFT_FILE, GIT_SHALLOW_FILE
 - GIT_IMPLICIT_WORK_TREE, GIT_NO_REPLACE_OBJECTS, GIT_PREFIX
 """
 
@@ -27,11 +24,12 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from apm_cli.utils import git_config_once as _config_once
 from apm_cli.utils.path_security import filesystem_containment
 from apm_cli.utils.subprocess_env import external_process_env
 
@@ -629,12 +627,19 @@ def clear_git_auth_env(
     env: dict[str, str],
     *,
     remove_helpers: bool = False,
+    keep_url_rewrites: bool = False,
 ) -> None:
-    """Remove inherited Git authorization channels while retaining other config."""
+    """Remove inherited Git authorization channels while retaining other config; with
+    *keep_url_rewrites* only GIT_CONFIG_PARAMETERS ``url.*`` rewrites stay (#5246)."""
+    from apm_cli.utils.git_config_parameters import url_rewrites_only
+
     env.pop(_MANAGED_GIT_AUTH_INTENT_ENV, None)
     env.pop("GIT_TOKEN", None)
     env.pop("GIT_HTTP_EXTRAHEADER", None)
-    env.pop("GIT_CONFIG_PARAMETERS", None)
+    parameters = env.pop("GIT_CONFIG_PARAMETERS", None)
+    rewrites = url_rewrites_only(parameters) if keep_url_rewrites else None
+    if rewrites:
+        env["GIT_CONFIG_PARAMETERS"] = rewrites
     try:
         count = int(env.pop("GIT_CONFIG_COUNT", "0"))
     except ValueError:
@@ -742,16 +747,16 @@ class GitConfigEntry:
 
     scope: str
     key: str
-    value: str
+    value: str = field(repr=False)  # may carry an extraheader credential
 
 
 @dataclass(frozen=True)
 class _GitConfigSnapshot:
     """Configuration facts validated for one Git child."""
 
-    entries: tuple[GitConfigEntry, ...]
-    rewrites: tuple[tuple[str, str], ...]
-    http_headers: tuple[GitConfigEntry, ...]
+    entries: tuple[GitConfigEntry, ...] = field(repr=False)
+    rewrites: tuple[tuple[str, str], ...] = field(repr=False)
+    http_headers: tuple[GitConfigEntry, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -771,7 +776,26 @@ def _read_effective_git_config(
     git_dir: Path | None = None,
     worktree: Path | None = None,
 ) -> _GitConfigSnapshot:
-    """Return the flattened config visible to one Git child."""
+    """Return the flattened config visible to one Git child, probed once per invocation."""
+    from apm_cli.utils import git_config_memo
+
+    return git_config_memo.read(
+        lambda: _probe_effective_git_config(env, git_dir=git_dir, worktree=worktree),
+        env,
+        git=get_git_executable(),
+        git_dir=git_dir,
+        worktree=worktree,
+        config_paths=git_config_memo.git_config_paths,
+    )
+
+
+def _probe_effective_git_config(
+    env: dict[str, str],
+    *,
+    git_dir: Path | None = None,
+    worktree: Path | None = None,
+) -> _GitConfigSnapshot:
+    """Spawn ``git config --list`` for the flattened config visible to one Git child."""
     if git_dir is not None and worktree is not None:
         raise ValueError("git_dir and worktree are mutually exclusive")
     command = [get_git_executable()]
@@ -875,6 +899,7 @@ def _has_applicable_http_authorization(
     return any(_is_credential_bearing_http_header(value) for value in active)
 
 
+@_config_once.urlmatch_first
 def _urlmatched_header_group(
     remote_url: str,
     headers: Sequence[GitConfigEntry],
@@ -1004,14 +1029,9 @@ _TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset(
     {"http.sslbackend", "http.sslcainfo", "http.sslcapath"}
 )
 
-# Module-level cache for the ambient (env=None) TLS probe -- see
-# real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
-# cached "no ambient TLS config" answer, not a retry signal. Guarded by
-# _real_git_tls_config_lock: parallel installs call this once per
-# dependency, and the probe spawns a `git config` child with its own
-# 10s/30s retry budget, so an unguarded check-then-probe race could let
-# several workers pay that cost concurrently before either stores a result.
-_real_git_tls_config_cache: dict[str, str] | None = None
+# (stamp, answer) of the ambient (env=None) TLS probe; {} is a real answer.
+# The lock makes racing workers share one probe (each has a retry budget).
+_real_git_tls_config_cache: tuple[tuple, dict[str, str]] | None = None
 _real_git_tls_config_lock = threading.Lock()
 
 
@@ -1039,9 +1059,8 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     tracked key is recorded during the scan and only the final, possibly
     empty, values are filtered out afterward.
 
-    Cached for the default ``env=None`` case after the first probe: the
-    ambient config a plain ``git clone`` sees is stable for the life of the
-    process, and both ``AuthResolver.build_public_github_anonymous_git_env``
+    Cached for ``env=None`` while ``git_config_memo.ambient_tls_stamp`` (env,
+    config files, user-code epoch) is unchanged, and both ``AuthResolver.build_public_github_anonymous_git_env``
     and ``AuthResolver.git_env_for_context`` call this once per attempt, so
     an uncached probe would spawn one extra ``git config`` child process
     (with its own retry/timeout budget) per dependency in a large install.
@@ -1055,8 +1074,12 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
     probe instead of each paying its own retry/timeout budget.
     """
     global _real_git_tls_config_cache
-    if env is None and _real_git_tls_config_cache is not None:
-        return dict(_real_git_tls_config_cache)
+    from apm_cli.utils.git_config_memo import ambient_tls_stamp
+
+    stamp = ambient_tls_stamp() if env is None else None
+    kept = _real_git_tls_config_cache
+    if kept is not None and kept[0] == stamp:
+        return dict(kept[1])
 
     def _probe() -> dict[str, str]:
         try:
@@ -1077,10 +1100,11 @@ def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
         return _probe()
 
     with _real_git_tls_config_lock:
-        if _real_git_tls_config_cache is not None:
-            return dict(_real_git_tls_config_cache)
+        kept = _real_git_tls_config_cache
+        if kept is not None and kept[0] == stamp:
+            return dict(kept[1])
         result = _probe()
-        _real_git_tls_config_cache = result
+        _real_git_tls_config_cache = (stamp, result)
         return dict(result)
 
 
@@ -1228,14 +1252,16 @@ def effective_git_url(remote_url: str, env: dict[str, str] | None) -> str:
     """Return the URL git contacts for *remote_url* after ``insteadOf`` rewrites.
 
     Identification only (for example keying a cached verdict to the server
-    contacted); it never authorizes a contact. Use
-    :func:`validate_git_url_rewrite_safety` before contacting a remote.
+    contacted); it never authorizes a contact (see validate_git_url_rewrite_safety).
     """
+    return resolve_git_url_rewrite(remote_url, git_url_rewrites(env)) or remote_url
+
+
+def git_url_rewrites(env: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """The ``insteadOf`` rewrites git applies under *env*; independent of the URL."""
     child = git_subprocess_env(env)
-    # Merge the parent process config exactly as git_network_env does.
-    _append_parent_git_config(child)
-    snapshot = _read_effective_git_config(child)
-    return resolve_git_url_rewrite(remote_url, snapshot.rewrites) or remote_url
+    _append_parent_git_config(child)  # the parent config merge git_network_env does
+    return tuple(_read_effective_git_config(child).rewrites)
 
 
 def _append_git_url_rewrites(
@@ -1564,6 +1590,7 @@ def git_network_env(
     return env
 
 
+@_config_once.config_once_first
 def git_clone_env(
     remote_url: str,
     overrides: dict[str, object] | None,
@@ -2050,6 +2077,9 @@ def reset_git_cache() -> None:
     _git_executable = None
     _gh_executable = None
     _real_git_tls_config_cache = None
+    from apm_cli.utils import git_config_memo
+
+    git_config_memo.forget()
 
 
 def git_long_paths_args() -> list[str]:
