@@ -173,12 +173,11 @@ def _kill(pid: int) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
-def _state(pid: int) -> str:
-    """First letter of ``ps`` state for *pid* (``Z`` for a zombie); empty once gone."""
-    result = subprocess.run(
+def _ps_state(pid: int) -> subprocess.CompletedProcess:
+    """``ps`` state of *pid*: ``Z...`` for a zombie, empty stdout once reaped."""
+    return subprocess.run(
         ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
     )
-    return result.stdout.strip()[:1]
 
 
 @posix_only
@@ -221,18 +220,43 @@ def test_exited_unreaped_helper_is_not_listed_as_running(tmp_path: Path) -> None
         assert helper.pid in credential_helpers.credential_helper_processes(os.getpgid(0))
         os.kill(helper.pid, signal.SIGKILL)
         deadline = time.monotonic() + 30
-        while _state(helper.pid) != "Z" and time.monotonic() < deadline:
+        ps = _ps_state(helper.pid)
+        while not ps.stdout.strip().startswith("Z") and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert _state(helper.pid) == "Z", "the killed helper never became a zombie"
+            ps = _ps_state(helper.pid)
+        listed = credential_helpers.credential_helper_processes(os.getpgid(0))
 
-        assert helper.pid not in credential_helpers.credential_helper_processes(os.getpgid(0))
+        assert ps.stdout.strip().startswith("Z"), (
+            f"the killed helper is not a zombie: {ps.stdout!r}"
+        )
+        assert helper.pid not in listed
     finally:
         _kill(helper.pid)
         helper.wait(timeout=30)
 
 
-def test_root_conftest_registers_the_guard(pytestconfig: pytest.Config) -> None:
-    """The suite carries the guard (on xdist it lives on the controller)."""
-    if hasattr(pytestconfig, "workerinput"):
-        pytest.skip("the guard runs on the xdist controller")
-    assert pytestconfig.pluginmanager.has_plugin(credential_helpers.PLUGIN_NAME)
+def test_root_conftest_registers_the_guard() -> None:
+    """A session under tests/ loads the guard through the root conftest."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--trace-config",
+            "tests/test_console.py",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert result.returncode == pytest.ExitCode.OK, result.stdout[-3000:] + result.stderr
+    assert "PLUGIN registered: <tests.utils.credential_helpers.CredentialHelperLeakGuard" in (
+        result.stdout
+    )
