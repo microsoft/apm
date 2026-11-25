@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- Upgrade notes: stricter org policy, exact dependency refs, and helper tools that resolve only from PATH outside the project. (#4920, #4827, #4853, #4970, #5006)
-- `apm install` is faster: in-process github.com fetches up to 2x faster cold, verified no-op replays on repeat runs, and `apm audit` uses up to 44% less CPU. (#5330, #5353, #4993, #5383, #5018)
+- `apm install` is faster: a fresh install is 2-2.4x faster than v0.38.1, and re-running it with nothing to change is 3-7x faster, and `apm audit` uses up to 44% less CPU. (#5330, #5353, #4993, #5383, #5018)
 - `apm uninstall` adds `--trust-lockfile`, re-anchors still-needed local dependencies, and cleans up bundles, orphaned MCP servers and emptied settings. (#4650, #4964, #4679, #4900, #4955)
 - An install after an interrupted one restores every file the killed run changed; cache, extraction and deploy paths are hardened. (#4982, #5016, #4891, #4976, #5146)
+- Upgrade notes: stricter org policy, exact dependency refs, and helper tools that resolve only from PATH outside the project. (#4920, #4827, #4853, #4970, #5006)
 
 ### Breaking changes and upgrade notes
 
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cold `apm install` fetches pinned github.com commits in-process, including token, monorepo and Windows installs, up to 2x faster; proxied or customized git setups still use git. (#5330, #5351, #5353, #5376, #5377)
 - Authenticated and non-github.com installs spawn about half as many git processes and write checkouts straight from the git pack. (#5341, #5366)
 - `apm install` and `apm update` reuse git config and origin ref lists within one command and verify cached checkouts without a git process per package. (#5283, #5318, #5410)
-- Repeat `apm install` on an unchanged project replays the verified no-op, also on GitLab and Azure DevOps, using 2-3x less CPU. (#4893, #4993, #5331, #5383)
+- Repeat `apm install` on an unchanged project replays the verified no-op, also on GitLab and Azure DevOps, about 3x faster at 10 packages and 6-7x at 50 than v0.38.1. (#4893, #4993, #5331, #5383)
 - `apm install` uses less CPU on large projects through fewer lockfile parses and path resolutions, byte-identical libyaml lockfile writes and lighter journaling. (#4888, #5132, #5204, #5325, #5333, #5354, #5361, #5367, #5372, #5374, #5382)
 - `apm audit` replays byte-copy packages from verified install records, using up to 44% less CPU on large projects; `APM_AUDIT_RECORDS=0` disables it. (#5018)
 
@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall <bundle>` removes a local bundle's hooks, scripts and lock claims, reaches partly retired or aliased bundles, and finishes interrupted record updates. (closes #3700, #4987, #5003; #4679, #4903, #4992, #5099)
 - `apm uninstall <bundle>` keeps scripts a user hook still runs, including `./x.sh`, `cd <dir> &&` and `cwd` forms, and refuses malformed `hook_files` records. (#5166, #5208, #5212, #5296)
 - `apm prune` removes orphaned transitive local dependencies and their LSP entries, refuses before changing anything when it cannot finish, and keeps lockfile rows stable. (#4994, #5183, #5239, #5262, #5390)
-- Install, compile, LSP, marketplace pin, uninstall and prune handle more edge cases safely. (#5350)
+- `apm uninstall` and `apm prune` keep an LSP server entry you edited after install, with a warning naming it. (#5350)
 - `apm audit` no longer fails a JavaScript hook on the module-type `package.json` that `apm install` deploys with it. (closes #4921, #4929)
 - `apm audit --ci` now checks deployed transitive Codex native plugins against `mcp.allow` under `mcp.trust_transitive: false`. (closes #4937, #4938)
 - `apm audit --ci` passes after `apm install -g` when a user-root Claude hook runs only an inline command. (closes #4837, #4883)
