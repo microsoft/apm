@@ -11,6 +11,7 @@ from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.paths import relative_to
+from apm_cli.utils.research_passmemo import passmemo as _passmemo
 
 # Directories excluded from hashing (not relevant to package content)
 _EXCLUDED_DIRS = {".git", "__pycache__"}
@@ -78,6 +79,19 @@ def compute_package_digests(
 def _hash_package_tree(
     package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
 ) -> tuple[str, str]:
+    """Research: one pass computes both streams; callers get the ones they asked for."""
+    both = _hash_package_tree_both(package_path, tuple(sorted(exclude)))
+    return (both[0] if legacy else ""), (both[1] if framed else "")
+
+
+@_passmemo("hash_tree")
+def _hash_package_tree_both(package_path: Path, exclude: tuple[str, ...]) -> tuple[str, str]:
+    return _hash_package_tree_impl(package_path, exclude, legacy=True, framed=True)
+
+
+def _hash_package_tree_impl(
+    package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
+) -> tuple[str, str]:
     """Feed only the requested streams; an unrequested stream returns ``""``."""
     if not package_path.is_dir():
         return (_EMPTY_HASH if legacy else ""), (_EMPTY_HASH if framed else "")
@@ -130,6 +144,7 @@ def _compute_package_hash_impl(
     return framed_digest if framed else legacy
 
 
+@_passmemo("package_files", copy=list)
 def _package_files(
     package_path: Path, *, native: bool = False, skip_roots: tuple[str, ...] = ()
 ) -> list[Path]:
@@ -290,6 +305,7 @@ def content_hash_of_bytes(raw: bytes) -> str:
     return f"sha256:{hashlib.sha256(_canonical_hash_bytes(raw)).hexdigest()}"
 
 
+@_passmemo("file_hash")
 def compute_file_hash(file_path: Path) -> str:
     """Compute SHA-256 of a single file's content (line-ending-normalized).
 

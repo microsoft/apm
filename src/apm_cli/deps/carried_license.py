@@ -132,6 +132,10 @@ def _copy_verbatim(data: bytes, destination: Path) -> bool:
     return True
 
 
+from apm_cli.utils.research_passmemo import passmemo as _passmemo
+
+
+@_passmemo("carried_skill_dirs", copy=list)
 def _skill_dirs(package_root: Path) -> list[Path]:
     found: list[Path] = []
     for directory, directories, files in os.walk(package_root, followlinks=False):

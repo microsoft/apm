@@ -178,6 +178,10 @@ class FormatDetector(Protocol):
 # ---------------------------------------------------------------------------
 
 
+from apm_cli.utils.research_passmemo import passmemo as _passmemo
+
+
+@_passmemo("nested_skill_dirs")
 def _collect_nested_skill_dirs(package_path: Path) -> tuple[str, ...]:
     """Return sorted names of ``skills/<name>/`` dirs containing a SKILL.md."""
     skills_dir = package_path / "skills"
@@ -369,7 +373,12 @@ class PackageFormatRegistry:
     ) -> None:
         self._detectors = detectors if detectors is not None else _DEFAULT_DETECTORS
 
-    def detect(
+    def detect(self, package_path: Path, **kwargs):
+        if self._detectors is not _DEFAULT_DETECTORS:
+            return self._detect(package_path, **kwargs)
+        return _detect_default(self, package_path, **kwargs)
+
+    def _detect(
         self,
         package_path: Path,
         *,
@@ -495,3 +504,8 @@ class NormalizationPlanner:
 
         # Nothing recognisable -> INVALID
         return PackageType.INVALID, None
+
+
+@_passmemo("format_detect", path_arg=1)
+def _detect_default(detector, package_path, **kwargs):
+    return detector._detect(package_path, **kwargs)
