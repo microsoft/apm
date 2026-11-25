@@ -1203,9 +1203,12 @@ def install(  # noqa: PLR0913
                         off in CI), always (force on -- never set in CI),
                         never (disable; also implied for non-TTY stdout).
     """
-    # C1 #856: defaults BEFORE try so `finally` never sees an UnboundLocalError.
+    # C1 #856: defaults BEFORE try so the finally clause never sees an
+    # UnboundLocalError if InstallLogger(...) raises during construction.
     _apm_verbose_prev = os.environ.get("APM_VERBOSE")
-    # F5 (#1116): captured before logger init so `finally` times EVERY exit path.
+    # F5 (#1116): elapsed wall time covers EVERY exit path. Captured
+    # before logger construction so `finally` can render a timing line
+    # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
     logger = dry_run_manifest_tmp = command_result = transaction = None
