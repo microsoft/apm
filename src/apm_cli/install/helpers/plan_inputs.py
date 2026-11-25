@@ -26,9 +26,18 @@ def confirm_update_plan(
     new targets), so an update refuses regardless of its plan. An install
     refuses when it adds or removes a dependency; an unchanged install still
     reads through it. Returns ``False`` when the caller
-    declined the plan.
+    declined the plan. A direct dependency that failed to resolve (a deleted
+    local path) fails the update here, as install's apply barrier does, rather
+    than being reported as already current (#5463).
     """
     if plan_callback is not None:
+        from apm_cli.install.outcome import (
+            direct_dependency_failed,
+            raise_direct_dependency_failure,
+        )
+
+        if direct_dependency_failed(ctx):
+            raise_direct_dependency_failure(ctx)
         plan = build_resolved_update_plan(ctx, lockfile)
         if not plan_callback(plan):
             return False
@@ -69,12 +78,16 @@ def writes_lockfile(ctx: InstallContext, lockfile: LockFile, *, updating: bool) 
 
 
 def build_resolved_update_plan(ctx: InstallContext, lockfile: LockFile | None) -> UpdatePlan:
-    """Supply validated, staged local replacement hashes to the pure plan owner."""
+    """Supply validated, staged local package hashes to the pure plan owner.
+
+    Resolve re-copies every local dependency, so its staged image is the
+    content install would lock; an edited local package is a change (#5463).
+    """
     from apm_cli.install.plan import build_update_plan
     from apm_cli.install.source_helpers import package_digests, record_package_digests
 
     for dependency in ctx.deps_to_install:
-        if dependency.replacement is not None and dependency.is_local:
+        if dependency.is_local:
             record_package_digests(
                 ctx,
                 dependency.get_unique_key(),
