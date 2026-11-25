@@ -286,3 +286,8 @@
 03:52 | tick; notes 1d723b4527730c6a50aea98dfd9dbd569d56c6d4 | SoL calib | none
 03:52 | W schannel calib 9V74 10.53 s x 0.568 = 5.98 s -> doc 'AT target' (3/4 classes) | SoL oracles | none
 03:54 | VP challenged 10.53; traced = cpu_p50_s artifact vm4 (wall 12.26); doc v3.2 caveats 48d166872cf38827b932052fdb1af2aaff603c1b | VP | none
+03:55 | VP accepted CPU base; edit 7 CLOSED; doc v3.3 states CPU p50 + wall +1.7 s (cd3aaefc106c2af8a60eea8163254ad49709d2e3) | doc final 12:00 | none
+04:02 | tick: main 1e4a208e unchanged (no perf landing); inbox silent; tick prompt refreshed (doc v3.3, edits closed) | SoL oracles; pulse ~04:25 | none
+04:11 | SoL Lane N: O-resolve L 0.956/W 0.954/M 0.916; O-walk v1 L 0.999/W 0.987/M 0.861 (memo ~0 CPU); O-walk2 in flight ~25 min; kill if <0.5 s L | SoL kill call + attribution reconcile | none
+04:13 | tick: main 1e4a208e unchanged; inbox silent; awaiting SoL O-walk2 (~04:40) | pulse+push ~04:25 | none
+04:15 | Bets pulse: train #5406 head 5c782a24 (8f56b436 interim-H8 fallback + #5419); #5382/#5377 inside; standby | none | none
