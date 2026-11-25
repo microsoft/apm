@@ -991,8 +991,15 @@ class TestRepositoryRelativeAnchorIdentity:
         assert home_or_above(tmp_path / "users", home.resolve())
         assert portable_anchor_identity(lib, app) == lib.resolve().as_posix()
         monkeypatch.setattr(os.path, "samefile", real_samefile)
-        assert not home_or_above(variant, home.resolve())
-        assert portable_anchor_identity(lib, app) == "../lib"
+        # The real volume decides: NTFS and default APFS fold, ext4 does not.
+        probe = tmp_path / "Fold-Probe"
+        probe.write_text("x", encoding="ascii")
+        folded = tmp_path / "fold-probe"
+        volume_folds = folded.exists() and real_samefile(probe, folded)
+        assert home_or_above(variant, home.resolve()) is volume_folds
+        assert portable_anchor_identity(lib, app) == (
+            lib.resolve().as_posix() if volume_folds else "../lib"
+        )
 
     def test_no_repository_filesystem_root_common_ancestor_stays_absolute(
         self, tmp_path: Path
