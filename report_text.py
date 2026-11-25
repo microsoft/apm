@@ -251,7 +251,7 @@ def render(g, srcs):
     a("")
     a(gap + " Bytes are already at the floor. Current phase shares on main: **integrate (per-file Python work and "
       "path containment) is ~50% of install on Windows and ~45% on Linux**, resolve + fetch ~33%, and the lockfile "
-      "code itself ~3% (an earlier 27% lock-phase bucket was a measurement confound). **What did not work:** lazy "
+      "code itself ~3% (the larger lock-phase share quoted earlier was a measurement confound). **What did not work:** lazy "
       "imports, frozen/zipapp boot, single-pass integrate (bytes are only ~6%; the cost is per-file Python and path "
       "containment), stat cuts, the rest-bucket cut, #5352 (~1.00 on GHE/GitLab) and small cars that stayed within "
       "noise; all were measured and killed. The earlier locked-warm regression is gone on main (#5414 was closed for "
