@@ -4,11 +4,10 @@ This module must NOT import from any command module.
 """
 
 import builtins
-import contextlib
 import functools
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from pathlib import Path
 
 import click
@@ -552,137 +551,13 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     found, whichever comes first. Returns the absolute path to the
     ``apm.yml`` file when found; ``None`` when no project root is
     discoverable from ``start`` upward.
-
-    An ancestor ``apm.yml`` another user owns is never adopted (git's
-    ``safe.directory`` class, #4545): ``/tmp/work`` must not run another
-    user's ``/tmp/apm.yml``. It is skipped with a warning naming it, and the
-    walk continues. Windows ownership (SIDs) is not checked.
     """
-    import stat
-
     cwd = (start or Path.cwd()).resolve()
-    geteuid = getattr(os, "geteuid", None)
     for candidate in (cwd, *cwd.parents):
         manifest = manifest_file(candidate)
-        try:
-            info = manifest.lstat()
-            if stat.S_ISLNK(info.st_mode) and not manifest.is_file():
-                continue
-        except OSError:
-            continue
-        if not stat.S_ISLNK(info.st_mode) and not stat.S_ISREG(info.st_mode):
-            continue
-        if candidate != cwd and geteuid is not None and info.st_uid != geteuid():
-            _rich_warning(
-                f"Skipping {manifest}: owned by uid {info.st_uid}, not you, so APM does "
-                "not use it as this project's apm.yml.",
-                symbol="warning",
-            )
-            continue
-        return manifest
+        if manifest.is_file():
+            return manifest
     return None
-
-
-def resolve_cli_packages_for_project_root(
-    packages: tuple[str, ...],
-    invoking_dir: Path,
-    project_root: Path,
-) -> tuple[str, ...]:
-    """Resolve relative CLI package paths from invoking_dir relative to project_root (#4545)."""
-    invoking, root = invoking_dir.resolve(), project_root.resolve()
-    if invoking == root:
-        return packages
-    resolved: list[str] = []
-    for pkg in packages:
-        # Only an explicit relative path names the invoking directory; a bare
-        # name (``foo``, ``name@market``) never depends on what the subdir holds.
-        if not pkg.startswith(("./", "../", ".\\", "..\\")):
-            resolved.append(pkg)
-            continue
-        resolved.append(_rebase_relative_package(pkg, invoking, root))
-    return tuple(resolved)
-
-
-def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:
-    """Rebase an explicit relative *pkg* from *invoking* onto *root* (#4545).
-
-    Only the parent is resolved, so an intermediate symlink followed by
-    ``..`` lands where the filesystem does; the final component is kept as
-    written, so install still refuses a selected symlink. ``.`` components
-    are dropped first, so ``./link/.`` cannot hide the link either. Across
-    Windows drives no relative path exists, so the absolute path is kept.
-    """
-    from ..models.dependency.identity import normalise_local_path_separators
-
-    parts = [
-        part for part in normalise_local_path_separators(pkg).split("/") if part not in ("", ".")
-    ]
-    if not parts or parts[-1] == "..":
-        target = os.path.realpath(os.path.join(invoking, *parts))
-    else:
-        target = os.path.join(os.path.realpath(os.path.join(invoking, *parts[:-1])), parts[-1])
-    try:
-        rel = os.path.relpath(target, root).replace("\\", "/")
-    except ValueError:
-        return Path(target).as_posix()
-    if rel == ".":
-        return "./"
-    if rel != ".." and not rel.startswith(("./", "../")):
-        return f"./{rel}"
-    return rel
-
-
-@contextlib.contextmanager
-def discover_project_root(
-    packages: tuple[str, ...] = (),
-    *,
-    enabled: bool = True,
-) -> Iterator[tuple[Path | None, tuple[str, ...]]]:
-    """Discover nearest ancestor apm.yml for project-scope install (#4545).
-
-    When *enabled*, walks parent directories from cwd looking for ``apm.yml``.
-    If cwd has no ``apm.yml`` and an ancestor does, prints the discovery notice,
-    resolves relative CLI package paths from the invoking directory against the
-    discovered project root, anchors sources and deploy paths by changing working
-    directory to that project root, and restores the original working directory on exit.
-    """
-    if not enabled:
-        yield None, packages
-        return
-
-    manifest_path = _find_apm_yml()
-    if manifest_path is None:
-        yield None, packages
-        return
-
-    project_root = manifest_path.parent
-    original = Path.cwd()
-    if project_root != original.resolve():
-        resolved_packages = resolve_cli_packages_for_project_root(packages, original, project_root)
-        _rich_info(
-            f"Using apm.yml at {manifest_path} (project root: {project_root})",
-            symbol="info",
-        )
-        os.chdir(project_root)
-        try:
-            yield project_root, resolved_packages
-        finally:
-            with contextlib.suppress(OSError):
-                os.chdir(original)
-    else:
-        yield project_root, packages
-
-
-def setup_project_root_discovery(
-    ctx: click.Context,
-    packages: tuple[str, ...],
-    *,
-    enabled: bool,
-) -> tuple[str, ...]:
-    """Register project root discovery with Click context if enabled (#4545)."""
-    if enabled:
-        _, packages = ctx.with_resource(discover_project_root(packages, enabled=True))
-    return packages
 
 
 # Shared by ``apm install`` and ``apm update`` so both commands expose the same
