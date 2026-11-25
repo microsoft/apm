@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 _VERSION = re.compile(r"Unsupported lockfile version (.+?);")
+_UNPARSEABLE = "Invalid lockfile YAML:"
 
 
 def with_version_remedy(exc: Exception, path: Path) -> Exception:
@@ -19,6 +20,8 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
     from ..core.scope import is_user_scope_root
     from .lockfile import UnsupportedLockfileVersionError
 
+    if str(exc).startswith(_UNPARSEABLE):
+        return _with_regenerate_remedy(exc, path)
     if not isinstance(exc, UnsupportedLockfileVersionError) or getattr(exc, "remediations", ()):
         return exc
     match = _VERSION.search(str(exc))
@@ -34,13 +37,11 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
     return error
 
 
-def with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
-    """Return *exc* ending with how to regenerate *path* when its YAML did not parse."""
+def _with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
+    """Return *exc* ending with how to regenerate *path*, whose YAML did not parse."""
     from ..core import remediation
     from ..core.scope import is_user_scope_root
 
-    if not getattr(exc, "unparseable", False):
-        return exc
     regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
     if is_user_scope_root(path.parent):
         regen = regen.with_command("apm install -g")

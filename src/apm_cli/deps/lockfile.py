@@ -50,7 +50,7 @@ from .carried_license import CarriedLicense, records_from_lock_data, records_to_
 from .lockfile_container import parse_lockfile_text, records_mcp_target_servers
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
-from .lockfile_version_remedy import with_regenerate_remedy, with_version_remedy
+from .lockfile_version_remedy import with_version_remedy
 
 logger = logging.getLogger(__name__)
 
@@ -227,9 +227,6 @@ def resolve_reproducible_timestamp(
 
 class LockfileFormatError(ValueError):
     """Raised when a lockfile container does not match its schema."""
-
-    # True when the YAML itself did not parse (a hand edit), not its schema.
-    unparseable = False
 
 
 class UnsupportedLockfileVersionError(LockfileFormatError):
@@ -1609,9 +1606,7 @@ class LockFile:
         try:
             loaded = parse_lockfile_text(yaml_str)
         except (yaml.YAMLError, ValueError) as exc:
-            error = LockfileFormatError(f"Invalid lockfile YAML: {exc}")
-            error.unparseable = True
-            raise error from exc
+            raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
         return cls._from_validated_data(data)
 
@@ -1854,9 +1849,7 @@ class LockFile:
                 raise LockfileConflictError(path)
             lock = cls.from_yaml(text)
         except LockfileFormatError as exc:
-            raise with_regenerate_remedy(  # noqa: B904 -- the helper chains its cause
-                with_version_remedy(exc, path), path
-            )
+            raise with_version_remedy(exc, path)  # noqa: B904 -- the helper chains its cause
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
         from .lockfile_generator import warn_if_newer
