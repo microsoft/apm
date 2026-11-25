@@ -28,7 +28,7 @@ from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy, ExecutablesPolicy
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-executable-item-admission")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-executable-item-admission")]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1036,7 +1036,9 @@ def test_approve_refuses_unlocked_package_under_empty_org_dependency_allowlist(
     before = manifest.read_bytes()
     assert not (manifest.parent / "apm.lock.yaml").exists()
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=_EMPTY_DEPENDENCY_ALLOW):
+    with patch(
+        "apm_cli.commands.approve.resolve_trust_policy", return_value=_EMPTY_DEPENDENCY_ALLOW
+    ):
         result = CliRunner().invoke(approve_cmd, ["org-denied"])
 
     assert result.exit_code == 1, result.output
@@ -1074,7 +1076,7 @@ def test_bulk_approval_skips_unlocked_package_under_empty_org_dependency_allowli
     before = manifest.read_bytes()
     assert not (manifest.parent / "apm.lock.yaml").exists()
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+    with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
         result = CliRunner().invoke(approve_cmd, args)
 
     assert result.exit_code == 0, result.output
@@ -1108,7 +1110,7 @@ def test_approve_refuses_unlocked_package_when_blocking_dependency_policy_cannot
     manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
     before = manifest.read_bytes()
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+    with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
         result = CliRunner().invoke(approve_cmd, ["org-denied"])
 
     flat = " ".join(result.output.split())
@@ -1125,7 +1127,7 @@ def test_approve_keeps_unlocked_package_behavior_outside_block_enforcement(
     _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
     policy = ApmPolicy(enforcement=enforcement, dependencies=DependencyPolicy(allow=()))
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+    with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
         result = CliRunner().invoke(approve_cmd, ["org-denied"])
 
     assert result.exit_code == 0, result.output
@@ -1161,7 +1163,7 @@ def test_approve_checks_unlocked_package_against_its_manifest_dependency_referen
         dependencies=DependencyPolicy(allow=(reference.get_canonical_dependency_string(),)),
     )
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+    with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
         result = CliRunner().invoke(approve_cmd, ["local-hook"])
 
     assert result.exit_code == 0, result.output

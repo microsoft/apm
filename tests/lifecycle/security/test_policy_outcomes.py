@@ -835,6 +835,26 @@ SITE_SLICES["audit-ci"] = SiteSlice(
 # the block knob refuses and writes nothing; otherwise the miss is reported once.
 _APPROVE_UNRESOLVED = r"Org policy not applied"
 _NOTHING_WRITTEN = r"Nothing was written"
+# The org dependency denylist names the package itself: approve refuses, exit 1,
+# and writes nothing, the same rule as the gate machine (#5236).
+_APPROVE_DEP_DENIED = (
+    r"packages/p-exec is denied by org policy \(dependency-denylist: denied by pattern: "
+    r"\*\*/p-exec\); approving cannot lift it",
+    r"Nothing written\.",
+)
+_APPROVE_GRANTED = (_APPROVE_UNRESOLVED, r"\(\d+ approved\)", r"deploy the approved executables")
+
+
+def _approve_dep_denied(*, policy_fetch: bool | None = None) -> Expect:
+    return Expect(
+        1,
+        _APPROVE_DEP_DENIED,
+        forbids=_APPROVE_GRANTED,
+        unchanged=("*",),
+        policy_fetch=policy_fetch,
+    )
+
+
 SITE_SLICES["approve"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm approve p-exec",
@@ -856,7 +876,7 @@ SITE_SLICES["approve"] = SiteSlice(
             1, (*_routed_block("empty"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
         ),
         "empty/warn": Expect(0, (_not_applied("empty"),)),
-        "found": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "found": _approve_dep_denied(),
         "disabled": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "malformed/block": Expect(1, (*_routed_block("malformed"), _NOTHING_WRITTEN)),
         "malformed/warn": Expect(0, (_not_applied("malformed"),)),
@@ -866,10 +886,10 @@ SITE_SLICES["approve"] = SiteSlice(
         "cached_stale/org-block": Expect(
             1, (_STALE_BLOCK, _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
         ),
-        "cached_stale/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "cache=cold": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=True),
-        "cache=warm-fresh": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=False),
-        "cache=stale<7d": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "cached_stale/warn": _approve_dep_denied(),
+        "cache=cold": _approve_dep_denied(policy_fetch=True),
+        "cache=warm-fresh": _approve_dep_denied(policy_fetch=False),
+        "cache=stale<7d": _approve_dep_denied(),
         "cache=stale>7d-or-expired": Expect(0, (_not_applied("cache_miss_fetch_fail"),)),
     },
 )
