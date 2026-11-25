@@ -32,6 +32,7 @@ import re
 import secrets
 import shutil
 import stat
+import sys
 import tempfile
 import threading
 from collections.abc import Callable, Iterable, Mapping
@@ -760,7 +761,13 @@ def _keep(store: Path) -> Path:
 
 _KEEP_CHANGED = "it changed after the interrupted install"
 _KEEP_WIDER = "its recorded mode is wider than it has now"
-_KEEP_ACL = "it carries a Windows ACL" if os.name == "nt" else "it carries a POSIX ACL"
+_KEEP_ACL = (
+    "it carries a Windows ACL"
+    if os.name == "nt"
+    else "it carries a macOS ACL"
+    if sys.platform == "darwin"
+    else "it carries a POSIX ACL"
+)
 
 
 def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]:
