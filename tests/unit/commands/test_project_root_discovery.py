@@ -153,3 +153,28 @@ def test_a_package_on_another_windows_drive_keeps_its_absolute_path(
     assert resolve_cli_packages_for_project_root(("./pkg",), sub, root) == (
         (sub.resolve() / "pkg").as_posix(),
     )
+
+
+@pytest.mark.skipif(
+    not hasattr(__import__("os"), "geteuid") or __import__("os").geteuid() != 0,
+    reason="needs root to give the link target another owner",
+)
+def test_a_symlinked_ancestor_apm_yml_whose_target_another_user_owns_is_skipped(
+    tmp_path: Path, capsys
+) -> None:
+    """The manifest is read through the link, so its target's owner counts too (#4545)."""
+    import os
+
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    shared = tmp_path / "shared"
+    work = shared / "work" / "src"
+    work.mkdir(parents=True)
+    target = tmp_path / "elsewhere.yml"
+    target.write_text("name: planted\nversion: 0.0.1\n", encoding="utf-8")
+    os.chown(target, 12345, 12345)
+    (shared / "apm.yml").symlink_to(target)
+
+    assert _find_apm_yml(work) is None
+    out = " ".join(capsys.readouterr().out.split())
+    assert "owned by uid 12345" in out, out

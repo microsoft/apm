@@ -564,19 +564,21 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
         manifest = manifest_file(candidate)
         try:
             info = manifest.lstat()
-            if stat.S_ISLNK(info.st_mode) and not manifest.is_file():
-                continue
+            # A symlinked manifest is read through the link: its target counts too.
+            followed = manifest.stat() if stat.S_ISLNK(info.st_mode) else info
         except OSError:
             continue
-        if not stat.S_ISLNK(info.st_mode) and not stat.S_ISREG(info.st_mode):
+        if not stat.S_ISREG(followed.st_mode):
             continue
-        if candidate != cwd and geteuid is not None and info.st_uid != geteuid():
-            _rich_warning(
-                f"Skipping {manifest}: owned by uid {info.st_uid}, not you, so APM does "
-                "not use it as this project's apm.yml.",
-                symbol="warning",
-            )
-            continue
+        if candidate != cwd and geteuid is not None:
+            foreign = next((i.st_uid for i in (info, followed) if i.st_uid != geteuid()), None)
+            if foreign is not None:
+                _rich_warning(
+                    f"Skipping {manifest}: owned by uid {foreign}, not you, so APM does "
+                    "not use it as this project's apm.yml.",
+                    symbol="warning",
+                )
+                continue
         return manifest
     return None
 
