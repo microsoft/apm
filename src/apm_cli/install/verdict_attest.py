@@ -126,11 +126,12 @@ def refuse_frozen_drift(project_root: Path) -> None:
     from apm_cli.install.errors import FrozenInstallError
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
+    from apm_cli.integration.mcp_config_view import PreflightNoticeTape
     from apm_cli.models.apm_package import APMPackage
 
     _FROZEN_NOTICES.pop(str(project_root), None)
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
-    tape = _NoticeTape()
+    tape = PreflightNoticeTape()
     try:
         request = InstallRequest.frozen_preflight(
             manifest, scope=InstallScope.PROJECT, logger=tape, speculative=True
@@ -139,30 +140,6 @@ def refuse_frozen_drift(project_root: Path) -> None:
     except FrozenInstallError:
         raise Decline("frozen preflight") from None  # the full run renders the refusal
     _FROZEN_NOTICES[str(project_root)] = tape.calls
-
-
-class _NoticeTape:
-    """Records each output call of the frozen preflight, in order.
-
-    Only the MCP view's output methods exist (mcp_config_view._McpViewLogger), so
-    any other use raises and the fast path declines (W3d N2). A once-per-command
-    trust notice is taped as such and never touches its owner's dedupe (N1).
-    """
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-
-    def progress(self, message: str) -> None:
-        self.calls.append(("progress", message))
-
-    def warning(self, message: str) -> None:
-        self.calls.append(("warning", message))
-
-    def verbose_detail(self, message: str) -> None:
-        self.calls.append(("verbose_detail", message))
-
-    def tape_trust_once(self, message: str) -> None:
-        self.calls.append(("trust_once", message))
 
 
 _FROZEN_NOTICES: dict[str, list[tuple[str, str]]] = {}
