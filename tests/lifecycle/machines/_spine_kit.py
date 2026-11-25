@@ -121,7 +121,13 @@ _TRANSITION_PROPERTIES = {
             "transaction.failed_command_preserves_state",
         }
     ),
-    "install": frozenset({"routing.authorized_targets_only", "source.ref_cache_coherent"}),
+    "install": frozenset(
+        {
+            "reference.depth_reuses_canonical_shallowest_node_identity",
+            "routing.authorized_targets_only",
+            "source.ref_cache_coherent",
+        }
+    ),
     "install_unlocked_revision": frozenset({"source.ref_cache_coherent"}),
     "prune_removed": frozenset({"ownership.preserve_unowned"}),
     "readd_declaration": frozenset({"transaction.failed_command_preserves_state"}),

@@ -30,6 +30,7 @@
     "P-LAW-outcome.status_matches_state": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): Exit status and diagnostics truthfully describe the durable outcome.",
     "P-LAW-ownership.preserve_unowned": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): Cleanup changes only APM-owned state and preserves user and surviving-package ownership.",
     "P-LAW-portability.byte_deterministic": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): Equivalent inputs produce portable paths and deterministic bytes across supported platforms.",
+    "P-LAW-reference.depth_reuses_canonical_shallowest_node_identity": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): Dependency depth uses canonical ref-insensitive source identity and reuses the depth of the shallowest node by (depth, id); a different origin keeps its own depth.",
     "P-LAW-routing.authorized_targets_only": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): Only explicitly effective targets receive package primitives and service configuration.",
     "P-LAW-source.ref_cache_coherent": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): Materialized content, resolved references, and cache identity describe the same source revision.",
     "P-LAW-transaction.failed_command_preserves_state": "lifecycle law (tests/fixtures/lifecycle_bug_ledger/): A command that fails before commit preserves all durable project and user state.",
