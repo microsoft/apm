@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -87,19 +86,58 @@ def test_symlinked_entry_is_the_skipped_tool_and_target_is_info(tmp_path: Path) 
 def test_powershell_message_names_whichever_candidate_was_shadowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from apm_cli.commands import self_update
+    from apm_cli.utils import executable_exclusion, git_env
 
     _project, bindir, _tool = _project_with_tool(tmp_path, monkeypatch, "pwsh")
-    monkeypatch.setattr(sys, "platform", "win32")
 
-    with (
-        patch("os.get_exec_path", return_value=[str(bindir)]),
-        pytest.raises(FileNotFoundError) as excinfo,
-    ):
-        self_update._get_installer_run_command("install.ps1")
+    with patch("os.get_exec_path", return_value=[str(bindir)]):
+        found = git_env.trusted_executable("powershell") or git_env.trusted_executable("pwsh")
 
-    assert "pwsh at" in str(excinfo.value)
-    assert "is inside the project" in str(excinfo.value)
+    message = executable_exclusion.not_found_message("generic", "powershell", "pwsh")
+    assert found is None
+    assert "pwsh at" in message
+    assert "is inside the project" in message
+
+
+def test_outside_entry_linking_into_project_is_not_called_inside(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "az").write_bytes(b"")
+    link = tmp_path / "tools" / "az"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(project / "az")
+    except OSError:
+        pytest.skip("symlinks unavailable")
+
+    message = str(ProjectShadowedExecutableError("az", str(link), project))
+
+    assert f"az at {link.parent.resolve() / 'az'} links to {(project / 'az').resolve()}" in message
+    assert f"which is inside the project {project}" in message
+    assert "not a link into it" in message
+
+
+def test_llm_version_failure_ignores_a_stale_shadow_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.runtime.llm_runtime import LLMRuntime
+    from apm_cli.utils.git_env import trusted_executable
+
+    if os.name == "nt":
+        pytest.skip("POSIX shell stand-in")
+    _project, bindir, _tool = _project_with_tool(tmp_path, monkeypatch, "llm")
+    managed = Path.home() / ".apm" / "runtimes" / "llm"
+    managed.parent.mkdir(parents=True)
+    managed.write_text("#!/bin/sh\nexit 1\n")
+    managed.chmod(0o755)
+
+    with patch("os.get_exec_path", return_value=[str(bindir)]):
+        assert trusted_executable("llm") is None
+        with pytest.raises(RuntimeError) as excinfo:
+            LLMRuntime()
+
+    assert "pip install llm" in str(excinfo.value)
+    assert "inside the project" not in str(excinfo.value)
 
 
 def test_runtime_helper_names_later_candidate_shadow(

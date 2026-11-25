@@ -25,19 +25,28 @@ def _entry_spelling(tool_path: str) -> str:
     return os.path.join(parent, stored)
 
 
+def _within(path: str, root: Path) -> bool:
+    return Path(os.path.normcase(path)).is_relative_to(os.path.normcase(root))
+
+
 class ProjectShadowedExecutableError(FileNotFoundError):
     """A helper tool exists on PATH, but only inside the enclosing project."""
 
     def __init__(self, name: str, tool_path: str, root: Path) -> None:
         shown = _entry_spelling(tool_path)
         target = os.path.realpath(shown)
-        link = (
-            f" (symlink to {target})" if os.path.normcase(target) != os.path.normcase(shown) else ""
-        )
+        fix = f"Install {name} outside {root} or launch apm from outside it."
+        if os.path.normcase(target) == os.path.normcase(shown):
+            where = f"{name} at {shown} is inside the project {root}"
+        elif _within(shown, root):
+            where = f"{name} at {shown} (symlink to {target}) is inside the project {root}"
+        else:
+            where = f"{name} at {shown} links to {target}, which is inside the project {root}"
+            fix = (
+                f"Install {name} outside {root} (not a link into it) or launch apm from outside it."
+            )
         super().__init__(
-            f"{name} at {shown}{link} is inside the project {root}; APM only runs "
-            f"helper tools from PATH outside the project. Install {name} outside "
-            f"{root} or launch apm from outside it."
+            f"{where}; APM only runs helper tools from PATH outside the project. {fix}"
         )
 
 

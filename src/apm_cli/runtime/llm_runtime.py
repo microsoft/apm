@@ -22,9 +22,14 @@ class LLMRuntime(RuntimeAdapter):
         self.model_name = model_name
 
         # Verify llm CLI is available
+        generic = "llm CLI not found. Please install: pip install llm"
+        try:
+            binary = require_runtime_binary("llm")
+        except FileNotFoundError:
+            raise RuntimeError(not_found_message(generic, "llm")) from None
         try:
             result = subprocess.run(  # noqa: F841
-                [require_runtime_binary("llm"), "--version"],
+                [binary, "--version"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -32,9 +37,7 @@ class LLMRuntime(RuntimeAdapter):
                 env=build_child_tls_env(os.environ),
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
-            raise RuntimeError(  # noqa: B904
-                not_found_message("llm CLI not found. Please install: pip install llm", "llm")
-            )
+            raise RuntimeError(generic)  # noqa: B904
 
     def execute_prompt(self, prompt_content: str, **kwargs) -> str:
         """Execute a single prompt using llm CLI and return the response.
