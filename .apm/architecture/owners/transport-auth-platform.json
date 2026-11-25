@@ -45,12 +45,11 @@
     {
       "id": "windows-held-directory-release",
       "decision": "Held directory release before APM directory mutations on Windows: only package activation registers a held root, and APM releases the holds under a path before it renames or deletes a directory there",
-      "owner": "utils/realpath_win.py (register_held_root, release_held); deps/apm_resolver.py (APMDependencyResolver._activate_validated_package is the only registrar); consumers release through utils/file_ops.py (robust_rmtree, robust_replace, _retry_on_lock) or call release_held directly in a frozen, reviewed module inventory; a tree copy that recreates links releases its destination first (file_ops.robust_copytree before its first link)",
+      "owner": "utils/realpath_win.py (register_held_root, release_held); deps/apm_resolver.py (APMDependencyResolver._activate_validated_package is the only registrar); consumers release through utils/file_ops.py (robust_rmtree, robust_replace, _retry_on_lock) or call release_held directly in a frozen, reviewed module inventory",
       "selectors": ["src/apm_cli/utils/realpath_win.py"],
       "guards": [
         "transport-platform-held-directory-release",
-        "transport-platform-held-root-registration",
-        "transport-platform-link-copy-release"
+        "transport-platform-held-root-registration"
       ]
     },
     {
