@@ -351,3 +351,7 @@
 07:52 | red-team de-dupe: SoL/Bets file into QL redteam-0.39.md; target RC 42878803+#5426; security finds private+neutral issue; SoL narrowed to #5382 proof-lifetime (W3d RT1 owns rest), Bets monorepo; lanes RT5/RT6 declared in plan | reports 08:30 | none
 07:53 | CEO load order: SoL/Bets paused local, CI-only; host load 39; top consumers QL RT4 pytest + apm install -g regent (not mine); VP told | reports 08:30 | none
 07:54 | audit verified (no-c2 L/W heads pass on non-policy fixtures); clean Lane N + prompts rows hold; doc FINAL
+07:55 | DOC PUBLISHED FINAL a32cba07; VP told | red-team reports 08:30 | none
+07:56 | VP: doc lane CLOSED; relayed QL ledger format + rules to SoL/Bets; Bets +target L5 #5418 branch (../ lockfile replay) | checkpoints 08:30/09:00/09:20/10:15; QL interim 09:30 final 10:30 | none
+07:56 | QL single-writer correction relayed: finds -> QL inbox.db post (kind bug), no plan-file edits | checkpoints 08:30 | none
+08:02 | Bets clean combo VERIFIED (digest SAME vs plain main; combined 0.822 -> ~4.4 s at 9V74 on the 5.3 s no-c2 base); doc addendum
