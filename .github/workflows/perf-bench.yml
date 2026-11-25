@@ -162,6 +162,13 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
+    - name: Render differential (research)
+      working-directory: harness
+      continue-on-error: true
+      env:
+        BASE_APM: ${{ github.workspace }}/base/${{ env.VENV_APM }}
+        NEW_APM: ${{ github.workspace }}/new/${{ env.VENV_APM }}
+      run: uv run --frozen python .github/probe/render_diff.py 2>&1 | tail -120
     - name: Interleaved runs
       working-directory: harness
       env:
