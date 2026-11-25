@@ -142,8 +142,11 @@ jobs:
     name: Oracle ${{ matrix.fixture }} ${{ matrix.mode }}
     needs: request
     if: needs.request.outputs.oracle != ''
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.request.outputs.runner }}
     timeout-minutes: 100
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -167,17 +170,21 @@ jobs:
         git -C harness fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$NEW"
         git -C harness worktree add --quiet --detach ../new FETCH_HEAD
         (cd new && uv sync --frozen --no-editable --quiet)
-        echo "new: $(git -C new rev-parse HEAD) $(new/.venv/bin/apm --version)"
+        echo "new: $(git -C new rev-parse HEAD) $(new/${{ needs.request.outputs.venv_apm }} --version)"
         (cd harness && uv sync --frozen --extra dev --quiet)
     - name: Input-mutation oracle
       working-directory: harness
       env:
-        NEW_APM: ${{ github.workspace }}/new/.venv/bin/apm
+        NEW_APM: ${{ github.workspace }}/new/${{ needs.request.outputs.venv_apm }}
         ORACLE_FIXTURE: ${{ matrix.fixture }}
         ORACLE_MODE: ${{ matrix.mode }}
       run: |
         set +e
-        uv run --frozen python .github/probe/mutation_oracle.py 2>&1 | tee oracle.log | grep -E "^ORACLE" | grep -v "^ORACLE same" | tail -300
+        if [[ "$ORACLE_MODE" == census-* ]]; then
+          CENSUS_JOURNEY="${ORACLE_MODE#census-}" uv run --frozen python .github/probe/write_census.py 2>&1 | tee oracle.log | tail -60
+        else
+          uv run --frozen python .github/probe/mutation_oracle.py 2>&1 | tee oracle.log | grep -E "^ORACLE" | grep -v "^ORACLE same" | tail -300
+        fi
         { echo "### Oracle $ORACLE_FIXTURE $ORACLE_MODE @ $NEW"; echo '```'; grep -E "^ORACLE (FINDING|positive|RESULT|ROW)|counts|baseline|NO BASELINE|reconverge" oracle.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
     - if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
