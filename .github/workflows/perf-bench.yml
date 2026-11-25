@@ -162,6 +162,11 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
+    - name: RT5 red cells (research)
+      if: matrix.shard == 1
+      working-directory: harness
+      continue-on-error: true
+      run: uv run --frozen pytest tests/integration/test_redteam_rt5_pack_trees.py -p no:cacheprovider -o addopts="" -rA -q 2>&1 | tail -60
     - name: Interleaved runs
       working-directory: harness
       env:
