@@ -965,9 +965,11 @@ def test_a_skipped_runtime_claim_still_guards_a_shared_file_entry_a_peer_retires
         ]
     )
 
-    _success(scenario.install())
+    result = scenario.install()
 
+    assert result.returncode == 0, result.stdout + result.stderr
     assert set(scenario.servers("claude")) == {"registered"}
+    assert "registered" in scenario.path("claude").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("foreign_target", ["claude", "codex"])
