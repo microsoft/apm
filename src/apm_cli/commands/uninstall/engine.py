@@ -1634,6 +1634,11 @@ def _sync_integrations_after_uninstall(
             "containment validation. Inspect or repair symlinked parents before "
             "removing anything."
         )
+    for kept_path in sorted(result.get("kept_paths", [])):
+        logger.warning(
+            f"Kept {kept_path}: APM has no record that it created this file, "
+            "so it is left empty. Delete it manually if it is no longer needed."
+        )
     failed_hook_paths = sorted(set(result.get("failed_paths", [])).union(unsafe_hook_paths))
     for failed_path in failed_hook_paths:
         path = Path(failed_path)

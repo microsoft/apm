@@ -78,7 +78,15 @@ def test_retiring_hooks_under_an_outside_home_claude_root_deletes_an_emptied_fil
     if user_key:
         data["theme"] = "dark"
     settings = profile / "settings.json"
-    settings.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+    if user_key:
+        settings.write_text(json.dumps(data), encoding="utf-8")
+    else:
+        from apm_cli.integration.config_file_provenance import recorded_config_write
+
+        # Only a record that APM created the file lets cleanup delete it (#4962).
+        with recorded_config_write(settings, manifest_root=home):
+            settings.write_text(json.dumps(data), encoding="utf-8")
 
     stats = HookIntegrator().retire_local_bundle_hooks("bun", home, [target])
 

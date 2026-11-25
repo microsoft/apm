@@ -813,14 +813,20 @@ def forget_config_file(path: str | os.PathLike[str]) -> None:
 
 
 def delete_emptied_config(
-    path: str | os.PathLike[str], *, root: str | os.PathLike[str] | None, empty: bool
+    path: str | os.PathLike[str],
+    *,
+    root: str | os.PathLike[str] | None,
+    empty: bool,
+    require_created: bool = False,
 ) -> bool:
     """Delete *path* if APM may, after a cleanup left it *empty*; return whether it did.
 
     *empty* is the caller's content fact: the file now holds only APM's empty
     skeleton. *root* (project or home) bounds the file: without it, or when
     any component below it is a link, nothing is deleted. A non-regular file
-    (link, FIFO) is never deleted or followed.
+    (link, FIFO) is never deleted or followed. With *require_created* (hook
+    files, #4962) the content proof of an unrecorded or legacy file is not
+    enough: only a record that APM created the file deletes it.
     """
     from apm_cli.integration.write_seam import unlink
     from apm_cli.utils.path_security import has_symlink_component
@@ -841,7 +847,7 @@ def delete_emptied_config(
         # A record APM cannot read proves nothing either way; one under another path
         # (a second mount) means the unrecorded fallback never applies (#5189).
         return False
-    if origin is Origin.PREEXISTING:
+    if origin is Origin.PREEXISTING or (require_created and origin is not Origin.CREATED):
         return False
     if origin is Origin.CREATED:
         try:
