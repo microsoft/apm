@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.39.1] - 2026-11-25
-
-The first published 0.39 release. It includes everything in 0.39.0 below, plus the fixes in this section.
-
-### Fixed
-
-- Helper tools such as git installed under your home directory are now found when apm runs outside a project. (#5470)
-
 ## [0.39.0] - 2026-11-25
 
 ### Highlights
@@ -59,6 +51,7 @@ The first published 0.39 release. It includes everything in 0.39.0 below, plus t
 
 ### Fixed
 
+- Helper tools such as git installed under your home directory are now found when apm runs outside a project. (#5470)
 - `apm install` now deletes a `.mcp.json` or `.claude/settings.json` it created once its last entry leaves, and omits an empty `mcp_target_servers`. (#4862)
 - `apm install` and `apm uninstall` keep an empty `.mcp.json` or hook config you created, drop hook entries of undeclared dependencies, and merge hooks in full-install order. (closes #4867; #4959, #5122, #5298)
 - `apm install` removes a whole Claude plugin's `enabledPlugins` entry from a harness `targets:` no longer declares; the remaining harness keeps it. (#4895)
