@@ -11,6 +11,7 @@ import os
 _ORIG_SCANDIR = os.scandir
 _ORIG_LISTDIR = os.listdir
 _SCANS: dict[str, list] = {}
+STATS = {"scan_hit": 0, "scan_miss": 0, "list_hit": 0, "list_miss": 0, "inactive": 0}
 _LISTS: dict[str, list] = {}
 ACTIVE = False
 
@@ -50,8 +51,10 @@ class _Cached:
 def _scandir(path="."):
     key = _key(path)
     if key is None:
+        STATS["inactive"] += 1
         return _ORIG_SCANDIR(path)
     entries = _SCANS.get(key)
+    STATS["scan_hit" if entries is not None else "scan_miss"] += 1
     if entries is None:
         with _ORIG_SCANDIR(path) as it:
             entries = _SCANS[key] = list(it)
@@ -63,11 +66,16 @@ def _listdir(path="."):
     if key is None:
         return _ORIG_LISTDIR(path)
     names = _LISTS.get(key)
+    STATS["list_hit" if names is not None else "list_miss"] += 1
     if names is None:
         names = _LISTS[key] = _ORIG_LISTDIR(path)
     return list(names)
 
 
 def install() -> None:
+    import atexit
+    import sys
+
+    atexit.register(lambda: sys.stderr.write(f"[owalk] {STATS}\n"))
     os.scandir = _scandir
     os.listdir = _listdir
