@@ -21,6 +21,8 @@
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_naming_a_path_through_a_symlinked_dir_never_governs_the_root_local_file",
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_entry_outside_the_project_is_refused_by_name",
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_a_governance_dir_linked_out_of_the_project_is_refused",
-    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_outside_entry_is_refused_while_the_other_entries_are_scanned"
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_outside_entry_is_refused_while_the_other_entries_are_scanned",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_absolute_entry_through_a_symlinked_dir_governs_the_file_it_walks",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_projected_writes_follow_the_subtree_a_symlinked_entry_walks"
   ]
 }

@@ -779,6 +779,10 @@ def test_unmanaged_files_deny_skips_harness_owned_local_files(
     assert text.count(_LOCAL_SETTINGS_NOTE) == 1, text
     assert "unmanaged file(s)" not in text, text
     assert (project / ".agents" / "skills" / "p-skill").is_dir(), text
+    # A converged reinstall (fast or attested path) still prints the skip line once.
+    again = driver.run(lifecycle_world, ["install"])
+    assert again.returncode == 0, _text(again)
+    assert _text(again).count(_LOCAL_SETTINGS_NOTE) == 1, _text(again)
     audit = driver.run(lifecycle_world, ["audit", "--ci"])
     assert audit.returncode == 0, _text(audit)
     assert _text(audit).count(_LOCAL_SETTINGS_NOTE) == 1, _text(audit)

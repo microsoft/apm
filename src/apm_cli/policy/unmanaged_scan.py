@@ -12,7 +12,7 @@ import os
 import posixpath
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 _DEFAULT_GOVERNANCE_DIRS = [
@@ -125,8 +125,28 @@ def _workspace_entry(project_root: Path, entry: str) -> str:
         )
     if not os.path.isabs(raw):
         return raw
-    lexical = _relpath(os.path.normpath(target), os.path.normpath(project_root))
-    return Path(real if _outside(lexical) else lexical).as_posix()
+    # Keep the entry's own components (a ``..`` after a link included), so the
+    # walk's realpath-guarded label decides what it names, never normpath.
+    for base in (project_root, Path(os.path.realpath(project_root))):
+        try:
+            return PurePosixPath(raw).relative_to(PurePosixPath(base.as_posix())).as_posix()
+        except ValueError:
+            continue
+    return Path(real).as_posix()
+
+
+def _projection_roots(project_root: Path, entry: str) -> set[str]:
+    """The labels a projected write must sit under to be in *entry*'s walked subtree.
+
+    The walk's realpath-guarded label of the entry, plus its resolved path when
+    that label keeps a ``..`` the filesystem does not honour (``.claude/link/..``
+    walks ``.claude/commands``, never ``.claude``).
+    """
+    label = _walked_label(project_root, project_root / entry)
+    if label == _lexical_posix(label):
+        return {label}
+    real = _relpath(os.path.realpath(project_root / entry), os.path.realpath(project_root))
+    return {label, Path(real).as_posix()}
 
 
 def _real_label(project_root: Path, file_path: Path) -> str:
@@ -195,7 +215,9 @@ def scan_governed_files(project_root: Path, directories: Sequence[str] | None) -
             else:
                 entries.append(gov_dir)
     named = {_walked_label(project_root, project_root / entry) for entry in entries}
-    scan.roots = [_lexical_posix(entry) for entry in entries]
+    scan.roots = sorted(
+        {root for entry in entries for root in _projection_roots(project_root, entry)}
+    )
     scan.exempt = {rel for rel in HARNESS_LOCAL_FILES if rel not in named}
     seen: set[str] = set()
     scanned = 0

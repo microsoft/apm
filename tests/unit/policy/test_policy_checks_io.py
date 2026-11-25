@@ -457,6 +457,50 @@ class TestUnmanagedFiles:
         text = " ".join([result.message, *result.details, *result.notes])
         assert "elsewhere" not in text and "x.md" not in text
 
+    @staticmethod
+    def _deep_link(root):
+        (root / ".claude" / "commands" / "deep").mkdir(parents=True, exist_ok=True)
+        try:
+            (root / ".claude" / "link").symlink_to(
+                Path("commands") / "deep", target_is_directory=True
+            )
+        except OSError:
+            pytest.skip("symlinks unavailable")
+
+    def test_an_absolute_entry_through_a_symlinked_dir_governs_the_file_it_walks(self, tmp_path):
+        """#5472: ``<project>/.claude/link/../settings.local.json`` walks
+        ``.claude/commands/settings.local.json`` where links resolve before ``..``;
+        the root local file is absent, so a normpath relabel would scan nothing."""
+        self._write(tmp_path, ".claude/commands/settings.local.json")
+        self._deep_link(tmp_path)
+        entry = tmp_path / ".claude" / "link" / ".." / "settings.local.json"
+        policy = UnmanagedFilesPolicy(action="deny", directories=[str(entry)])
+        result = _check_unmanaged_files(tmp_path, None, policy)
+        if not os.path.exists(entry):
+            pytest.skip("this platform collapses '..' before following the link")
+        assert not result.passed, result.details
+        [flagged] = self._flagged(result)
+        assert flagged != self._LOCAL, result.details
+
+    def test_projected_writes_follow_the_subtree_a_symlinked_entry_walks(self, tmp_path):
+        """#5472: ``.claude/link/..`` walks ``.claude/commands``; a projected
+        ``.claude/settings.json`` is outside that subtree, ``.claude/commands/x.md``
+        is inside it."""
+        self._deep_link(tmp_path)
+        entry = tmp_path / ".claude" / "link" / ".."
+        if os.path.samefile(entry, tmp_path / ".claude"):
+            pytest.skip("this platform collapses '..' before following the link")
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".claude/link/.."])
+        outside = _check_unmanaged_files(
+            tmp_path, None, policy, projected_writes=[".claude/settings.json"]
+        )
+        assert outside.passed, outside.details
+        inside = _check_unmanaged_files(
+            tmp_path, None, policy, projected_writes=[".claude/commands/x.md"]
+        )
+        assert not inside.passed
+        assert self._flagged(inside) == [".claude/commands/x.md"], inside.details
+
     def test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file(self, tmp_path):
         """#5472: a symlinked local settings file skips its link path only; the governed
         file it points to is still reported at its own path."""
