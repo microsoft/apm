@@ -160,7 +160,21 @@ def key(output: dict | None) -> tuple | None:
     """The comparable part of a captured output (no manifest)."""
     if not output:
         return None
+    if output.get("unstable"):
+        return ("unstable", output["unstable"])
     return (output.get("files"), output.get("tree"), output.get("lock"))
+
+
+def record_output(outputs: list[dict]) -> dict:
+    """One record's output from its successful samples' outputs, in run order.
+
+    Every sample contributes to the CPU p50, so every sample must have left the
+    same output: otherwise the record is marked ``unstable`` (variant count).
+    """
+    keys = {key(o) for o in outputs}
+    if len(keys) > 1:
+        return {"unstable": len(keys)}
+    return outputs[-1] if outputs else {}
 
 
 def compare(base: list[tuple[str, dict]], new: list[tuple[str, dict]]) -> dict:
@@ -187,9 +201,18 @@ def compare(base: list[tuple[str, dict]], new: list[tuple[str, dict]]) -> dict:
         }
     paired = sorted(pairs)
     variants = {base_by_pair[p] for p in paired} | {new_by_pair[p] for p in paired}
-    if len(variants) == 1:
+    if len(variants) == 1 and next(iter(variants))[0] != "unstable":
         return {"verdict": "same", "files": next(iter(variants))[0]}
     mismatched = [p for p in paired if base_by_pair[p] != new_by_pair[p]]
+    unstable = [p for p in paired if "unstable" in (base_by_pair[p][0], new_by_pair[p][0])]
+    if unstable or not mismatched:
+        # Each side must leave one output; varying outputs are not a base/new delta.
+        return {
+            "verdict": "UNSTABLE",
+            "variants": len(variants),
+            "pairs": len(paired),
+            "unstable_records": len(unstable),
+        }
     pair = mismatched[0] if mismatched else paired[-1]
     outputs = {side: dict(rows)[pair] for side, rows in (("base", base), ("new", new))}
     before = outputs["base"].get("manifest") or {}

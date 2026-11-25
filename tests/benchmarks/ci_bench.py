@@ -239,11 +239,13 @@ def render(rows: list[dict], meta: dict) -> str:
 
 
 def _output_cell(output: dict | None) -> str:
-    """``same (N files)``, ``INVALID (base->new files)``, ``INCOMPLETE`` or ``-``."""
+    """``same``, ``INVALID``, ``INCOMPLETE``, ``UNSTABLE`` or ``-``."""
     if not output or output["verdict"] == "-":
         return "-"
     if output["verdict"] == "INCOMPLETE":
         return f"INCOMPLETE ({output['uncovered_pairs']}/{output['pairs']} pairs uncaptured)"
+    if output["verdict"] == "UNSTABLE":
+        return f"UNSTABLE ({output['variants']} output variants)"
     return f"{output['verdict']} ({output.get('files')} files)"
 
 
@@ -257,6 +259,14 @@ def _invalid_lines(rows: list[dict]) -> list[str]:
                 f"\n[x] INCOMPLETE {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
                 f"{output['uncovered_pairs']} of {output['pairs']} pairs carry no output on "
                 f"one side (first: {output['first']}), so parity is unproven."
+            )
+            continue
+        if output.get("verdict") == "UNSTABLE":
+            lines.append(
+                f"\n[x] UNSTABLE {row['fixture']} {row['journey']} rtt={row['rtt_ms']:g}: "
+                f"the journey left {output['variants']} different outputs across "
+                f"{output['pairs']} pairs ({output['unstable_records']} records varied "
+                "between their own samples), so no output is like-for-like."
             )
             continue
         if output.get("verdict") != "INVALID":
@@ -284,7 +294,8 @@ def report(args: argparse.Namespace) -> int:
         Path(args.json).write_text(
             json.dumps({"meta": meta, "rows": rows}, indent=2) + "\n", encoding="utf-8"
         )
-    invalid = any((r.get("output") or {}).get("verdict") in ("INVALID", "INCOMPLETE") for r in rows)
+    failing = ("INVALID", "INCOMPLETE", "UNSTABLE")
+    invalid = any((r.get("output") or {}).get("verdict") in failing for r in rows)
     return 1 if not rows or invalid or any(_incomplete(r, args) for r in rows) else 0
 
 

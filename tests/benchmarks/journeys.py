@@ -1122,7 +1122,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "git_verbs": ok[-1].git_verbs if ok else {},
         "fs": ok[-1].fs if ok else {},
         "replay": ok[-1].replay if ok else "",
-        "output": ok[-1].output if ok else {},
+        "output": output_oracle.record_output([s.output for s in ok]),
         "samples": [_sample_record(s) for s in samples],
         "error": error,
     }

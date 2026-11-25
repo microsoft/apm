@@ -163,3 +163,27 @@ def test_a_pair_without_output_on_one_side_is_incomplete(tmp_path, capsys):
 
     assert status == 1
     assert "INCOMPLETE (1/2 pairs uncaptured)" in capsys.readouterr().out
+
+
+def test_outputs_that_vary_across_matching_pairs_are_unstable_not_invalid(tmp_path):
+    full = _capture(tmp_path / "base")
+    partial = _capture(tmp_path / "new", deploy=False)
+
+    verdict = output_oracle.compare(
+        [("p0", full), ("p1", partial)], [("p0", full), ("p1", partial)]
+    )
+
+    assert verdict["verdict"] == "UNSTABLE"
+    assert verdict["variants"] == 2
+
+
+def test_a_record_whose_samples_left_different_outputs_is_unstable(tmp_path):
+    full = _capture(tmp_path / "base")
+    partial = _capture(tmp_path / "new", deploy=False)
+    record = output_oracle.record_output([partial, partial, full])
+
+    verdict = output_oracle.compare([("p0", full)], [("p0", record)])
+
+    assert record == {"unstable": 2}
+    assert verdict["verdict"] == "UNSTABLE"
+    assert verdict["unstable_records"] == 1
