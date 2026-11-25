@@ -101,62 +101,120 @@ def test_isolated_system_config_skips_a_system_helper_and_keeps_other_keys(
 
 
 _LEAKING_TEST = """
+import pathlib
 import subprocess
 
 def test_leaves_a_credential_helper_running():
-    subprocess.Popen(
+    helper = subprocess.Popen(
         [{helper!r}, "120"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        start_new_session={detach!r},
     )
+    pathlib.Path({pid_file!r}).write_text(str(helper.pid))
 """
 
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 
-@pytest.mark.skipif(sys.platform == "win32", reason="needs a POSIX sleep binary")
-def test_guard_fails_the_session_that_leaves_a_credential_helper(tmp_path: Path) -> None:
-    """A test whose git-credential process outlives the run fails the session."""
+
+def _fake_helper(tmp_path: Path) -> Path:
     sleep = shutil.which("sleep")
     assert sleep is not None
     helper = tmp_path / "git-credential-apmleak"
     shutil.copy2(sleep, helper)
-    test_file = tmp_path / "test_leak.py"
-    test_file.write_text(textwrap.dedent(_LEAKING_TEST.format(helper=str(helper))), "utf-8")
+    return helper
 
-    before = set(credential_helpers.credential_helper_processes())
-    survivors: list[int] = []
+
+def _run_leaking_session(
+    tmp_path: Path, *, detach: bool
+) -> tuple[subprocess.CompletedProcess, int]:
+    """Run an inner pytest session whose only test leaves a fake helper running."""
+    pid_file = tmp_path / "helper.pid"
+    test_file = tmp_path / "test_leak.py"
+    test_file.write_text(
+        textwrap.dedent(
+            _LEAKING_TEST.format(
+                helper=str(_fake_helper(tmp_path)), detach=detach, pid_file=str(pid_file)
+            )
+        ),
+        "utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "tests.utils.credential_helpers",
+            "-q",
+            str(test_file),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    return result, int(pid_file.read_text())
+
+
+def _alive(pid: int) -> bool:
+    return pid in credential_helpers.credential_helper_processes()
+
+
+def _kill(pid: int) -> None:
+    with contextlib.suppress(OSError):
+        os.kill(pid, signal.SIGKILL)
+
+
+@posix_only
+def test_guard_fails_the_session_that_leaves_a_credential_helper(tmp_path: Path) -> None:
+    """A helper this pytest run started that outlives it fails the session and is stopped."""
+    result, pid = _run_leaking_session(tmp_path, detach=False)
     try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                "-p",
-                "tests.utils.credential_helpers",
-                "-q",
-                str(test_file),
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        survivors = sorted(set(credential_helpers.credential_helper_processes()) - before)
+        survived = _alive(pid)
     finally:
-        for pid in survivors:
-            with contextlib.suppress(OSError):
-                os.kill(pid, signal.SIGKILL)
+        _kill(pid)
 
     output = result.stdout + result.stderr
     assert result.returncode == pytest.ExitCode.TESTS_FAILED, output[-3000:]
     assert "1 passed" in output
     assert "git credential helper process(es) started during the run" in output
-    assert "git-credential-" in output
-    assert survivors == [], "the guard did not terminate the leaked helper"
+    assert f"pid {pid}:" in output
+    assert not survived, "the guard did not terminate the leaked helper"
+
+
+@posix_only
+def test_guard_ignores_a_helper_outside_its_process_group(tmp_path: Path) -> None:
+    """Another process group's helper (another run, a user's git) is neither reported nor stopped."""
+    result, pid = _run_leaking_session(tmp_path, detach=True)
+    try:
+        survived = _alive(pid)
+    finally:
+        _kill(pid)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == pytest.ExitCode.OK, output[-3000:]
+    assert "git credential helper" not in output
+    assert survived, "the guard stopped a helper it does not own"
+
+
+@posix_only
+def test_exited_unreaped_helper_is_not_listed_as_running(tmp_path: Path) -> None:
+    """A zombie helper is not a leak: it has exited and only awaits its reaper."""
+    helper = subprocess.Popen([str(_fake_helper(tmp_path)), "120"], stdin=subprocess.DEVNULL)
+    try:
+        assert helper.pid in credential_helpers.credential_helper_processes(os.getpgid(0))
+        os.kill(helper.pid, signal.SIGKILL)
+        os.waitid(os.P_PID, helper.pid, os.WEXITED | os.WNOWAIT)
+
+        assert helper.pid not in credential_helpers.credential_helper_processes(os.getpgid(0))
+    finally:
+        _kill(helper.pid)
+        helper.wait(timeout=30)
 
 
 def test_root_conftest_registers_the_guard(pytestconfig: pytest.Config) -> None:

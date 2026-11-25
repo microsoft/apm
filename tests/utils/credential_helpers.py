@@ -16,15 +16,13 @@ Tests that need a helper configure one at global or command scope, which
 still applies after the system-level reset.
 
 :class:`CredentialHelperLeakGuard` fails the session when a
-``git-credential-*`` process that started during the run is still alive at
+``git-credential-*`` process this pytest invocation started is still alive at
 the end, and terminates it.
 """
 
 from __future__ import annotations
 
 import contextlib
-import csv
-import io
 import os
 import shutil
 import signal
@@ -87,51 +85,40 @@ def isolate_git_credential_helpers(
     return config
 
 
-def _posix_processes() -> dict[int, str]:
-    result = subprocess.run(
-        ["ps", "-A", "-o", "pid=,comm="],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
-    processes: dict[int, str] = {}
-    for line in result.stdout.splitlines():
-        pid, _, command = line.strip().partition(" ")
-        if pid.isdigit():
-            processes[int(pid)] = command.strip()
-    return processes
+def credential_helper_processes(pgid: int | None = None) -> dict[int, str]:
+    """Live ``git-credential-*`` processes in process group *pgid*, pid -> name.
 
-
-def _windows_processes() -> dict[int, str]:
-    result = subprocess.run(
-        ["tasklist", "/FO", "CSV", "/NH"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
-    processes: dict[int, str] = {}
-    for row in csv.reader(io.StringIO(result.stdout)):
-        if len(row) > 1 and row[1].isdigit():
-            processes[int(row[1])] = row[0]
-    return processes
-
-
-def credential_helper_processes() -> dict[int, str]:
-    """Running ``git-credential-*`` processes, pid -> command name."""
+    Helpers inherit the process group of the pytest invocation that spawned
+    them through xdist workers and git, and keep it after their parent dies,
+    so the group marks ownership across reparenting. Zombies are skipped: an
+    exited helper waiting to be reaped is not a leak. POSIX only; Windows
+    neither reparents nor exposes process groups, so nothing is listed there.
+    """
+    if sys.platform == "win32":
+        return {}
     try:
-        processes = _windows_processes() if sys.platform == "win32" else _posix_processes()
+        result = subprocess.run(
+            ["ps", "-A", "-o", "pid=,pgid=,stat=,comm="],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return {}
-    # Linux truncates ``comm`` to 15 characters: "git-credential-".
-    return {
-        pid: command
-        for pid, command in processes.items()
-        if Path(command.replace("\\", "/")).name.lower().startswith(HELPER_PREFIX)
-    }
+    helpers: dict[int, str] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) < 4 or not (fields[0].isdigit() and fields[1].isdigit()):
+            continue
+        pid, group, state, command = int(fields[0]), int(fields[1]), fields[2], fields[3]
+        if state.startswith("Z") or (pgid is not None and group != pgid):
+            continue
+        # Linux truncates ``comm`` to 15 characters: "git-credential-".
+        if Path(command.strip()).name.startswith(HELPER_PREFIX):
+            helpers[pid] = command.strip()
+    return helpers
 
 
 def _terminate(pids: list[int]) -> None:
@@ -145,27 +132,36 @@ class CredentialHelperLeakGuard:
 
     Runs on the xdist controller (or the only process): helpers outlive the
     worker whose ``git`` was killed, so a per-worker check would miss them.
+    Only helpers in this invocation's process group that were not running at
+    session start count, so another pytest run or git command on the machine
+    is never reported or stopped.
     """
 
     def __init__(
         self,
-        list_helpers: Callable[[], dict[int, str]] = credential_helper_processes,
+        list_helpers: Callable[[int | None], dict[int, str]] = credential_helper_processes,
         grace_seconds: float = _GRACE_SECONDS,
     ) -> None:
         self._list_helpers = list_helpers
         self._grace_seconds = grace_seconds
+        self._pgid: int | None = None
         self._before: set[int] = set()
 
     def _new_helpers(self) -> dict[int, str]:
         return {
-            pid: command for pid, command in self._list_helpers().items() if pid not in self._before
+            pid: command
+            for pid, command in self._list_helpers(self._pgid).items()
+            if pid not in self._before
         }
 
     def pytest_sessionstart(self, session: pytest.Session) -> None:
-        self._before = set(self._list_helpers())
+        self._pgid = os.getpgid(0) if hasattr(os, "getpgid") else None
+        self._before = set(self._list_helpers(self._pgid))
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
+        if self._pgid is None:
+            return
         leaked = self._new_helpers()
         if leaked and self._grace_seconds:
             time.sleep(self._grace_seconds)
