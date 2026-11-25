@@ -122,7 +122,7 @@ def test_modern_windows_missing_lookup_scales_linearly(
             ),
         )
         with patch("shutil._access_check", return_value=False) as access:
-            with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            with pytest.raises(FileNotFoundError, match="is inside the project"):
                 _resolve_trusted_executable(name)
             counts.append(access.call_count)
 
@@ -259,7 +259,7 @@ class TestResolveTrustedExecutable:
         monkeypatch.setenv("PATH", str(project))
         monkeypatch.setenv("PATHEXT", ".EXE")
 
-        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+        with pytest.raises(FileNotFoundError, match="is inside the project"):
             _resolve_trusted_executable(name)
 
     @pytest.mark.parametrize("name", ["git", "gh"])
@@ -300,7 +300,7 @@ class TestResolveTrustedExecutable:
         monkeypatch.setenv("PATH", str(trusted_bin))
         monkeypatch.setenv("PATHEXT", ".EXE")
 
-        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+        with pytest.raises(FileNotFoundError, match="is inside the project"):
             _resolve_trusted_executable(name)
 
     def test_rejects_candidate_resolving_inside_worktree(
@@ -318,6 +318,12 @@ class TestResolveTrustedExecutable:
             pytest.raises(FileNotFoundError),
         ):
             _resolve_trusted_executable("git")
+
+
+def _assert_resolves_to(result: str, tool: Path) -> None:
+    """The lookup returned the stand-in *tool*, which exists on disk."""
+    assert result == str(tool.resolve())
+    assert Path(result).is_file()
 
 
 _USER_TOOL_DIRS = [
@@ -346,7 +352,7 @@ class TestTrustedExecutableUnderHome:
         monkeypatch.chdir(home)
 
         with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
-            assert _resolve_trusted_executable("git") == str(git.resolve())
+            _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
     def test_unmarked_cwd_below_home_still_resolves_home_tool(
@@ -359,7 +365,7 @@ class TestTrustedExecutableUnderHome:
         monkeypatch.chdir(downloads)
 
         with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
-            assert _resolve_trusted_executable("git") == str(git.resolve())
+            _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
     def test_dotfiles_git_at_home_is_not_the_project(
@@ -373,7 +379,7 @@ class TestTrustedExecutableUnderHome:
         monkeypatch.chdir(cwd)
 
         with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
-            assert _resolve_trusted_executable("git") == str(git.resolve())
+            _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
     def test_nearest_marker_wins_over_dotfiles_git(
@@ -388,7 +394,7 @@ class TestTrustedExecutableUnderHome:
         monkeypatch.chdir(project)
 
         with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
-            assert _resolve_trusted_executable("git") == str(git.resolve())
+            _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     def test_marker_above_home_excludes_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -401,7 +407,7 @@ class TestTrustedExecutableUnderHome:
         monkeypatch.chdir(cwd)
 
         with patch("os.get_exec_path", return_value=[str(home / ".local" / "bin")]):
-            assert _resolve_trusted_executable("git") == str(git.resolve())
+            _assert_resolves_to(_resolve_trusted_executable("git"), git)
 
     @pytest.mark.parametrize("name", ["git", "gh"])
     def test_tool_only_inside_project_names_path_and_root(
@@ -458,7 +464,7 @@ class TestTrustedExecutableUnderHome:
             "os.get_exec_path",
             return_value=[str(project / "bin"), str(home / ".local" / "bin")],
         ):
-            assert _resolve_trusted_executable("git") == str(outside.resolve())
+            _assert_resolves_to(_resolve_trusted_executable("git"), outside)
 
     def test_trusted_path_environment_keeps_home_entries(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -476,6 +482,7 @@ class TestTrustedExecutableUnderHome:
         env = trusted_path_environment({"PATH": str(bin_dir)})
 
         assert env["PATH"] == str(bin_dir.resolve())
+        assert (bin_dir / "x").parent.is_dir()
 
 
 class TestGitSubprocessEnv:
