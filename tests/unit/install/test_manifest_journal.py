@@ -8,14 +8,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from apm_cli.install import manifest_journal
 from apm_cli.install.errors import InstallFailureAlreadyRendered
 from apm_cli.install.manifest_journal import (
     ManifestJournal,
-    expect_manifest_text,
     replay_abandoned_manifest,
 )
-from apm_cli.utils.atomic_io import write_text_lf
 
 pytestmark = [
     pytest.mark.component,
@@ -23,12 +20,6 @@ pytestmark = [
 ]
 
 _PRIOR = b"name: proj\nversion: 1.0.0\n"
-
-
-@pytest.fixture(autouse=True)
-def _no_active_journal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each cell's journals stay its own: the in-process record pointer is reset."""
-    monkeypatch.setattr(manifest_journal, "_ACTIVE", None)
 
 
 @pytest.fixture
@@ -86,8 +77,7 @@ def test_a_kill_between_publication_and_seal_still_restores(workspace: Path) -> 
     """The writer names its bytes before it publishes them; no seal is needed (#5454)."""
     journal = ManifestJournal(workspace / "apm.yml", workspace, _PRIOR, ["./x"])
     text = "name: proj\nversion: 1.0.0\ndependencies:\n  apm: [./x]\n"
-    expect_manifest_text(workspace / "apm.yml", text)
-    write_text_lf(workspace / "apm.yml", text)  # killed here, before any seal
+    journal.publish(text)  # killed here, before any seal
     logger = MagicMock()
 
     replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
@@ -125,11 +115,15 @@ def test_the_advice_repeats_the_interrupted_command_exactly(
     journal.seal()
     logger = MagicMock()
     replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
+    assert (workspace / "apm.yml").read_bytes() == _PRIOR
+    assert not journal.path.exists()
     assert f"Run '{retry}' to add it again." in logger.warning.call_args.args[0]
 
     journal = ManifestJournal(workspace / "apm.yml", workspace, _PRIOR, ["./x"], options)
     (workspace / "apm.yml").write_bytes(b"# hand edit\n")
     replay_abandoned_manifest(workspace, logger, workspace / "apm.yml")
+    assert (workspace / "apm.yml").read_bytes() == b"# hand edit\n"
+    assert not journal.path.exists()
     assert f"Run '{kept}' to lock what apm.yml declares." in logger.warning.call_args.args[0]
 
 
@@ -146,7 +140,8 @@ def test_a_root_record_restores_its_source_manifest_only(
     (source / "apm.yml").write_bytes(_PRIOR + b"dependencies:\n  apm: [./x]\n")
     journal.seal()
 
-    replay_abandoned_manifest(deploy, MagicMock(), tmp_path / "other" / "apm.yml")
+    with pytest.raises(InstallFailureAlreadyRendered):
+        replay_abandoned_manifest(deploy, MagicMock(), tmp_path / "other" / "apm.yml")
     assert journal.path.exists(), "another source's command replayed this record"
 
     replay_abandoned_manifest(deploy, MagicMock(), source / "apm.yml")
@@ -167,7 +162,32 @@ def test_a_record_naming_another_apm_yml_never_writes_it(workspace: Path, tmp_pa
 
     with pytest.raises(TypeError):  # no caller may replay without naming its manifest
         replay_abandoned_manifest(workspace, MagicMock())  # type: ignore[call-arg]
-    replay_abandoned_manifest(workspace, MagicMock(), workspace / "apm.yml")
+    with pytest.raises(InstallFailureAlreadyRendered):
+        replay_abandoned_manifest(workspace, MagicMock(), workspace / "apm.yml")
 
     assert victim.read_bytes() == b"name: theirs\n"
     assert (workspace / "apm.yml").read_bytes() == ours
+
+
+def test_a_record_from_another_source_refuses_and_names_that_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed: a second source sharing the --root workspace never replaces the record."""
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    source, deploy = tmp_path / "source-a", tmp_path / "deploy"
+    source.mkdir()
+    deploy.mkdir()
+    (source / "apm.yml").write_bytes(_PRIOR)
+    journal = ManifestJournal(
+        source / "apm.yml", deploy, _PRIOR, ["./x"], (["--root", str(deploy)], [])
+    )
+    journal.publish(_PRIOR.decode() + "dependencies:\n  apm: [./x]\n")
+    logger = MagicMock()
+
+    with pytest.raises(InstallFailureAlreadyRendered):
+        replay_abandoned_manifest(deploy, logger, tmp_path / "source-b" / "apm.yml")
+
+    assert journal.path.exists()
+    message = logger.error.call_args.args[0]
+    assert f"'apm install --root {deploy} ./x' from {source} is still pending" in message
+    assert f"Change to {source}, then run 'apm install --root {deploy}'" in message

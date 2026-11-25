@@ -316,3 +316,59 @@ def test_a_successful_add_leaves_home_byte_identical(tmp_path: Path, apm_binary_
     assert added.returncode == 0, evidence(added)
     assert _home_state(world.isolated.home) == before
     assert not (world.isolated.config_root / "install-snapshots").exists()
+
+
+def test_a_kill_during_the_apm_yml_publication_never_leaves_a_partial_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The add publishes apm.yml with one rename: a kill mid-write leaves the prior bytes."""
+    world = build_world(tmp_path, apm_binary_path)
+    manifest, lock = (world.project / "apm.yml").read_bytes(), world.lockfile_bytes()
+    delta = world.write_package("delta")
+
+    _kill_on_engine(
+        world,
+        "stage+kill",
+        delta,
+        APM_TEST_DEPLOY_KILL_PATH=f"{world.project.name}/apm.yml",
+    )
+    assert (world.project / "apm.yml").read_bytes() == manifest
+    assert _records(world), "the kill left no manifest record"
+
+    frozen = world.install("--frozen")
+    assert frozen.returncode == 0, evidence(frozen)
+    assert (world.project / "apm.yml").read_bytes() == manifest
+    assert world.lockfile_bytes() == lock
+    assert not _records(world)
+
+
+def test_another_source_sharing_the_root_is_refused_until_the_first_replays(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Fail closed: B never overwrites A's record; the refusal names A and its command."""
+    world = build_world(tmp_path, apm_binary_path, installed=False)
+    deploy = world.project.parent / "deploy"
+    (deploy / ".claude").mkdir(parents=True)
+    assert world.install("--root", str(deploy)).returncode == 0
+    manifest = (world.project / "apm.yml").read_bytes()
+    delta = str(world.project / world.write_package("delta"))
+    _kill_at_commit(world, "--root", str(deploy), delta)
+
+    other = world.project.parent / "other"
+    other.mkdir()
+    (other / "apm.yml").write_text("name: other\nversion: 1.0.0\n", encoding="ascii")
+    with expect_output_violation("I8", reason="the refusal exits before install"):
+        refused = world.runner.run(
+            ("install", "--no-policy", "--root", str(deploy), delta), cwd=other, env=world.env
+        )
+    output = _text(refused)
+    assert refused.returncode != 0, evidence(refused)
+    assert f"from {world.project} is still pending" in output, evidence(refused)
+    assert f"Change to {world.project}, then run 'apm install --root {deploy}'" in output
+    assert (other / "apm.yml").read_text(encoding="ascii") == "name: other\nversion: 1.0.0\n"
+    assert _records(world), "the second source replaced the pending record"
+
+    replayed = world.install("--root", str(deploy), "--frozen")
+    assert replayed.returncode == 0, evidence(replayed)
+    assert (world.project / "apm.yml").read_bytes() == manifest
+    assert not _records(world)

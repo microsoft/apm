@@ -82,11 +82,12 @@ def _merge_packages_into_yml(
     data[dep_section]["apm"] = current_deps
 
     try:
-        from apm_cli.install.manifest_journal import expect_manifest_data
+        from apm_cli.install.manifest_journal import publish_journaled_manifest
         from apm_cli.utils.yaml_io import dump_yaml_roundtrip
 
-        expect_manifest_data(apm_yml_path, data)  # before the write (#5454)
-        dump_yaml_roundtrip(data, apm_yml_path)
+        # An install journaling this apm.yml publishes it atomically (#5454).
+        if not publish_journaled_manifest(apm_yml_path, data):
+            dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(
                 f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)"
@@ -208,9 +209,7 @@ def bootstrap_install_manifest(
     config = bootstrap_config(project_name) | (
         {"targets": manifest_targets} if manifest_targets else {}
     )
-    write_minimal_manifest(
-        config, target_path=manifest_path, before_write=transaction.expect_manifest
-    )
+    write_minimal_manifest(config, target_path=manifest_path, publish=transaction.publish_manifest)
     _report_bootstrap_manifest(
         logger=logger,
         manifest_display=manifest_display,

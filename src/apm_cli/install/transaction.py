@@ -450,10 +450,14 @@ class InstallTransaction:
             self.manifest_path, workspace, self._manifest_snapshot, packages, options
         )
 
-    def expect_manifest(self, text: str) -> None:
-        """Name the bytes a bootstrap is about to publish as apm.yml (#5454)."""
+    def publish_manifest(self, text: str) -> None:
+        """Publish a bootstrapped apm.yml: journaled and atomic under an add (#5454)."""
         if self._manifest_journal is not None:
-            self._manifest_journal.expect(text)
+            self._manifest_journal.publish(text)
+            return
+        from apm_cli.utils.atomic_io import write_text_lf
+
+        write_text_lf(self.manifest_path, text)
 
     def record_validation(self, validation: _ValidationOutcome) -> None:
         """Attach the validation outcome produced after transaction creation."""

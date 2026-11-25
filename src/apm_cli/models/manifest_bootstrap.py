@@ -51,7 +51,7 @@ def bootstrap_config(project_name):
     }
 
 
-def write_minimal_manifest(config, plugin=False, target_path=None, before_write=None):
+def write_minimal_manifest(config, plugin=False, target_path=None, publish=None):
     """Create minimal apm.yml file with auto-detected metadata.
 
     Args:
@@ -60,8 +60,8 @@ def write_minimal_manifest(config, plugin=False, target_path=None, before_write=
             Optional 'target' key: CSV string of targets to pin.
         plugin: if True, include a devDependencies section.
         target_path: explicit file path to write (defaults to cwd/apm.yml).
-        before_write: called with the rendered text just before it is written,
-            so an install can journal the bytes it publishes (#5454).
+        publish: writes the rendered text in place of a plain write, so an
+            install can journal and publish it atomically (#5454).
 
     The rendered manifest is parsed back through the manifest target
     declaration owner first, so no scaffold or bootstrap writes a manifest
@@ -150,6 +150,7 @@ def write_minimal_manifest(config, plugin=False, target_path=None, before_write=
     from .manifest_targets import verify_rewritten_manifest
 
     verify_rewritten_manifest(out_file, content)
-    if before_write is not None:
-        before_write(content)
+    if publish is not None:
+        publish(content)
+        return
     out_file.write_text(content, encoding="utf-8")

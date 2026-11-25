@@ -13,7 +13,8 @@ attempt wrote (a seal), and the lockfile it is about to commit (a mark). The
 record is dropped once that lockfile is on disk or the transaction ends in
 process. Every writer of that ``apm.yml`` names the bytes it is about to
 publish first (:func:`expect_manifest_text`), so a kill between the write and
-its seal still replays. The next install entry, under the lifecycle lock and before it reads
+its seal still replays, and publishes them atomically, so a kill never
+leaves a partial apm.yml (:func:`publish_journaled_manifest`). The next install entry, under the lifecycle lock and before it reads
 the manifest, replays a record a killed process left
 (:func:`replay_abandoned_manifest`): while the lockfile is the one the killed
 install found and ``apm.yml`` holds bytes it wrote, the prior manifest is put
@@ -59,6 +60,10 @@ def _write(path: Path, record: dict[str, Any]) -> None:
 def _remove(path: Path) -> None:
     """Delete the record and, like a discarded deploy journal, its parent once empty."""
     from apm_cli.utils.realpath_win import release_held
+
+    global _ACTIVE
+    if _ACTIVE is not None and _ACTIVE.path == path:
+        _ACTIVE = None  # this process journals that record no longer
 
     with contextlib.suppress(FileNotFoundError):
         path.unlink()
@@ -118,20 +123,20 @@ def _scope_prefix(options: list[str]) -> list[str]:
 _ACTIVE: ManifestJournal | None = None
 
 
-def expect_manifest_text(path: Path, text: str) -> None:
-    """Name the bytes about to be published at *path*, before the write (#5454)."""
+def publish_journaled_manifest(path: Path, data: Any) -> bool:
+    """Write round-trip YAML *data* to the journaled apm.yml *path*, atomically.
+
+    Returns ``False`` when no install journals *path*: the caller writes it
+    as before. Otherwise the bytes are named first, then published with
+    ``os.replace``, so a kill never leaves a partial apm.yml (#5454).
+    """
     journal = _ACTIVE
-    if journal is not None and Path(os.path.abspath(path)) == journal.manifest_path:
-        journal.expect(text)
-
-
-def expect_manifest_data(path: Path, data: Any) -> None:
-    """Name the round-trip YAML *data* ``dump_yaml_roundtrip`` is about to write to *path*."""
-    if _ACTIVE is None:
-        return
+    if journal is None or Path(os.path.abspath(path)) != journal.manifest_path:
+        return False
     from apm_cli.utils.yaml_io import yaml_roundtrip_to_str
 
-    expect_manifest_text(Path(path), yaml_roundtrip_to_str(data))
+    journal.publish(yaml_roundtrip_to_str(data))
+    return True
 
 
 class ManifestJournal:
@@ -179,6 +184,18 @@ class ManifestJournal:
             [_digest(v.encode("utf-8")) for v in dict.fromkeys((lf, lf.replace("\n", os.linesep)))]
         )
 
+    def publish(self, text: str) -> None:
+        """Name *text*, then replace the manifest with it in one rename."""
+        from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode, write_text_lf
+
+        self.expect(text)
+        if self.manifest_path.is_symlink():
+            write_text_lf(self.manifest_path, text)  # a rename would replace the link
+            return
+        atomic_write_text(
+            self.manifest_path, text, new_file_mode=umask_file_mode(self.manifest_path)
+        )
+
     def seal(self) -> None:
         """Record the manifest this attempt wrote, so replay may undo exactly it."""
         try:
@@ -193,10 +210,6 @@ class ManifestJournal:
         _write(self.path, self._record)
 
     def discard(self) -> None:
-        global _ACTIVE
-
-        if _ACTIVE is self:
-            _ACTIVE = None
         _remove(self.path)
 
 
@@ -234,6 +247,23 @@ def _retry(record: dict[str, Any]) -> str:
     return _quoted([*record["options"], *bootstrap, *record["packages"]])
 
 
+def _refuse_pending(record: dict[str, Any], target: Path, path: Path, logger: Any) -> None:
+    from apm_cli.core.remediation import INTERRUPTED_ADD_PENDING
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    source = printable_ascii_text(str(target.parent))
+    pending = INTERRUPTED_ADD_PENDING.bind(source=source)
+    if scope := _scope_prefix(record["options"]):
+        pending = pending.with_command(f"apm install {_quoted(scope)}")
+    if logger is not None:
+        logger.error(
+            f"An interrupted 'apm install {_retry(record)}' from {source} is still pending "
+            f"for this workspace. {pending.sentence()}"
+        )
+    raise InstallFailureAlreadyRendered(f"pending manifest record {path}")
+
+
 def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> None:
     """Restore the ``apm.yml`` an install killed before its lock commit left (#5454).
 
@@ -262,8 +292,9 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> N
         raise InstallFailureAlreadyRendered(f"unreadable manifest record {path}") from None
     target = Path(record["manifest"])
     if target != Path(os.path.abspath(manifest)):
-        # Never trust the record's own path: only the command's apm.yml is restored.
-        return  # Another source's apm.yml (--root): its own next install replays it.
+        # Never trust the record's own path, and never let another source's
+        # install overwrite this record: refuse until that source replays it.
+        _refuse_pending(record, target, path, logger)
     lock = _lock_identity(workspace)
     if (record.get("commit") is not None and lock == record["commit"]) or lock != record.get(
         "lock"
