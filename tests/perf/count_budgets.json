@@ -243,10 +243,10 @@
         "pr": "#5345"
       },
       "fs.stat_calls": {
-        "budget": 174,
-        "measured": 165,
-        "reason": "the TLS probe stamp stats the git config files it names on each probe lookup (W3d cost line): Lifecycle Smoke shard 3, run 45446283432 at 9b26dd0d",
-        "pr": "#5370"
+        "budget": 176,
+        "measured": 176,
+        "reason": "#4545 HOME ceiling: one-time (dev, ino) identity stats for the HOME chain + project dir, ~7 per process, constant (not per walk level); cost: ~7 stat syscalls once per process; PERF VP co-sign; observed 176 at d02676a8 (was 174)",
+        "pr": "#5497"
       },
       "git.config": {
         "budget": 4,

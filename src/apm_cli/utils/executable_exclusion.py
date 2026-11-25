@@ -55,15 +55,17 @@ def is_home(directory: Path) -> bool:
 
 
 def _home_chain_identities(home: Path) -> frozenset[tuple[int, int]] | None:
-    """(dev, ino) of *home*; cached only when it stat'ed. Ancestors match by spelling."""
+    """(dev, ino) of *home* and each ancestor; cached only when every level stat'ed."""
     cached = _HOME_CHAIN.get(home)
     if cached is not None:
         return cached
     try:
-        info = os.stat(home)
+        identities = frozenset(
+            (info.st_dev, info.st_ino) for info in map(os.stat, (home, *home.parents))
+        )
     except OSError:
         return None
-    identities = _HOME_CHAIN[home] = frozenset({(info.st_dev, info.st_ino)})
+    _HOME_CHAIN[home] = identities
     return identities
 
 
@@ -71,17 +73,13 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
     """Whether *directory* is *home* or one of its ancestors (``/``, ``/home``, ...).
 
     The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
-    manifest) is not a project. *home* is resolved, so a case-variant spelling of
-    any level matches by case-folded path and HOME itself also by (dev, ino);
-    each verdict is stat'ed once per process. A missing *home*
-    (``resolved_home()`` returned None) disables the check.
+    manifest) is not a project. Identity-based, so a case-variant or symlinked
+    spelling matches; HOME's chain and each directory verdict are stat'ed once per process.
+    A missing *home* (``resolved_home()`` returned None) disables the check.
     """
     if home is None:
         return False
     if directory == home or directory in home.parents:
-        return True
-    levels = {os.path.normcase(str(level)).casefold() for level in (home, *home.parents)}
-    if os.path.normcase(str(directory)).casefold() in levels:
         return True
     known = _LEVEL_VERDICTS.get((home, directory))
     if known is not None:
@@ -90,9 +88,11 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
     try:
         wanted = os.stat(directory)
     except OSError:
-        return False
+        # Fail closed: an unreadable directory spelled as a HOME level stays a ceiling.
+        levels = {os.path.normcase(str(level)) for level in (home, *home.parents)}
+        return os.path.normcase(str(directory)) in levels
     if chain is None:
-        return same_directory(directory, home)
+        return any(same_directory(directory, level) for level in (home, *home.parents))
     verdict = _LEVEL_VERDICTS[(home, directory)] = (wanted.st_dev, wanted.st_ino) in chain
     return verdict
 
