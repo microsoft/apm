@@ -43,10 +43,12 @@ def frozen_mcp_drift_reasons(
     return reasons
 
 
-def frozen_drift_headline(reasons: list[str]) -> str:
+def frozen_drift_headline(
+    reasons: list[str], default: str = "--frozen: apm.lock.yaml is out of sync with apm.yml."
+) -> str:
     """The ``--frozen`` headline: a policy refusal leads when org policy caused the drift."""
     from apm_cli.integration.mcp_config_view import POLICY_WITHHELD
 
     if any(POLICY_WITHHELD in reason for reason in reasons):
         return "--frozen: org MCP policy refuses server(s) that apm.lock.yaml admitted."
-    return "--frozen: apm.lock.yaml is out of sync with apm.yml."
+    return default

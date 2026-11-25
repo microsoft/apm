@@ -827,8 +827,12 @@ class InstallService:
             include_dependency_mcp=include_dependency_mcp,
         )
         if reasons:
+            from apm_cli.install.frozen_mcp_drift import frozen_drift_headline
+
             raise FrozenInstallError(
-                "--frozen: restored MCP declarations differ from apm.lock.yaml.",
+                frozen_drift_headline(
+                    reasons, "--frozen: restored MCP declarations differ from apm.lock.yaml."
+                ),
                 reasons=reasons,
                 tip=(
                     "Tip: review the restored sources and lockfile before running "
