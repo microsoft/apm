@@ -314,6 +314,16 @@ def _null_root_identity(data: dict) -> None:
     data["root_identity"] = None
 
 
+def _string_root_identity(data: dict) -> None:
+    data["root_identity"] = "corrupt"
+
+
+def _device_only_change(data: dict) -> None:
+    """Same UUID and inode, another device and no matching birth time: ambiguous."""
+    data["root_identity"][0] += 1
+    data["root_birth_time"] = 1.0
+
+
 def _another_uuid_no_writes(data: dict) -> None:
     data["installation"] = "0" * 32
     del data["writes"]
@@ -321,11 +331,23 @@ def _another_uuid_no_writes(data: dict) -> None:
 
 @pytest.mark.parametrize(
     "corrupt",
-    ["text", _null_root_identity, _another_uuid_no_writes],
-    ids=["not-json", "null-root-identity", "another-uuid-no-writes"],
+    [
+        "text",
+        _null_root_identity,
+        _string_root_identity,
+        _device_only_change,
+        _another_uuid_no_writes,
+    ],
+    ids=[
+        "not-json",
+        "null-root-identity",
+        "string-root-identity",
+        "device-only-change",
+        "another-uuid-no-writes",
+    ],
 )
 def test_corrupt_evidence_is_never_set_aside_by_an_install(project: Path, corrupt) -> None:
-    """Only well-formed evidence provably bound to another installation rotates."""
+    """Only well-formed evidence with positive proof of another installation rotates."""
     _install_write(project, _Logger())
     path = McpWriteReceipts.open(project, user_scope=False).path
     if corrupt == "text":
