@@ -126,7 +126,9 @@ def refuse_frozen_drift(project_root: Path) -> None:
 
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
     try:
-        request = InstallRequest.frozen_preflight(manifest, scope=InstallScope.PROJECT)
+        request = InstallRequest.frozen_preflight(
+            manifest, scope=InstallScope.PROJECT, speculative=True
+        )
         InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
     except FrozenInstallError:
         raise Decline("frozen preflight") from None  # the full run renders the refusal

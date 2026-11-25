@@ -1525,6 +1525,33 @@ def test_a_changed_input_never_serves_a_frozen_install(project: Path, change: st
     _assert_keyed(project, ["install"], "plain")  # the record stays; only the hit misses
 
 
+def test_a_frozen_hit_re_proves_every_declared_edge_from_the_lock(project: Path) -> None:
+    """Copilot #5423: the attested gates run the frozen edge walk; an edge the lock does
+    not hold declines a frozen hit and never a plain one (positive control)."""
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.diff_apply import Decline
+
+    package = project / "apm_modules" / "o" / "p" / "apm.yml"
+    package.write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")  # a readable copy
+    lock = LockFile.read(project / "apm.lock.yaml")
+    assert verdict_attest.attested_gates(project, lock, None, SimpleNamespace(replay=True))
+    from apm_cli.models.apm_package import clear_apm_yml_cache
+
+    (project / "apm.yml").write_text(_MANIFEST + "    - o/unlocked\n", encoding="utf-8")
+    clear_apm_yml_cache()  # a new run reads the edited manifest
+    assert verdict_attest.attested_gates(project, lock, None, SimpleNamespace(replay=False))
+
+    with pytest.raises(Decline, match="unlocked dependency edge"):
+        verdict_attest.attested_gates(project, lock, None, SimpleNamespace(replay=True))
+    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes(project)
+
+
+def lock_bytes(project: Path) -> bytes:
+    return (project / "apm.lock.yaml").read_bytes()
+
+
 def test_every_frozen_only_owner_is_classified_for_an_attested_hit() -> None:
     """W3d AF2, closed world: the frozen owner row's modules and every frozen method of
     InstallService are classified live or implied (install/verdict_attest.py)."""

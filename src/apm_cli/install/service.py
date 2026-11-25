@@ -618,6 +618,7 @@ class InstallService:
             user_scope=is_user_scope(request.scope),
             one_off=request.trust_transitive_mcp,
             no_policy=request.no_policy,
+            migrate_user_legacy=not request.dry_run,  # a speculative preflight never migrates
         )
         reasons.extend(
             InstallService._frozen_mcp_reasons(
