@@ -69,6 +69,7 @@ def main() -> int:
     a, b = report["fast"]["files"], report["full"]["files"]
     diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
     report["diff"] = diff
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=1))
     for mode in ("fast", "full", "fast2"):
         print(mode, len(report[mode]["files"]), "files;", report[mode]["trace"][:3])
