@@ -90,7 +90,11 @@ def init(force, no_gitignore_check, name, owner, verbose):
         sys.exit(1)
 
     block_data = rt.load(render_marketplace_block(owner=owner))
-    data["marketplace"] = block_data["marketplace"]
+    block = block_data["marketplace"]
+    # An existing apm.yml keeps its project name; --name names the marketplace (#5405).
+    if name is not None and name != data.get("name"):
+        block.insert(0, "name", name)
+    data["marketplace"] = block
 
     out = StringIO()
     rt.dump(data, out)

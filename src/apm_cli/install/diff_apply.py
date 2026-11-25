@@ -214,17 +214,24 @@ def _plan_files(
     return writes
 
 
-def _refuse_claude_carried_rules(project_root: Path, targets: Any) -> None:
-    """Decline when a Claude rule may be left to a compiled AGENTS.md (#5343).
+def _refuse_claude_carried_rules(project_root: Path, targets: Any, lock: Any = None) -> None:
+    """Decline when a Claude rule may be left to a compiled AGENTS.md (#5343, #5434).
 
     The lock records only the rules install wrote, so a deleted carrier would
-    otherwise leave Claude with no copy; the full run restores the rule.
+    otherwise leave Claude with no copy; the full run restores the rule. A
+    locked package's routable instruction can be carried by a directory's
+    AGENTS.md anywhere, so it declines too.
     """
-    from apm_cli.compilation.claude_agents_md import compiled_agents_md_may_carry
+    from apm_cli.compilation.claude_agents_md import (
+        compiled_agents_md_may_carry,
+        lock_ships_routable_instruction,
+    )
 
-    if any(
-        getattr(t, "compile_family", None) == "claude" for t in targets
-    ) and compiled_agents_md_may_carry(project_root):
+    if not any(getattr(t, "compile_family", None) == "claude" for t in targets):
+        return
+    if compiled_agents_md_may_carry(project_root) or (
+        lock is not None and lock_ships_routable_instruction(project_root, lock)
+    ):
         raise Decline("claude rules may depend on a compiled AGENTS.md")
 
 
@@ -777,7 +784,7 @@ def try_apply(
         _root, user_scope, targets = resolve_audit_scope(project_root, lock)
         if user_scope or not targets:
             raise Decline("scope")
-        _refuse_claude_carried_rules(project_root, targets)
+        _refuse_claude_carried_rules(project_root, targets, lock)
         from apm_cli.cache.deploy_store import DeployStore
 
         session = DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)

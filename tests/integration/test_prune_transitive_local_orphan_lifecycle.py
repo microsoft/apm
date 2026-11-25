@@ -346,6 +346,68 @@ def test_prune_keeps_a_survivor_spelled_another_way(
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("e_spells_f", "a_spells_f"),
+    [
+        pytest.param("F-Pkg", "f-pkg", id="case-alias"),
+        pytest.param(f"f{_NFC}", f"f{_NFD}", id="nfc-alias"),
+    ],
+)
+def test_install_and_prune_keep_one_row_per_folded_directory(
+    tmp_path: Path, apm_binary_path: Path, e_spells_f: str, a_spells_f: str
+) -> None:
+    """#5424: two spellings of one directory on a folding filesystem are one lock row.
+
+    Install records f once; prune keeps that one row and removes the orphan e.
+    """
+    if not _fs_folds(e_spells_f, a_spells_f, tmp_path):
+        pytest.skip("this filesystem keeps both spellings distinct")
+    world = _world(tmp_path, apm_binary_path, f_dir=e_spells_f, a_spells_f=a_spells_f)
+    assert len(_lock_rows_named(world, "f")) == 1, sorted(_rows(world))
+
+    pruned = world.apm("prune")
+
+    rows = _rows(world)
+    assert pruned.returncode == 0, pruned.stderr
+    assert "_local/e" not in rows, sorted(rows)
+    assert len(_lock_rows_named(world, "f")) == 1, sorted(rows)
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+def _lock_rows_named(world: ReplayWorld, name: str) -> list[str]:
+    """Every lock row (not deduplicated by key) of the package *name*."""
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    return sorted(row["repo_url"] for row in lock["dependencies"] if row.get("name") == name)
+
+
+def test_an_exactly_spelled_local_graph_keeps_its_lock_bytes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5424: spellings that match the stored entries keep the identity install always wrote.
+
+    The transitive rows keep the typed spelling, and neither ``--frozen`` nor
+    a plain re-install rewrites the lock: no churn for existing lockfiles.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (("F-Pkg", ()), ("e", ("../F-Pkg",)), ("d", ("../e",))):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    locked = lock_bytes(world.project)
+    anchors = {row.get("anchored_local_path") for row in _rows(world).values()}
+    assert {"vendor/F-Pkg", "vendor/e"} <= anchors, sorted(anchors, key=str)
+
+    frozen = world.apm("install", "--frozen")
+    assert frozen.returncode == 0, frozen.stderr
+    assert lock_bytes(world.project) == locked
+    reinstalled = world.apm("install")
+    assert reinstalled.returncode == 0, reinstalled.stderr
+    assert lock_bytes(world.project) == locked
+
+
 def test_prune_reparents_a_survivor_whose_recorded_parent_goes(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -776,9 +838,9 @@ def test_prune_keeps_the_parent_chain_when_equally_near_parents_disagree(
     """f is reached at one depth from sub/z (../../f) and m (../f): prune keeps e's chain.
 
     A path from one parent paired with the other would point outside vendor,
-    so prune changes no lock bytes. Install itself cannot yet resolve this
-    graph once d is dropped (with or without --frozen, with or without
-    prune); the multi-path rule is tracked in #5126.
+    so prune changes no lock bytes. Install then resolves the graph with and
+    without --frozen (#5238 item 1, fixed by #5390); that convergence is
+    checked in test_prune_multi_parent_survivor_lifecycle.py.
     """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"

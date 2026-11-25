@@ -282,6 +282,43 @@ class TestPluginInitCommand:
                 os.chdir(self.original_dir)
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["", "MyPlugin", "CON", "a--b", "a..b", "lead-", "x" * 65, "a/b", ".."],
+    ids=[
+        "empty",
+        "uppercase",
+        "reserved-device",
+        "double-hyphen",
+        "double-dot",
+        "trailing-hyphen",
+        "too-long",
+        "path-separator",
+        "parent",
+    ],
+)
+def test_plugin_init_rejected_name_creates_nothing(name, tmp_path, monkeypatch):
+    """#5404: a rejected plugin name exits 1 before any filesystem write."""
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["plugin", "init", name, "--yes"])
+
+    assert result.exit_code == 1, result.output
+    assert "Invalid" in result.output
+    assert list(tmp_path.iterdir()) == []
+    assert Path.cwd() == tmp_path
+
+
+def test_plugin_init_valid_name_still_creates_the_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["plugin", "init", "my-plugin", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "my-plugin" / "apm.yml").is_file()
+    assert (tmp_path / "my-plugin" / "plugin.json").is_file()
+
+
 class TestRemovedInitFlags:
     """``apm init --plugin`` / ``--marketplace`` were removed in 0.37 (#4073).
 

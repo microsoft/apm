@@ -79,7 +79,7 @@ def _write_local_package(project: Path) -> None:
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="#4939 secure-fast install not built yet: write-time containment "
+    reason="#5461 secure-fast install not built yet (#4939 closed): write-time containment "
     "(design section 0.3 cell 4)",
 )
 def test_a_parent_swapped_for_a_link_before_the_write_receives_nothing_outside(
