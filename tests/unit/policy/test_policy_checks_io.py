@@ -428,9 +428,12 @@ class TestUnmanagedFiles:
         assert result.details[1].startswith(".claude/commands/mine.md -- not tracked")
         assert not any("x.md" in line for line in result.details), result.details
 
-    def test_a_default_governance_dir_linked_out_of_the_project_is_never_walked(self, tmp_path):
-        """#5472: a default dir (``.claude``) that links outside the project is not
-        walked, so nothing outside is read or reported."""
+    @pytest.mark.parametrize("form", ["default", "named"])
+    @pytest.mark.parametrize("action", ["deny", "warn"])
+    def test_a_governance_dir_linked_out_of_the_project_is_refused(self, tmp_path, action, form):
+        """#5472: ``.claude`` linking outside the project, as a default dir or a named
+        entry, is refused (deny fails, as on main), never walked, and the refusal names
+        only the entry, never the outside path."""
         project = tmp_path / "proj"
         project.mkdir()
         self._write(tmp_path, "elsewhere/commands/x.md")
@@ -438,9 +441,21 @@ class TestUnmanagedFiles:
             (project / ".claude").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
         except OSError:
             pytest.skip("symlinks unavailable")
-        result = _check_unmanaged_files(project, None, UnmanagedFilesPolicy(action="deny"))
-        assert result.passed, result.details
-        assert result.details == []
+        directories = [".claude"] if form == "named" else None
+        policy = UnmanagedFilesPolicy(action=action, directories=directories)
+        result = _check_unmanaged_files(project, None, policy)
+        refusal = (
+            "unmanaged_files.directories entry '.claude' is outside the project; "
+            "use a path relative to the project root"
+            if form == "named"
+            else "governance directory '.claude' links outside the project; "
+            "replace the link with a directory inside the project"
+        )
+        assert result.passed is (action == "warn")
+        assert result.details == [refusal]
+        assert result.message == refusal
+        text = " ".join([result.message, *result.details, *result.notes])
+        assert "elsewhere" not in text and "x.md" not in text
 
     def test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file(self, tmp_path):
         """#5472: a symlinked local settings file skips its link path only; the governed

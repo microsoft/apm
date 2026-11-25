@@ -139,7 +139,7 @@ def _candidate_files(project_root: Path, dirs: Sequence[str]) -> Iterator[Path]:
     """
     for gov_dir in dirs:
         entry_path = project_root / gov_dir
-        # A default governance dir linked out of the project is never walked.
+        # An entry that resolves out of the project is never walked.
         if _symlink_escapes_workspace(entry_path, project_root):
             continue
         if os.path.lexists(entry_path) and not entry_path.is_dir():
@@ -170,8 +170,9 @@ def scan_governed_files(project_root: Path, directories: Sequence[str] | None) -
 
     Stops with ``capped`` set past ``MAX_UNMANAGED_SCAN_FILES`` files. A
     harness local file the policy does not name is skipped with one note.
-    An entry outside the project is refused (``refused``) and never walked;
-    the other entries are still scanned.
+    An entry outside the project, or a default governance dir linked out of
+    it, is refused (``refused``, naming only the entry) and never walked; the
+    other entries are still scanned.
     """
     scan = GovernedScan()
     entries: list[str] = []
@@ -180,12 +181,19 @@ def scan_governed_files(project_root: Path, directories: Sequence[str] | None) -
             entries.append(_workspace_entry(project_root, entry))
         except EntryOutsideProject as exc:
             scan.refused.append(str(exc))
+    if not directories:
+        for gov_dir in _DEFAULT_GOVERNANCE_DIRS:
+            if _symlink_escapes_workspace(project_root / gov_dir, project_root):
+                scan.refused.append(
+                    f"governance directory '{gov_dir}' links outside the project; "
+                    "replace the link with a directory inside the project"
+                )
+            else:
+                entries.append(gov_dir)
     named = {_walked_label(project_root, project_root / entry) for entry in entries}
     seen: set[str] = set()
     scanned = 0
-    for file_path in _candidate_files(
-        project_root, entries if directories else _DEFAULT_GOVERNANCE_DIRS
-    ):
+    for file_path in _candidate_files(project_root, entries):
         rel = _walked_label(project_root, file_path)
         # A label the walk kept unnormalized also claims its real path, so one
         # file reached under two labels is judged once.
