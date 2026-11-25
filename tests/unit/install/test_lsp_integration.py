@@ -703,42 +703,31 @@ class TestPackageMoveWithPluginRoot:
             plugin_root=str(root.resolve()) if "${" in command else None,
         )
 
-    def _deploy_from_a(self, tmp_path, *runtimes: str):
-        """Install srv from package A as a previous ``apm install`` would."""
-        from apm_cli.integration.lsp_integrator import LSPIntegrator
-
-        dep_a = self._dep(tmp_path, "pkg-a")
-        LSPIntegrator.install([dep_a], project_root=tmp_path, target_runtimes=list(runtimes))
-        lock = LockFile(
-            lsp_servers=["srv"],
-            lsp_configs=LSPIntegrator.get_server_configs([dep_a]),
-            lsp_config_provenance={"srv": "package:acme/pkg-a"},
-        )
-        DeploymentLedgerCodec.replace_lsp_target_servers(
-            lock, {runtime: ["srv"] for runtime in runtimes}
-        )
-        lock._lsp_target_servers_present = True
+    def _deploy_from_a(self, tmp_path, *runtimes: str, dep: LSPDependency | None = None):
+        """Install srv (from package A by default) as a previous ``apm install`` did."""
+        self._install(tmp_path, list(runtimes), None, dep or self._dep(tmp_path, "pkg-a"))
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
         return tmp_path.joinpath(*self._PATHS[runtimes[0]]), lock
 
-    def _install(self, tmp_path, runtime: str | list, lock: LockFile, dep: LSPDependency):
+    def _install(self, tmp_path, runtime: str | list, lock: LockFile | None, dep: LSPDependency):
         runtimes = [runtime] if isinstance(runtime, str) else runtime
         package = MagicMock()
         package.get_lsp_dependencies.return_value = [dep]
         diagnostics = MagicMock()
-        # Copilot resolves only with its binary on PATH: pin the target.
-        with patch(f"{_PATCH_TARGET}.resolve_target_runtimes", return_value=runtimes):
-            run_lsp_integration(
-                apm_package=package,
-                apm_modules_path=tmp_path / "apm_modules",
-                lock_path=tmp_path / "apm.lock.yaml",
-                existing_lock=lock,
-                project_root=tmp_path,
-                user_scope=False,
-                should_install=True,
-                logger=_mock_logger(),
-                diagnostics=diagnostics,
-                explicit_target=runtimes,
-            )
+        # A --target decision: no runtime binary detection on the test host.
+        run_lsp_integration(
+            apm_package=package,
+            apm_modules_path=tmp_path / "apm_modules",
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=lock,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+            diagnostics=diagnostics,
+            explicit_target=runtimes,
+            target_decision=EffectiveTargetDecision(runtimes, "--target flag"),
+        )
         return diagnostics
 
     @pytest.mark.parametrize("runtime", ["copilot", "claude"])
@@ -796,22 +785,14 @@ class TestPackageMoveWithPluginRoot:
         diagnostics.error.assert_called_once()
 
     def test_project_server_moved_into_a_package_updates_the_entry(self, tmp_path) -> None:
-        from apm_cli.integration.lsp_integrator import LSPIntegrator
-
         project = _make_dep(
             "srv",
             command="${CLAUDE_PLUGIN_ROOT}/bin/srv",
             extension_to_language=None,
             plugin_root=str(tmp_path.resolve()),
         )
-        LSPIntegrator.install([project], project_root=tmp_path, target_runtimes=["copilot"])
-        lock = LockFile(
-            lsp_servers=["srv"],
-            lsp_configs=LSPIntegrator.get_server_configs([project]),
-            lsp_config_provenance={"srv": "project:."},
-        )
-        DeploymentLedgerCodec.replace_lsp_target_servers(lock, {"copilot": ["srv"]})
-        lock._lsp_target_servers_present = True
+        _config, lock = self._deploy_from_a(tmp_path, "copilot", dep=project)
+        assert lock.lsp_config_provenance == {"srv": "project:."}
 
         diagnostics = self._install(tmp_path, "copilot", lock, self._dep(tmp_path, "pkg-b"))
 
@@ -822,13 +803,13 @@ class TestPackageMoveWithPluginRoot:
 
     def test_locked_root_keeps_the_spelling_install_bound(self, tmp_path, monkeypatch) -> None:
         """A case-insensitive volume: resolve_path keeps the stored spelling (#5437 R1)."""
-        from apm_cli.utils import realpath
 
-        def stored_spelling(path):
+        def stored_spelling(path, _text=None):
             resolved = Path(path).resolve()
             return resolved.with_name("PKG-A") if resolved.name == "pkg-a" else resolved
 
-        monkeypatch.setattr(realpath, "resolve_path", stored_spelling)
+        # The filesystem layer under resolve_path reports the stored spelling.
+        monkeypatch.setattr("apm_cli.utils.realpath._platform_resolve", stored_spelling)
         config, lock = self._deploy_from_a(tmp_path, "copilot")
         stored = stored_spelling(tmp_path / "apm_modules" / "acme" / "pkg-a")
         data = json.loads(config.read_text())
