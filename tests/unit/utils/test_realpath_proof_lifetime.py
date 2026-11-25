@@ -148,11 +148,10 @@ def test_a_publish_parked_across_a_forget_and_a_swap_never_lands(tree: Path, for
 def test_a_swapped_in_directory_answers_as_pathlib_at_every_depth(tree: Path) -> None:
     """Same path, new inode: native plugin deploy renames a staged tree over a proven one.
 
-    The swap is a raw rename (no release). The proof survives only if the new tree
-    is link-free wherever the old one was proven; any link must still be seen.
+    The swap is a raw rename (no release); every answer after it must match pathlib.
     """
     from apm_cli.core.invocation_memo import invocation_scope
-    from apm_cli.native_plugins.layout import NativeLayoutError, deploy_plugin
+    from apm_cli.native_plugins.layout import deploy_plugin
 
     root = tree / "dir"
     name = "sub"
@@ -161,25 +160,45 @@ def test_a_swapped_in_directory_answers_as_pathlib_at_every_depth(tree: Path) ->
     source = tree / "source"
     (source / "inner").mkdir(parents=True)
     (source / "inner" / "new.md").write_text("new", encoding="utf-8")
-    (tree / "outside" / "skill.md").write_text("out", encoding="utf-8")
-    (source / "linked").symlink_to(tree / "outside", target_is_directory=True)
+    (source / "fresh").mkdir()
+    (source / "fresh" / "f.md").write_text("fresh", encoding="utf-8")
     probes = [
         deployed / "inner" / "new.md",
-        deployed / "inner" / "x.md",
-        deployed / "linked" / "skill.md",
-        deployed / "linked" / "x.md",
+        deployed / "inner" / "old.md",
+        deployed / "fresh" / "f.md",
+        deployed / "fresh" / "x.md",
     ]
     with invocation_scope():
         for probe in (deployed / "inner" / "old.md", deployed / "x.md"):
             assert resolve_path(probe) == probe
         assert realpath.proven_link_free(deployed / "inner")
-        try:
-            deploy_plugin(root, name, source, "fp", lambda _p: "fp")
-        except (NativeLayoutError, PathTraversalError) as exc:  # refusing the link is safe
-            pytest.skip(f"deploy refused the source: {type(exc).__name__}")
+        result = deploy_plugin(
+            root, name, source, "fp", lambda path: "stale" if path == deployed else "fp"
+        )
+        assert result.changed
+        assert (deployed / "inner" / "new.md").read_text(encoding="utf-8") == "new"
+        assert not (deployed / "inner" / "old.md").exists()
         for _ in range(2):
             for probe in probes:
                 assert str(resolve_path(probe)) == os.path.realpath(probe), probe
-                assert (first_symlink_component(tree, probe) is None) == (
-                    not any(p.is_symlink() for p in [probe, *probe.parents] if tree in p.parents)
-                ), probe
+
+
+@pytest.mark.usefixtures("k_applies")
+def test_a_linked_plugin_source_is_refused_before_any_swap(tree: Path) -> None:
+    """Native deploy refuses a source with a link, so no link is swapped under a proof."""
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.native_plugins.layout import NativeLayoutError, deploy_plugin
+
+    root = tree / "dir"
+    deployed = root / "sub"
+    (deployed / "inner" / "old.md").write_text("old", encoding="utf-8")
+    source = tree / "source"
+    source.mkdir()
+    (source / "linked").symlink_to(tree / "outside", target_is_directory=True)
+    with invocation_scope():
+        assert resolve_path(deployed / "inner" / "old.md") == deployed / "inner" / "old.md"
+        with pytest.raises((NativeLayoutError, PathTraversalError)):
+            deploy_plugin(
+                root, "sub", source, "fp", lambda path: "stale" if path == deployed else "fp"
+            )
+        assert (deployed / "inner" / "old.md").read_text(encoding="utf-8") == "old"

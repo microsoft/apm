@@ -242,9 +242,12 @@ def _copies_links(
         return False
     for keyword in call.keywords:
         if keyword.arg == "symlinks":
-            value = keyword.value
-            return not (isinstance(value, ast.Constant) and value.value is False)
-    return len(call.args) >= 3
+            return not _literal_false(keyword.value)
+    return len(call.args) >= 3 and not _literal_false(call.args[2])
+
+
+def _literal_false(value: ast.AST) -> bool:
+    return isinstance(value, ast.Constant) and value.value is False
 
 
 def _copytree_names(index: TreeIndex) -> frozenset[str]:
