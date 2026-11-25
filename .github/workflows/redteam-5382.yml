@@ -1,0 +1,33 @@
+name: Red team 5382 proof lifetime (research)
+
+on:
+  push:
+    branches: [perf-research/redteam-5382]
+
+permissions:
+  contents: read
+
+jobs:
+  cells:
+    name: cells ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: false
+      - name: Red cells + control
+        run: |
+          uv sync --frozen --extra dev --quiet
+          uv run --frozen pytest -p no:xdist -q -rA tests/unit/utils/test_realpath.py 2>&1 | tail -5
+          uv run --frozen pytest -p no:xdist -rA --tb=long -l tests/unit/utils/test_realpath_proof_lifetime.py
