@@ -6,7 +6,7 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
 
 ## 0. Summary
 
-- **Target** (reference runner class EPYC 9V74, cold t50, default-on, 0 errors): Linux <= 3.5 s, Windows <= 7.5 s.
+- **Target** (reference runner class EPYC 9V74, cold t50, default-on, 0 errors): Linux <= 3.5 s, Windows <= 7.5 s. There is NO macOS target in v0.40; macOS is reported as a paired ratio only, since there is no 9V74-class calibration for macOS runners.
 - **Main today (1e4a208e):** Linux 6.1 s, Windows 13.2 s. The physics floor is ~0.7 s Linux / ~1.2 s Windows, so the gap is 8.7x Linux / 11x Windows.
 - **Where the gap is** (measured by paired deletion and a per-phase CPU probe on main):
   - integrate is ~45% Linux / ~50% Windows;
@@ -18,7 +18,7 @@ Scope: `apm install` cold fresh, warm and locked journeys at tree-50 (50 deps, 6
 - **Result** (stacked measured ceiling, ONE head = integrate ceiling ea0ec45e + M2 bound c2, unsafe upper bounds):
   - L 0.701 (~4.3 s on 9V74 vs 3.5; miss ~0.8 s) [45530064444].
   - M 0.663 [45530082924].
-  - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~7-8 s on 9V74 (13.2 x ~0.95-0.96 for #5374 x 0.568 = ~7.1 s): AT the 7.5 s target. Calibration is OpenSSL-world; the default-schannel absolute may run higher.
+  - W 0.568 vs main+#5374 (bench 15.09 -> 8.44 s) [45532025700] = ~7-8 s on 9V74 (13.2 x ~0.95-0.96 for #5374 x 0.568 = ~7.1 s): AT OR NEAR the 7.5 s target, CALIBRATION PENDING. The 13.2 s base is the OpenSSL-world calibration; a default-schannel 9V74 A/A is being measured.
   - The levers stack slightly better than paper (0.701 vs 0.716-0.734).
 - **Native-core gate on Linux:** MET.
   - walk+stat+hash+copy = 45.5% of L CPU on main [45520769932] and 45.2% at the stacked head [45530101839] (65% with realpath).
@@ -388,7 +388,7 @@ The threat model, unchanged from containment-once:
 - **IN model:** links committed in the user's repo; package user code (lifecycle scripts, hooks) mid-command; trees persisted from earlier runs and changed between runs; Windows junction, 8.3 and case aliases; APM's own worker threads sharing proof memos (`w3d:5382:train-T1T2`).
 - **OUT of model:** a concurrent same-user process racing between proof and open.
 
-### 3.1 Invariant table
+### 5.1 Invariant table
 
 | id | guards | binds | proving cell (K9/differential unless noted) | cost |
 |---|---|---|---|---|
@@ -416,7 +416,7 @@ The threat model, unchanged from containment-once:
 | **MD4 / K8 / IR9** single owners | one classifier (fed the manifest path set, content-reading classes keep reading); proof recording only in the containment owner + plan owner; arch guard + MutationCase | A, C, MD | class(manifest paths) == today's classification on L/W/M; guard mutation cases | test only |
 | **K9** differential | today's verdict, lockfile and receipts under planted links (dir/intermediate/leaf), W junction/8.3, case alias, in-root link, mid-install script, warm planted leaf, hardlinked leaf, old `apm_modules` link, git checkout with a symlink | all | `perf-research/arch-render-diff` + a K9 cell set | test only |
 
-### 3.2 Conflicts and gaps between rulings: RESOLVED
+### 5.2 Conflicts and gaps between rulings: RESOLVED
 
 W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
 
@@ -443,7 +443,7 @@ W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
 - **MD3 hash-while-writing:** no conflict. Hash the buffer written to the target and re-check size on close; receipts stay byte-identical (differential).
 - cost (W3d): 0 for each. G3 is one shared int + the lock already in #5382; G4 is one fchmod per staged file, which today's deploy already pays.
 
-### 3.3 Cost summary
+### 5.3 Cost summary
 
 - Every invariant is O(1) per file or one per root/package.
 - The only per-file additions over the fastest shape:
@@ -451,14 +451,7 @@ W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
   - one lstat on replace and per staged entry (seal);
   - one fchmod per materialized file;
   - one lock per proof publish.
-- None changes the order of the measured ceilings (W 0.718 on main + #5374).
-
-### 5.x Gap rulings (W3d row w3d:ruling:v040-gaps, 03:10 CET, cost 0 each):
-- G1: IR1 governs. "By construction" = every entry made by APM via exclusive, no-follow, per-file creates in THIS invocation: the lever-C landing, M2, an M1 per-file clone into an exclusive stage, and IR6 stages. copytree(symlinks=True), dir clonefile and git checkout take the I2 walk.
-- G2: the MD2 manifest proof joins the K8/IR9 allow-list with the IR2 lifetime. Its only producer is the landing; its only consumers are package_plan/integrate. It is published via the guarded path, with an arch guard plus a MutationCase.
-- G3: ONE generation rule for ALL proof kinds. A shared generation is bumped by every forget (forget_proofs / release_held / forget_invocation_memos) under the lock with the clear-all, and is captured before the first observation the proof rests on.
-- G4: MS4 tree-entry mode applies to apm_modules. Deployed targets keep today's deploy-mode rule: fchmod BEFORE the IR6 seal, and the seal checks mode. Compare modes on L/M; on W compare ACL inheritance per #5388.
-- #5418: exactly 3 lockfile fields are known-variant; everything else is asserted byte-equal; the #5418 fix removes the exemption.
+- None changes the order of the measured ceilings (integrate ceiling W 0.718 on main + #5374; stacked W 0.568).
 
 ## 6. Linux bar -- REGENT RULING (approved, via PERF VP 03:25 CET)
 "L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured ~4.3 s L milestone."
@@ -466,7 +459,7 @@ W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
 - The native-core gate is MET: walk+stat+hash+copy = 45% of L CPU (65% with realpath; hash 0.2%) [45520769932 / 45530101839].
 - The native filesystem-op core is a RESEARCH lane (Lane N, section 7). It is not part of the v0.40 commitment.
 - Alternative considered, not chosen: revise the L bar to ~4.3 s with no native lane.
-W: stacked ceiling 0.568 vs main+#5374 [45532025700]; ~7-8 s on 9V74, at the 7.5 s target.
+W: stacked ceiling 0.568 vs main+#5374 [45532025700]; ~7-8 s on 9V74, at or near the 7.5 s target (calibration pending).
 
 ## 7. Build plan (PERF-Bets; owners per PERF VP)
 
@@ -493,7 +486,6 @@ Rules for every car:
   - copy-on-write render;
   - source changed by a lifecycle script is re-parsed;
   - hostile frontmatter still refused.
-- **Owner suggestion:** PERF-BETS (it holds the ceilings and the differential harness).
 
 ### Car 2: M2, materialize once (fetch into the final tree; cache = objects)
 
@@ -509,7 +501,6 @@ Rules for every car:
   - tampered cache object refused;
   - user edit in `apm_modules` caught by `verify_locked_package`;
   - an eviction in project A leaves project B untouched.
-- **Owner suggestion:** SoL (owns the c2 measurement) with F&C (B1 landing seam).
 
 ### Car 3: C, containment by construction (destinations and sources)
 
@@ -534,7 +525,6 @@ Rules for every car:
   - old `apm_modules` link;
   - git checkout with a tracked symlink.
   Each gives today's verdict, lockfile and receipts on L and W.
-- **Owner suggestion:** PERF-BETS (lever K owner) + E1 (Windows Paths).
 
 ### Car 4: B, bulk skills (skill bundle as one staged tree op)
 
@@ -552,12 +542,11 @@ Rules for every car:
   - Car 2 materializes from it; integrate consumes it, with no re-walk, re-hash or re-classify.
   - Warm re-derives it from pinned tree objects (MS6) + `verify_locked_package`; never a trusted cached manifest.
   - MD5: an unprovable package takes today's whole-package path.
-- **Measured ceiling:** the STACKED ceiling (Car 2 c2 + integrate ea0ec45e) is being measured by SoL (~04:30). The doc quotes only that number; no paper sums.
+- **Measured ceiling (STACKED, one head, unsafe upper bounds):** L 0.701 vs main [45530064444]; W 0.568 vs main+#5374 [45532025700]; M 0.663 vs main [45530082924]. No paper sums.
 - **Charter native-core gate:** "native only if the post-manifest L profile shows >= 25% of CPU in walk/stat/hash/copy". Evaluated on the stacked L profile.
-- **Kill bar:** the v0.40 target (install-cold t50 on 9V74: L <= 3.5 s, W <= 7.5 s), or the revised L bar (regent call, both options shown with the stacked number).
-- **W3d:** MD1-MD5 (use the amended sentence verbatim), MS1-MS7, IR2/IR9 (add the manifest proof owner to the allow-list: gap 3.2-2), T1/T2.
+- **Kill bar:** install-cold t50 on 9V74: W <= 7.5 s, and L at the ~4.3 s milestone (regent ruling). The L North Star of 3.5 s is pursued via Lane N.
+- **W3d:** MD1-MD5 (use the amended sentence verbatim), MS1-MS7, IR2/IR9 (add the manifest proof owner to the allow-list: gap 5.2-2), T1/T2.
 - **Differential:** everything from Cars 1-3, plus class(manifest paths) == today's classification on L/W/M (MD4), and the MD5 whole-package fallback cells.
-- **Owner suggestion:** PERF-ARCH Lead (architecture), with SoL (materialize) and PERF-BETS (integrate consumption).
 
 ### Owners (VP-accepted 03:10; work starts after the doc lands WED 12:00 CET)
 
@@ -596,6 +585,16 @@ LANE N (research; regent ruling via PERF VP 03:25 CET):
 | lane | scope | deliverable | end date | owner | ship |
 |---|---|---|---|---|---|
 | N | native filesystem-op core: ONE hot loop (walk/stat/realpath/copy) behind the same W3d invariants (IR/MS/MD) | measured upper bound, L/W/M cold t50, vs the stacked Python ceiling | FRI 27 Nov 03:30 CET (48 h); no bound by then = killed | SoL (2ec55fc5) under the research lead; starts after SoL's doc sections are in | CEO gate: only if >= 0.5 s on L, default-on, across all 3 OS. Then a decision memo: cost, QL/security supply-chain review, wheel matrix |
+
+Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
+- Zero-cost ORACLES FIRST, on the stacked head, before any native code:
+  - O-walk: one walk per package tree per invocation, served to every caller;
+  - O-resolve: the remaining resolve callers made lexical, with the override placed after realpath.py's win32 block.
+- Kill rules:
+  - KILL Wednesday if both oracles are < 0.5 s L at 9V74.
+  - KILL if the native form reaches < 50% of its oracle.
+- An oracle that clears is ALSO reported as a Python car (an extension of Car 1). The native lane only has value beyond the oracle's Python form.
+- Native shape: returns DATA only; policy stays in the Python owners. Proved by a side-by-side differential build. W3d ruling before any code.
 
 ## 8. What did not work (kills, with numbers)
 - lazy imports (L 0.988 / W 0.995);

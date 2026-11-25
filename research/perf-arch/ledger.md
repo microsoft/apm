@@ -278,3 +278,4 @@
 03:19 | E2 _trusted_hash memo neutral (main + K) -> doc sec 2 | SoL W 03:55 | none
 03:30 | tick; notes dc4b631479a1ac1457feeeb7b91099531c35665e | SoL W stacked ~03:55; QL re-H8 #5382 | none
 03:33 | W stacked 0.568 (~7.1 s, at target) [45532025700]; sec1 FINAL; SoL starts Lane N | doc assembly; QL #5382 | none
+03:35 | design doc REVIEW COPY v1 assembled (620 lines) -> arch-notes ea4427ac, VP review by 10:00; Lane N plan approved (oracles first) | VP review; SoL oracles; QL #5382 | none
