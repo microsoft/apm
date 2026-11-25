@@ -347,9 +347,8 @@ class DeploymentMaterializationSession:
 
     def another_installation(self, data: Mapping[str, Any]) -> bool:
         """Whether well-formed receipt *data* for this root path and scope provably belongs to
-        another installation: another (or no) UUID here, or another root inode. A device-only
-        change (same UUID and inode) is ambiguous and never qualifies; :meth:`binds` stays the
-        single binding decision."""
+        another installation: another (or no) UUID here, or another root inode (a device-only
+        change is ambiguous); :meth:`binds` stays the single binding decision."""
         recorded, identity = data["installation"], data["root_identity"]
         return (
             [data["version"], data["root"], data["scope"]]
