@@ -635,8 +635,10 @@ class InstallService:
 
         satisfied = satisfied and not reasons
         if not satisfied:
+            from apm_cli.install.frozen_mcp_drift import frozen_drift_headline
+
             raise FrozenInstallError(
-                "--frozen: apm.lock.yaml is out of sync with apm.yml.",
+                frozen_drift_headline(reasons),
                 reasons=reasons,
             )
         # A deny of a local bundle refuses before its LSP server is retired (RA-041).
@@ -827,8 +829,12 @@ class InstallService:
             include_dependency_mcp=include_dependency_mcp,
         )
         if reasons:
+            from apm_cli.install.frozen_mcp_drift import frozen_drift_headline
+
             raise FrozenInstallError(
-                "--frozen: restored MCP declarations differ from apm.lock.yaml.",
+                frozen_drift_headline(
+                    reasons, "--frozen: restored MCP declarations differ from apm.lock.yaml."
+                ),
                 reasons=reasons,
                 tip=(
                     "Tip: review the restored sources and lockfile before running "

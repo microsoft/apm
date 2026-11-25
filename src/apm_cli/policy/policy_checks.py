@@ -779,15 +779,12 @@ _TRUST_TRANSITIVE_REASON = "transitive server not in mcp.allow (mcp.trust_transi
 
 def _trust_transitive_result(names: Sequence[str]) -> CheckResult:
     if not names:
-        return CheckResult(
-            name=_TRUST_TRANSITIVE,
-            passed=True,
-            message="No transitive MCP server outside mcp.allow",
-        )
+        return CheckResult(_TRUST_TRANSITIVE, True, "No transitive MCP server outside mcp.allow")
+    from ..security.trust import trust_transitive_summary
+
     return _subjects_result(
         _TRUST_TRANSITIVE,
-        f"{len(names)} transitive MCP server(s) not in mcp.allow while "
-        "mcp.trust_transitive is false",
+        trust_transitive_summary(len(names)),
         [PolicySubject(name, _TRUST_TRANSITIVE_REASON) for name in names],
     )
 

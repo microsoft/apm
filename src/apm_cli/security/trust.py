@@ -54,6 +54,8 @@ REASON_DENIED = "denied"
 REASON_DEFINITION_CHANGED = "definition-changed"
 REASON_UNTRUSTED_TRANSITIVE = "untrusted-transitive"
 REASON_POLICY_TRANSITIVE = "policy-transitive"
+# The two ways out of an org mcp.trust_transitive refusal, shared by every message.
+TRUST_TRANSITIVE_FIX = "add them to mcp.allow or set mcp.trust_transitive: true"
 REASON_UNAPPROVED = "unapproved-executables"
 # A native plugin's executable surface points into APM-owned paths that the
 # plugin pin does not cover (root ``.apm/`` or ``apm.yml``).
@@ -104,6 +106,14 @@ class Admission:
     detail: str | None = None
     # The whole-plugin pin that admitted a native plugin; deploy re-checks it.
     pin: str | None = None
+
+
+def trust_transitive_summary(count: int) -> str:
+    """The audit headline for *count* transitive servers outside ``mcp.allow``."""
+    return (
+        f"{count} transitive MCP server(s) not in mcp.allow while mcp.trust_transitive "
+        f"is false; {TRUST_TRANSITIVE_FIX}"
+    )
 
 
 def _names(package_keys: tuple[str, ...]) -> set[str]:
