@@ -1088,7 +1088,7 @@ class AuthResolver:
 
         # --- ADO-specific error cases ---
         if host_info.kind == "ado":
-            from apm_cli.core.azure_cli import get_bearer_provider
+            from apm_cli.core.azure_cli import get_bearer_provider, shadow_line
 
             bearer_supported = self._supports_ado_bearer(host_info.host)
             provider = get_bearer_provider() if bearer_supported else None
@@ -1163,10 +1163,8 @@ class AuthResolver:
                 )
             if not az_available:
                 # Case 1: no az, no PAT
-                az_note = getattr(provider, "shadow_notice", None)
-                shadow_line = f"\n    {az_note}\n" if isinstance(az_note, str) else ""
                 return (
-                    f"{shadow_line}"
+                    f"{shadow_line(provider)}"
                     f"\n    Azure DevOps requires authentication. You have two options:\n\n"
                     f"    1. Install Azure CLI and sign in (recommended for Entra ID users):\n"
                     f"         brew install azure-cli            # macOS\n"

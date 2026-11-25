@@ -62,6 +62,12 @@ class AzureCliBearerError(Exception):
 _SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
+def shadow_line(provider: object) -> str:
+    """Return the indented shadow notice for an error context, or ''."""
+    note = getattr(provider, "shadow_notice", None)
+    return f"\n    {note}\n" if isinstance(note, str) and note else ""
+
+
 class AzureCliBearerProvider:
     """Acquires Entra ID bearer tokens for Azure DevOps via the az CLI.
 
