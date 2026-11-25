@@ -1,0 +1,1364 @@
+{
+ "base": "e37400fa313bfe736ec63242299486dac7647961",
+ "new": "42878803f020bf3f31821e24d764d2f8fdf40c6f",
+ "new_label": "the fat train head (#5406)",
+ "harness": "danielmeppiel-perf-ceo-report",
+ "reference_cpu_class": "EPYC 9V74",
+ "collected": "2026-11-25T05:43",
+ "rows": [
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547509699",
+   "pairs": 15,
+   "paired_p50": 0.48222140762463345,
+   "band": [
+    0.4774272338693263,
+    0.4867763737878343
+   ],
+   "speedup": 2.073736221968833,
+   "base_cpu_s": 3.2685,
+   "new_cpu_s": 1.5786,
+   "base_wall_s": 4.9614,
+   "new_wall_s": 2.6593,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 4.1318,
+     "new_s": 1.9878
+    },
+    "EPYC 9V45": {
+     "n": 5,
+     "base_s": 2.5149,
+     "new_s": 1.2006
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 3.2685,
+     "new_s": 1.5658
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 5,
+    "base_s": 4.1318,
+    "new_s": 1.9878
+   },
+   "requests": "41->21",
+   "spawns": "123->14",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.5475339268951819,
+   "band": [
+    0.46841224909933094,
+    0.656555215694547
+   ],
+   "speedup": 1.8263708436672579,
+   "base_cpu_s": 4.24265,
+   "new_cpu_s": 2.3295,
+   "base_wall_s": 5.8641000000000005,
+   "new_wall_s": 3.3601,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 5.0184,
+     "new_s": 2.77935
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 3.6456,
+     "new_s": 2.0304
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 4.12945,
+     "new_s": 2.4074999999999998
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 3.6456,
+    "new_s": 2.0304
+   },
+   "requests": "41->21",
+   "spawns": "133->16",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen-noop",
+   "journey": "install-frozen-noop",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547807435",
+   "pairs": 15,
+   "paired_p50": 0.3561890909090909,
+   "band": [
+    0.3497057032677086,
+    0.36597552818979423
+   ],
+   "speedup": 2.80749754982032,
+   "base_cpu_s": 2.5203,
+   "new_cpu_s": 0.9287,
+   "base_wall_s": 2.5591,
+   "new_wall_s": 0.9572,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 3.5011,
+     "new_s": 1.2244
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 2.4571,
+     "new_s": 0.8692
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 2.5203,
+     "new_s": 0.9287
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 2.4571,
+    "new_s": 0.8692
+   },
+   "requests": "0->0",
+   "spawns": "18->2",
+   "replay_new": [
+    "attested miss (inputs changed: argv), recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "linux",
+   "fixture": "tree-10",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.6001214888492379,
+   "band": [
+    0.5882075286158204,
+    0.6283166904422255
+   ],
+   "speedup": 1.6663292659583788,
+   "base_cpu_s": 2.82625,
+   "new_cpu_s": 1.766,
+   "base_wall_s": 3.5111499999999998,
+   "new_wall_s": 2.15925,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 3.48505,
+     "new_s": 2.0913
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 2.52005,
+     "new_s": 1.4889000000000001
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 2.82625,
+     "new_s": 1.766
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 2.52005,
+    "new_s": 1.4889000000000001
+   },
+   "requests": "11->11",
+   "spawns": "33->23",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.7881784744961358,
+   "band": [
+    0.7182779632526324,
+    0.8868733121991311
+   ],
+   "speedup": 1.2687481736154707,
+   "base_cpu_s": 4.27905,
+   "new_cpu_s": 3.0903,
+   "base_wall_s": 5.76225,
+   "new_wall_s": 4.9109,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 4.9076,
+     "new_s": 3.8155
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 3.0443,
+     "new_s": 2.5317999999999996
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 4.9076,
+    "new_s": 3.8155
+   },
+   "requests": "41->51",
+   "spawns": "134->47",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.7183796040936963,
+   "band": [
+    0.7118950270989826,
+    0.7753099984303877
+   ],
+   "speedup": 1.392021703151768,
+   "base_cpu_s": 4.17285,
+   "new_cpu_s": 2.99065,
+   "base_wall_s": 5.6619,
+   "new_wall_s": 4.7607,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 4.19265,
+     "new_s": 3.00005
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.5355,
+     "new_s": 1.94495
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 4.19265,
+    "new_s": 3.00005
+   },
+   "requests": "41->51",
+   "spawns": "132->43",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.3103712688564696,
+   "band": [
+    0.305400111919418,
+    0.35933114362496266
+   ],
+   "speedup": 3.221947713409154,
+   "base_cpu_s": 2.83155,
+   "new_cpu_s": 0.87165,
+   "base_wall_s": 2.85935,
+   "new_wall_s": 0.9574,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 2.8360000000000003,
+     "new_s": 0.87555
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 1.6550500000000001,
+     "new_s": 0.58615
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 2.8360000000000003,
+    "new_s": 0.87555
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "linux",
+   "fixture": "tree-10-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.7223483392173492,
+   "band": [
+    0.7068232091202995,
+    0.7837688719466319
+   ],
+   "speedup": 1.3843736404010856,
+   "base_cpu_s": 3.46475,
+   "new_cpu_s": 2.4825,
+   "base_wall_s": 4.01035,
+   "new_wall_s": 3.25935,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 3.47505,
+     "new_s": 2.4928999999999997
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.0044500000000003,
+     "new_s": 1.57085
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 3.47505,
+    "new_s": 2.4928999999999997
+   },
+   "requests": "11->21",
+   "spawns": "34->35",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547509699",
+   "pairs": 15,
+   "paired_p50": 0.37522790810745105,
+   "band": [
+    0.35513822636105763,
+    0.38291613354767456
+   ],
+   "speedup": 2.6650469711694202,
+   "base_cpu_s": 14.3346,
+   "new_cpu_s": 5.2248,
+   "base_wall_s": 16.5781,
+   "new_wall_s": 6.8636,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 18.2664,
+     "new_s": 7.0137
+    },
+    "EPYC 9V45": {
+     "n": 5,
+     "base_s": 10.9639,
+     "new_s": 3.8527
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 14.3346,
+     "new_s": 5.2248
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 5,
+    "base_s": 18.2664,
+    "new_s": 7.0137
+   },
+   "requests": "201->101",
+   "spawns": "567->17",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.3692734731795404,
+   "band": [
+    0.3596702654135231,
+    0.382437182658508
+   ],
+   "speedup": 2.708020133127193,
+   "base_cpu_s": 15.38635,
+   "new_cpu_s": 5.77935,
+   "base_wall_s": 17.430300000000003,
+   "new_wall_s": 7.26615,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 19.3206,
+     "new_s": 7.133649999999999
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 13.7858,
+     "new_s": 5.0265
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 15.38635,
+     "new_s": 5.77935
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 13.7858,
+    "new_s": 5.0265
+   },
+   "requests": "201->101",
+   "spawns": "617->20",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-frozen-noop",
+   "journey": "install-frozen-noop",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547807435",
+   "pairs": 15,
+   "paired_p50": 0.19853249475890986,
+   "band": [
+    0.19665091076781188,
+    0.2087031082529475
+   ],
+   "speedup": 5.036958817317846,
+   "base_cpu_s": 9.7842,
+   "new_cpu_s": 2.0445,
+   "base_wall_s": 9.7673,
+   "new_wall_s": 2.0585,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 13.9846,
+     "new_s": 2.7513
+    },
+    "EPYC 9V74": {
+     "n": 5,
+     "base_s": 9.7346,
+     "new_s": 1.9192
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 9.7794,
+     "new_s": 2.0445
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 5,
+    "base_s": 9.7346,
+    "new_s": 1.9192
+   },
+   "requests": "0->0",
+   "spawns": "18->2",
+   "replay_new": [
+    "attested miss (inputs changed: argv), recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "linux",
+   "fixture": "tree-50",
+   "run": "45547590844",
+   "pairs": 6,
+   "paired_p50": 0.5283827673782601,
+   "band": [
+    0.5102374251553559,
+    0.5571000763679735
+   ],
+   "speedup": 1.8925673995043772,
+   "base_cpu_s": 11.58955,
+   "new_cpu_s": 6.453799999999999,
+   "base_wall_s": 12.4241,
+   "new_wall_s": 6.4651,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 14.840499999999999,
+     "new_s": 7.8414
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 10.58845,
+     "new_s": 5.4376999999999995
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 2,
+     "base_s": 11.58955,
+     "new_s": 6.453799999999999
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 10.58845,
+    "new_s": 5.4376999999999995
+   },
+   "requests": "51->51",
+   "spawns": "117->67",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.6710775416827226,
+   "band": [
+    0.6375948024256755,
+    0.7124432093864409
+   ],
+   "speedup": 1.4901407630070684,
+   "base_cpu_s": 18.58345,
+   "new_cpu_s": 12.11955,
+   "base_wall_s": 19.63095,
+   "new_wall_s": 13.776250000000001,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 18.81215,
+     "new_s": 12.2229
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 11.5708,
+     "new_s": 8.100950000000001
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 18.81215,
+    "new_s": 12.2229
+   },
+   "requests": "201->251",
+   "spawns": "618->170",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.6825600725385554,
+   "band": [
+    0.6218832210989593,
+    0.7133199535227632
+   ],
+   "speedup": 1.4650725119048236,
+   "base_cpu_s": 18.5994,
+   "new_cpu_s": 12.7447,
+   "base_wall_s": 19.628999999999998,
+   "new_wall_s": 14.2742,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 18.7462,
+     "new_s": 12.84645
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 11.7241,
+     "new_s": 7.8104
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 18.7462,
+    "new_s": 12.84645
+   },
+   "requests": "201->251",
+   "spawns": "616->167",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-noop",
+   "journey": "install-noop",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.1445173029103949,
+   "band": [
+    0.1406850881230605,
+    0.15547259828371388
+   ],
+   "speedup": 6.919586650603563,
+   "base_cpu_s": 11.122800000000002,
+   "new_cpu_s": 1.6029,
+   "base_wall_s": 11.018650000000001,
+   "new_wall_s": 1.65815,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 11.13085,
+     "new_s": 1.6086
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 6.59535,
+     "new_s": 0.9756
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 11.13085,
+    "new_s": 1.6086
+   },
+   "requests": "0->0",
+   "spawns": "8->2",
+   "replay_new": [
+    "attested hit, recorded"
+   ],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm",
+   "journey": "install-warm",
+   "os": "linux",
+   "fixture": "tree-50-ghe",
+   "run": "45547619088",
+   "pairs": 6,
+   "paired_p50": 0.6828732723362713,
+   "band": [
+    0.667447242461492,
+    0.7155886743221166
+   ],
+   "speedup": 1.4644005564586868,
+   "base_cpu_s": 14.54165,
+   "new_cpu_s": 9.7838,
+   "base_wall_s": 15.07245,
+   "new_wall_s": 9.868549999999999,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 4,
+     "base_s": 14.568249999999999,
+     "new_s": 9.93425
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 8.65525,
+     "new_s": 5.9877
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 4,
+    "base_s": 14.568249999999999,
+    "new_s": 9.93425
+   },
+   "requests": "51->101",
+   "spawns": "118->116",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547526017",
+   "pairs": 15,
+   "paired_p50": 0.48042853065794383,
+   "band": [
+    0.4404145077720207,
+    0.5280777890168695
+   ],
+   "speedup": 2.0814750502650337,
+   "base_cpu_s": 4.4969,
+   "new_cpu_s": 2.1282,
+   "base_wall_s": 8.1162,
+   "new_wall_s": 4.2589,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 4.4969,
+     "new_s": 2.1282
+    }
+   },
+   "headline": {
+    "cpu_class": "Apple M1",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 4.4969,
+    "new_s": 2.1282
+   },
+   "requests": "41->21",
+   "spawns": "123->14",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.44351762227409897,
+   "band": [
+    0.40170992742034695,
+    0.5715841584158415
+   ],
+   "speedup": 2.254701842223506,
+   "base_cpu_s": 4.6314,
+   "new_cpu_s": 2.08675,
+   "base_wall_s": 7.8291,
+   "new_wall_s": 3.91785,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 4.6314,
+     "new_s": 2.08675
+    }
+   },
+   "headline": {
+    "cpu_class": "Apple M1",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 4.6314,
+    "new_s": 2.08675
+   },
+   "requests": "41->21",
+   "spawns": "133->16",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "macos",
+   "fixture": "tree-10",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.7472793260481598,
+   "band": [
+    0.5308189278854549,
+    0.9193677649154053
+   ],
+   "speedup": 1.3381876965448836,
+   "base_cpu_s": 2.4298,
+   "new_cpu_s": 1.9444500000000002,
+   "base_wall_s": 3.60875,
+   "new_wall_s": 2.84355,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 2.4298,
+     "new_s": 1.9444500000000002
+    }
+   },
+   "headline": {
+    "cpu_class": "Apple M1",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 2.4298,
+    "new_s": 1.9444500000000002
+   },
+   "requests": "11->11",
+   "spawns": "33->23",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547526017",
+   "pairs": 15,
+   "paired_p50": 0.3337500950787252,
+   "band": [
+    0.31534921275736777,
+    0.35497004730600745
+   ],
+   "speedup": 2.996253828074923,
+   "base_cpu_s": 19.4776,
+   "new_cpu_s": 6.6444,
+   "base_wall_s": 24.853,
+   "new_wall_s": 10.4453,
+   "by_class": {
+    "Apple M1": {
+     "n": 15,
+     "base_s": 19.4776,
+     "new_s": 6.6444
+    }
+   },
+   "headline": {
+    "cpu_class": "Apple M1",
+    "reference_class": false,
+    "n": 15,
+    "base_s": 19.4776,
+    "new_s": 6.6444
+   },
+   "requests": "201->101",
+   "spawns": "567->14",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.3200415259617815,
+   "band": [
+    0.28265331729005944,
+    0.37370563370831744
+   ],
+   "speedup": 3.1245945256473293,
+   "base_cpu_s": 18.157400000000003,
+   "new_cpu_s": 5.9056,
+   "base_wall_s": 22.31475,
+   "new_wall_s": 8.6983,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 18.157400000000003,
+     "new_s": 5.9056
+    }
+   },
+   "headline": {
+    "cpu_class": "Apple M1",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 18.157400000000003,
+    "new_s": 5.9056
+   },
+   "requests": "201->101",
+   "spawns": "617->15",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "macos",
+   "fixture": "tree-50",
+   "run": "45547650037",
+   "pairs": 6,
+   "paired_p50": 0.6024055117575868,
+   "band": [
+    0.36843388808418814,
+    0.7036798635076971
+   ],
+   "speedup": 1.6600113718786966,
+   "base_cpu_s": 11.8782,
+   "new_cpu_s": 5.6844,
+   "base_wall_s": 14.1172,
+   "new_wall_s": 6.24765,
+   "by_class": {
+    "Apple M1": {
+     "n": 6,
+     "base_s": 11.8782,
+     "new_s": 5.6844
+    }
+   },
+   "headline": {
+    "cpu_class": "Apple M1",
+    "reference_class": false,
+    "n": 6,
+    "base_s": 11.8782,
+    "new_s": 5.6844
+   },
+   "requests": "51->51",
+   "spawns": "117->64",
+   "replay_new": [],
+   "tls": {},
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547559105",
+   "pairs": 15,
+   "paired_p50": 0.44122809886719216,
+   "band": [
+    0.4292528301886792,
+    0.4619146460357895
+   ],
+   "speedup": 2.2664014430798884,
+   "base_cpu_s": 6.9062,
+   "new_cpu_s": 3.0312,
+   "base_wall_s": 7.5131,
+   "new_wall_s": 4.0973,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 9.375,
+     "new_s": 4.0469
+    },
+    "EPYC 9V74": {
+     "n": 10,
+     "base_s": 6.7344,
+     "new_s": 2.91405
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 10,
+    "base_s": 6.7344,
+    "new_s": 2.91405
+   },
+   "requests": "41->21",
+   "spawns": "123->14",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.45715916666666667,
+   "band": [
+    0.39802105263157894,
+    0.5531602909962896
+   ],
+   "speedup": 2.1874219591644777,
+   "base_cpu_s": 10.03905,
+   "new_cpu_s": 4.2031,
+   "base_wall_s": 10.5898,
+   "new_wall_s": 5.3987,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 11.03905,
+     "new_s": 4.85935
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 5.34375,
+     "new_s": 2.5781
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 11.1719,
+     "new_s": 5.60935
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 11.1719,
+    "new_s": 5.60935
+   },
+   "requests": "41->21",
+   "spawns": "133->16",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "windows",
+   "fixture": "tree-10",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.811040946148383,
+   "band": [
+    0.6691423966119372,
+    0.8426966292134831
+   ],
+   "speedup": 1.2329833712452865,
+   "base_cpu_s": 5.64065,
+   "new_cpu_s": 4.2344,
+   "base_wall_s": 5.9137,
+   "new_wall_s": 4.5136,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 6.09375,
+     "new_s": 4.2344
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 2.6875,
+     "new_s": 2.17965
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 5.64065,
+     "new_s": 4.6797
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 5.64065,
+    "new_s": 4.6797
+   },
+   "requests": "11->11",
+   "spawns": "33->23",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold",
+   "journey": "install-cold",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547543560",
+   "pairs": 15,
+   "paired_p50": 0.345657846859939,
+   "band": [
+    0.331987676617444,
+    0.35878962536023057
+   ],
+   "speedup": 2.8930342796621114,
+   "base_cpu_s": 35.0156,
+   "new_cpu_s": 11.5625,
+   "base_wall_s": 27.3807,
+   "new_wall_s": 13.5325,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 5,
+     "base_s": 43.7344,
+     "new_s": 15.5312
+    },
+    "EPYC 9V45": {
+     "n": 5,
+     "base_s": 22.4219,
+     "new_s": 7.5781
+    },
+    "XEON(R) PLATINUM 8573C": {
+     "n": 5,
+     "base_s": 35.0156,
+     "new_s": 11.5625
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 7763",
+    "reference_class": false,
+    "n": 5,
+    "base_s": 43.7344,
+    "new_s": 15.5312
+   },
+   "requests": "201->101",
+   "spawns": "567->18",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-cold-auth",
+   "journey": "install-cold-auth",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.3431358869645724,
+   "band": [
+    0.3006059980029611,
+    0.3653577142857143
+   ],
+   "speedup": 2.914297332308021,
+   "base_cpu_s": 43.6328,
+   "new_cpu_s": 15.3125,
+   "base_wall_s": 33.750550000000004,
+   "new_wall_s": 16.832500000000003,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 44.6328,
+     "new_s": 15.3125
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 22.6953,
+     "new_s": 7.0547
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 43.6328,
+     "new_s": 15.9297
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 43.6328,
+    "new_s": 15.9297
+   },
+   "requests": "201->101",
+   "spawns": "617->20",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  },
+  {
+   "command": "install-warm-auth",
+   "journey": "install-warm-auth",
+   "os": "windows",
+   "fixture": "tree-50",
+   "run": "45547733056",
+   "pairs": 6,
+   "paired_p50": 0.7483355529337519,
+   "band": [
+    0.7167665643463613,
+    0.8130383954154728
+   ],
+   "speedup": 1.3362989317821805,
+   "base_cpu_s": 22.60155,
+   "new_cpu_s": 17.2031,
+   "base_wall_s": 20.842950000000002,
+   "new_wall_s": 15.30795,
+   "by_class": {
+    "EPYC 7763": {
+     "n": 2,
+     "base_s": 23.7266,
+     "new_s": 17.6797
+    },
+    "EPYC 9V45": {
+     "n": 2,
+     "base_s": 11.3125,
+     "new_s": 8.5
+    },
+    "EPYC 9V74": {
+     "n": 2,
+     "base_s": 22.60155,
+     "new_s": 17.25
+    }
+   },
+   "headline": {
+    "cpu_class": "EPYC 9V74",
+    "reference_class": true,
+    "n": 2,
+    "base_s": 22.60155,
+    "new_s": 17.25
+   },
+   "requests": "51->51",
+   "spawns": "117->67",
+   "replay_new": [],
+   "tls": {
+    "mode": "system"
+   },
+   "harness_rev": "v2",
+   "source": "artifacts",
+   "quality": "final",
+   "replay_hit": null,
+   "conclusion": "success"
+  }
+ ],
+ "pending": [
+  "linux tree-10,tree-50 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581190-ca46b3 in_progress",
+  "linux tree-10,tree-50 update,uninstall,compile,audit,audit-ci,pack,install-bundle,outdated,prune,boot-version,boot-help perf-bench/42878803-1795581207-865166 in_progress",
+  "macos tree-10,tree-50 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581221-f62001 in_progress",
+  "macos tree-10,tree-50 update,uninstall,compile,audit,audit-ci,pack,install-bundle,outdated,prune,boot-version,boot-help perf-bench/42878803-1795581237-2af390 in_progress",
+  "macos tree-10-ghe,tree-50-ghe install-cold,install-warm,install-noop,install-cold-auth perf-bench/42878803-1795581246-31261f in_progress",
+  "windows tree-10 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581252-262197 in_progress",
+  "windows tree-50 install-warm,install-noop,install-noop-replay,install-frozen perf-bench/42878803-1795581262-079d50 in_progress",
+  "windows tree-10,tree-50 update,uninstall,compile,audit,audit-ci,pack,install-bundle,outdated,prune,boot-version,boot-help perf-bench/42878803-1795581280-2c64c9 in_progress",
+  "windows tree-10-ghe,tree-50-ghe install-cold,install-warm,install-noop,install-cold-auth perf-bench/42878803-1795581292-5b05e8 in_progress"
+ ]
+}
