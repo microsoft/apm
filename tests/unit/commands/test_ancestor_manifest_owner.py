@@ -17,7 +17,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 
 pytestmark = [
-    pytest.mark.unit,
+    pytest.mark.component,
     pytest.mark.promise("P-OWN-install-command-scope-selection"),
 ]
 
@@ -68,7 +68,9 @@ def test_an_ancestor_apm_yml_another_user_owns_is_skipped_and_named(
 
 
 @pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership")
-def test_an_ancestor_apm_yml_the_user_owns_is_found(tmp_path: Path) -> None:
+def test_an_ancestor_apm_yml_the_user_owns_is_found(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from apm_cli.commands._helpers import _find_apm_yml
 
     work = tmp_path / "project" / "src"
@@ -77,13 +79,16 @@ def test_an_ancestor_apm_yml_the_user_owns_is_found(tmp_path: Path) -> None:
     manifest.write_text("name: mine\nversion: 0.0.1\n", encoding="utf-8")
 
     assert _find_apm_yml(work) == manifest.resolve()
+    assert "Skipping" not in capsys.readouterr().out
 
 
 # -- only a regular file (or a link to one) is a manifest --
 
 
 @pytest.mark.parametrize("shape", ["directory", "dangling-link"])
-def test_an_apm_yml_that_is_not_a_regular_file_is_passed_over(tmp_path: Path, shape: str) -> None:
+def test_an_apm_yml_that_is_not_a_regular_file_is_passed_over(
+    tmp_path: Path, shape: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     from apm_cli.commands._helpers import _find_apm_yml
 
     manifest = tmp_path / "apm.yml"
@@ -99,3 +104,4 @@ def test_an_apm_yml_that_is_not_a_regular_file_is_passed_over(tmp_path: Path, sh
             pytest.skip("symlinks unavailable")
 
     assert _find_apm_yml(work) == manifest.resolve()
+    assert "Skipping" not in capsys.readouterr().out
