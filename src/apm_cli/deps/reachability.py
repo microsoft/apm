@@ -818,6 +818,8 @@ def retained_lock_keys(
     retained: set[str] = set()
     candidates: set[str] = set()
     reasons: dict[str, str] = {}
+    # The declared walk this call ran, whether or not the caller collects it.
+    declared_walk: ReachabilityResult | None = None
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     for dep in lockfile.get_package_dependencies():
@@ -864,6 +866,7 @@ def retained_lock_keys(
             frozenset(candidates),
             dev_refs=dev_refs,
         )
+        declared_walk = walk
         if walks is not None:
             walks.append(walk)
         if walk.complete:
@@ -901,7 +904,7 @@ def retained_lock_keys(
         lockfile,
         project_root,
         apm_modules_dir,
-        walks[-1] if walks else None,
+        declared_walk,
         candidates,
         retained,
         reasons,
