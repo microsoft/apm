@@ -906,7 +906,6 @@ class TestUpdateNoChanges:
                 patch(
                     "apm_cli.install.manifest_reconcile.reconcile_project_deployed_state"
                 ) as reconcile,
-                patch("apm_cli.commands.update._run_mcp_lsp_integration") as mcp_lsp,
             ):
                 decline_result = runner.invoke(cli, ["update"], input="n\n")
 
@@ -915,9 +914,9 @@ class TestUpdateNoChanges:
             assert "Apply these changes?" in decline_result.output
             assert "No changes applied." in decline_result.output
             assert json.loads(pins_file.read_text(encoding="utf-8")) == legacy_pins
-            # A declined repair is a refusal: nothing reconciles or writes (#5243).
+            # A declined repair is a refusal: the no-op reconcile never runs (#5243).
             assert reconcile.call_count == 0
-            assert mcp_lsp.call_count == 0
+            assert not (Path.cwd() / "apm.lock.yaml").exists()
 
     def test_a_pin_repair_the_commit_could_not_save_is_not_reported_as_repaired(
         self, runner, tmp_path
@@ -932,8 +931,10 @@ class TestUpdateNoChanges:
                 stage = open_ref_pin_stage()
                 stage_ref_pin("mkt", "plug", "v1", repair=True)
                 assert kwargs["plan_callback"](UpdatePlan(entries=())) is True
-                with patch("apm_cli.marketplace.version_pins.save_ref_pins", return_value=False):
-                    stage.commit(pins_dir=str(Path.cwd() / "pins"))
+                # The I/O boundary fails: a file stands where the pins directory goes.
+                blocked = Path.cwd() / "pins"
+                blocked.write_text("not a directory", encoding="utf-8")
+                stage.commit(pins_dir=str(blocked))
                 from apm_cli.models.results import InstallResult
 
                 return InstallResult()
