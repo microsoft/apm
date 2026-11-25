@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- `apm install` is faster: a fresh install is 2-2.4x faster than v0.38.1, and re-running it with nothing to change is 3-7x faster, and `apm audit` uses up to 44% less CPU. (#5330, #5353, #4993, #5383, #5018)
+- Faster everyday commands: a fresh `apm install` is 2-2.4x faster than v0.38.1, re-running it with nothing to change is 3-7x faster, and `apm audit` uses up to 44% less CPU. (#5330, #5353, #4993, #5383, #5018)
 - `apm uninstall` adds `--trust-lockfile`, re-anchors still-needed local dependencies, and cleans up bundles, orphaned MCP servers and emptied settings. (#4650, #4964, #4679, #4900, #4955)
 - An install after an interrupted one restores every file the killed run changed; cache, extraction and deploy paths are hardened. (#4982, #5016, #4891, #4976, #5146)
 - Upgrade notes: stricter org policy, exact dependency refs, and helper tools that resolve only from PATH outside the project. (#4920, #4827, #4853, #4970, #5006)
