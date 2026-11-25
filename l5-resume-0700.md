@@ -52,3 +52,16 @@
 - W attribution sent (imports ~577 modules beyond boot dominate; enforce_frozen x2 ~0.09 s local cut).
 - Pre-existing: plain install under decide migrates legacy approvals.yml -> report/issue.
 - Night automation cleared. Order: #5423 land -> #5418 -> Car 5 -> #5420 (accepted, low).
+
+- 07:08 VP: #5423 land as-is (no enforce_frozen x2 fold). After #5423 lands: own the W import-oracle (-X importtime on the W hit + pre-import oracle of the ~577 modules, W+L t10 6 pairs; bar oracle W t10 <= 1 s; 60-min box; kill if not), ahead of #5418. Open the W follow-up issue at land.
+
+- 07:35 oracle: harness research branch danielmeppiel-perf-import-oracle (journeys boot-version-imports, install-frozen-noop-imports; Sample.imports). Local mac: hit cpu 0.506, imports self 0.368 (815 mods) vs boot 0.061 (265). Benches W perf-bench/5c6b22e8-1795587512-597b32, L perf-bench/5c6b22e8-1795587522-40763c. Oracle = hit cpu (plain journey) - (imports_hit - imports_boot).
+
+- 07:23 VP: oracle 0.847 is ARITHMETIC/provisional; after #5428 do a MEASURED pre-import oracle (fork pattern) W+L 6 pairs + module ranking.
+- #5428 worktree ../l5-consent branch danielmeppiel-fast-path-consent from main 1e4a208e. Land by 10:30.
+
+- 07:45 #5429 (Fixes #5428) READY at 32764b87 (worktree ../l5-consent). Copilot/W3d/QL requested. Land by 10:30. Oracle parked (measured pre-import oracle next).
+
+- 07:44 measured preimport oracle requested: W perf-bench/5c6b22e8-1795589046-0382cc, L perf-bench/5c6b22e8-1795589055-87fb1e (journeys boot-version, install-frozen-noop, install-frozen-noop-preimport). Oracle W = preimport inner cpu + boot-version cpu; bar <= 1 s. #5429 post-tag (PM), Copilot r1 handled at c0483deb.
+
+- 07:50 MEASURED oracle: W 45562816715 new hit 1.281 cpu; preimport inner 0.453 + boot 0.203 = 0.656 cpu / 0.711 wall (CLEARS 1 s). L 45562834291 oracle 0.319. Proposed next: per-module ranking (importtime self x executed-code oracle) -> lazy-import PR. Awaiting VP go.
