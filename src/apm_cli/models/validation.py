@@ -253,7 +253,19 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
     )
 
 
-def detect_package_type(
+def detect_package_type(*_a, **_k):
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    _m = invocation_memo('research-plan-once')
+    if _m is None:
+        return _detect_package_type_impl(*_a, **_k)
+    _key = ('detect_package_type', tuple(str(x) for x in _a), tuple(sorted((k, str(v)) for k, v in _k.items())))
+    if _key not in _m:
+        _m[_key] = _detect_package_type_impl(*_a, **_k)
+    return _m[_key]
+
+
+def _detect_package_type_impl(
     package_path: Path,
     *,
     agent_plugin_detection: AgentPluginDetection | None = None,
@@ -336,7 +348,19 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
     )
 
 
-def validate_apm_package(
+def validate_apm_package(*_a, **_k):
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    _m = invocation_memo('research-plan-once')
+    if _m is None:
+        return _validate_apm_package_impl(*_a, **_k)
+    _key = ('validate_apm_package', tuple(str(x) for x in _a), tuple(sorted((k, str(v)) for k, v in _k.items())))
+    if _key not in _m:
+        _m[_key] = _validate_apm_package_impl(*_a, **_k)
+    return _m[_key]
+
+
+def _validate_apm_package_impl(
     package_path: Path,
     *,
     source_path: Path | None = None,

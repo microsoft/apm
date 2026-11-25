@@ -510,38 +510,52 @@ class SkillIntegrator(BaseIntegrator):
         def managed(path: str) -> bool:
             return path in self._skill_session_hashes or claimed(path)
 
-        adopted = skill_tree_baselines(
-            self, source, destination, ignore=ignore, owned=lambda p: claimed(entry(p)), force=force
+        adopted = (
+            {}
+            if not destination.exists()
+            else skill_tree_baselines(
+                self, source, destination, ignore=ignore, owned=lambda p: claimed(entry(p)), force=force
+            )
         )
         unchanged = unchanged and not adopted
         before = tree_file_hashes(destination, entry)
-        copied = self.copy_directory_files(
-            source,
-            destination,
-            ignore=ignore,
-            path_entry=entry,
-            is_managed=managed,
-            recorded_hashes=hashes,
-            baseline_hash=(
-                (lambda path: adopted.get(path) or session.baseline(path, targets))
-                if session is not None
-                else None
-            ),
-            on_member_written=written.append,
-            requires_write=(
-                (lambda path: session.requires_target_write(path, targets, owner))
-                if session is not None
-                else None
-            ),
-            on_member_skipped=self._skill_member_skipped,
-            unchanged=unchanged,
-            write_allowed=lambda path: (
-                self._replay_owners is None or self._replay_owners.get(path, owner) == owner
-            ),
-            force=force or managed_files is None,
-            diagnostics=diagnostics,
-            package=owner or "",
-        )
+        if not destination.exists():
+            # research: one tree op for a cold destination (ceiling only)
+            import shutil
+
+            from apm_cli.utils.file_ops import _reflink_copy_file
+
+            shutil.copytree(source, destination, ignore=ignore, copy_function=_reflink_copy_file)
+            copied = sorted(p for p in destination.rglob("*") if p.is_file())
+            written.extend(copied)
+        else:
+            copied = self.copy_directory_files(
+                source,
+                destination,
+                ignore=ignore,
+                path_entry=entry,
+                is_managed=managed,
+                recorded_hashes=hashes,
+                baseline_hash=(
+                    (lambda path: adopted.get(path) or session.baseline(path, targets))
+                    if session is not None
+                    else None
+                ),
+                on_member_written=written.append,
+                requires_write=(
+                    (lambda path: session.requires_target_write(path, targets, owner))
+                    if session is not None
+                    else None
+                ),
+                on_member_skipped=self._skill_member_skipped,
+                unchanged=unchanged,
+                write_allowed=lambda path: (
+                    self._replay_owners is None or self._replay_owners.get(path, owner) == owner
+                ),
+                force=force or managed_files is None,
+                diagnostics=diagnostics,
+                package=owner or "",
+            )
         if not unchanged:
             if self.link_resolver is None:
                 self._skill_can_complete = False
