@@ -90,6 +90,7 @@ def render_post_install_summary(
     force: bool,
     elapsed_seconds: float | None = None,
     result: InstallResult | None = None,
+    fast: bool = False,
 ) -> InstallResult:
     """Render diagnostics and the final disposition-aware summary line.
 
@@ -125,6 +126,8 @@ def render_post_install_summary(
             force=force,
         )
     apply_install_command_outcome(result)
+    if not fast:
+        _note_full_noop(logger, result, apm_count, mcp_count, lsp_count, error_count)
     logger.install_summary(
         apm_count=apm_count,
         mcp_count=mcp_count,
@@ -135,3 +138,24 @@ def render_post_install_summary(
         disposition=result.disposition,
     )
     return result
+
+
+def _note_full_noop(logger, result, apm_count, mcp_count, lsp_count, errors) -> None:
+    """Note a full install that changed nothing, judged from its structured counts (#5451).
+
+    Nothing installed, cleaned, removed or updated, no lock write, no error: the
+    verdict record may then keep this run's own output (install/verdict_write.py).
+    """
+    from apm_cli.install import verdict_record
+    from apm_cli.models.results import InstallDisposition
+
+    if (
+        result.disposition is InstallDisposition.SUCCESS
+        and apm_count == 0
+        and mcp_count == 0
+        and lsp_count == 0
+        and errors == 0
+        and logger.stale_cleaned_total == 0
+        and not logger.changed_state()
+    ):
+        verdict_record.note_full_noop()

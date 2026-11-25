@@ -2001,3 +2001,135 @@ def test_a_nested_directory_link_present_before_recording_is_never_recorded(
     _record()
 
     assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_routed_prefix_not_in_nfc_is_never_recorded(project: Path, capsys) -> None:
+    """#5451 W3b (d): one spelling per routed directory; a decomposed prefix declines."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        _decide_claude_routing(project, "cafe\u0301/**")
+        verdict_record.note_verified_noop()
+    capsys.readouterr()
+
+    assert not verdict_record._record_path(project).exists()
+
+
+def test_every_read_of_the_claude_routing_decision_is_a_keyed_input(project: Path) -> None:
+    """#5451 W3b (a): trace every file the routing owners stat or open (the root and a
+    routed prefix, a compile record naming a compiled file); each one under the project
+    is a path key_claude_routing keys, or apm.yml (keyed whole)."""
+    from apm_cli.compilation import claude_agents_md as routing
+    from apm_cli.core.agents_md_compile_record import write_record
+
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    _nested_carrier(project)
+    (project / "docs").mkdir()
+    (project / "docs" / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    write_record(project, {"docs/AGENTS.md": {"sha256": "sha256:0", "instructions": ["x"]}})
+    reads: set[str] = set()
+
+    def tracer(real):
+        def traced(path, *args, **kwargs):
+            if isinstance(path, str | os.PathLike):
+                reads.add(os.fspath(path))
+            return real(path, *args, **kwargs)
+
+        return traced
+
+    with pytest.MonkeyPatch.context() as trace:
+        for name in ("stat", "lstat"):
+            trace.setattr(os, name, tracer(getattr(os, name)))
+        trace.setattr("builtins.open", tracer(open))
+        for apply_to in ("**", "src/test/**"):
+            routing.routes_to_agents_md(apply_to, project)
+            routing.CompiledCoverage(project).carrier(apply_to, "Run the tests.")
+        routing.claude_agents_md_blocker(project)
+        routing._directory_destination_open(project, "src/test")
+
+    from apm_cli.install import verdict_inputs
+
+    tags: list[str] = []
+    recorder = type("Recorder", (), {"put": lambda self, tag, data: tags.append(tag)})()
+    verdict_inputs.key_claude_routing(recorder, project, ["", "src/test"])
+    root = os.path.realpath(project)
+    keyed = {"apm.yml"}  # keyed whole as a project surface
+    for tag in tags:
+        kind, _, name = tag.partition(":")
+        if kind == "route-dir":
+            keyed.add(name or ".")
+        elif kind in ("route", "route-compiled"):
+            keyed.add(name.lstrip("/"))
+        elif kind == "route-git":
+            keyed.add(os.path.relpath(name, project))
+    under = {
+        os.path.relpath(os.path.realpath(path), root)
+        for path in reads
+        if os.path.realpath(path) == root or os.path.realpath(path).startswith(root + os.sep)
+    }
+    assert under, "the routing owners read the project"
+    assert under <= keyed, sorted(under - keyed)
+
+
+def _record_routed(project: Path, apply_to: str) -> None:
+    """A verified no-op whose run routed *apply_to* through the instruction integrator."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        _decide_claude_routing(project, apply_to)
+        verdict_record.note_verified_noop()
+
+
+@pytest.mark.parametrize(
+    "mutation", ["nested import removed", "routed dir linked", "nested AGENTS.md deleted"]
+)
+def test_a_routed_directory_change_flips_the_served_verdict(
+    project: Path, capsys, mutation: str
+) -> None:
+    """#5451 W3d R3: each change to a routed directory's inputs turns a served replay
+    into a miss (positive control: unchanged, it replays)."""
+    _nested_carrier(project)
+    _record_routed(project, "src/test/**")
+    capsys.readouterr()
+    _assert_replays(True)
+    nested = project / "src" / "test"
+    if mutation == "nested import removed":
+        (nested / "CLAUDE.md").write_text("# Notes\n", encoding="utf-8")
+    elif mutation == "routed dir linked":
+        copy = project / "src" / "test-copy"
+        shutil.copytree(nested, copy)
+        shutil.rmtree(nested)
+        try:
+            _link_dir(nested, copy)
+        except OSError:
+            pytest.skip("directory links unsupported here")
+    else:
+        (nested / "AGENTS.md").unlink()
+    capsys.readouterr()
+
+    _assert_replays(False)
+
+
+def test_the_claude_routing_decision_reads_no_environment(project: Path) -> None:
+    """#5451 W3d R1: the routing owners read no environment variable, so no unkeyed
+    environment input can change their decision."""
+    from apm_cli.compilation import claude_agents_md as routing
+
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    _nested_carrier(project)
+    names: list[str] = []
+    real = os._Environ.__getitem__
+
+    def traced(self, key):
+        names.append(key)
+        return real(self, key)
+
+    with pytest.MonkeyPatch.context() as trace:
+        trace.setattr(os._Environ, "__getitem__", traced)
+        for apply_to in ("**", "src/test/**"):
+            routing.routes_to_agents_md(apply_to, project)
+            routing.CompiledCoverage(project).carrier(apply_to, "Run the tests.")
+        routing.claude_agents_md_blocker(project)
+        routing._directory_destination_open(project, "src/test")
+
+    assert not set(names) - set(verdict_record.ENV_ALLOWLIST), sorted(set(names))

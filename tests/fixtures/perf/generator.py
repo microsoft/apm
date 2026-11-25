@@ -214,8 +214,10 @@ class _Prose:
         return "\n".join(sections)
 
 
-def _instruction(prose: _Prose, rng: random.Random, name: str) -> str:
+def _instruction(prose: _Prose, rng: random.Random, name: str, routed: str = "") -> str:
     glob = f"**/*.{rng.choice(_LANGUAGES)}"
+    if routed:  # same rng draws, so the other recipes stay byte-identical
+        glob = routed
     return f"---\ndescription: {prose.sentence(8)}\napplyTo: '{glob}'\n---\n\n{prose.body(name)}"
 
 
@@ -264,7 +266,9 @@ def author_package(
     )
     prose = _Prose(rng)
     for i in range(mix.instructions):
-        factory.add_instruction(package, f"{name}-rule-{i}", _instruction(prose, rng, name))
+        # Claude-routed variants: an always-on rule and a directory rule (#5451).
+        routed = mix.routed[i] if i < len(mix.routed) else ""
+        factory.add_instruction(package, f"{name}-rule-{i}", _instruction(prose, rng, name, routed))
     for i in range(mix.agents):
         agent = f"{name}-agent-{i}"
         factory.add_agent(package, agent, _agent(prose, agent))

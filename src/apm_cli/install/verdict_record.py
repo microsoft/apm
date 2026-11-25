@@ -35,6 +35,8 @@ RECORD_VERSION = 3
 # no-op; "attested" when a successful full install committed the state it keys, or
 # when a run replayed an attested record. Provenance never upgrades.
 PROVEN, ATTESTED = "proven", "attested"
+# A full install that decided Claude routing and changed nothing (#5451).
+FULL = "full"
 RECORDS_DIR = "verdicts"
 KEY_FILE = "verdict.key"
 # Argv the record serves; anything else runs the CLI as usual.
@@ -907,6 +909,38 @@ _UNKNOWN: list[str] = []
 # The directory prefixes ("" for the root) whose carriers decided Claude rule
 # routing this run (instruction_integrator); a record keys their inputs (#5451).
 _CLAUDE_ROUTING: set[str] = set()
+# The full pipeline judged this run a no-op from its structured counts (#5451).
+_FULL_NOOP: list[bool] = []
+
+
+_DEPLOY_WRITES: list[bool] = []
+# APM home at the run's entry: a full no-op record needs it unchanged (W3d C8).
+_ENTRY_HOME: list[bytes] = []
+
+
+def note_deploy_write() -> None:
+    """The install transaction recorded a deploy write this run (W3d C8)."""
+    if _ACTIVE:
+        _DEPLOY_WRITES[:] = [True]
+
+
+def home_fingerprint() -> bytes:
+    """APM home as a full no-op must leave it: every keyed file's path, size and mtime."""
+    from apm_cli.install.locking import _LIFECYCLE_LOCK_NAME
+
+    rows = []
+    for rel, files, _dirs in _tree(str(_apm_home()), skip=(RECORDS_DIR, "cache")):
+        for entry in files:
+            if entry.name not in (KEY_FILE, _LIFECYCLE_LOCK_NAME):
+                info = entry.stat(follow_symlinks=False)
+                rows.append(f"{rel}/{entry.name}|{info.st_size}|{info.st_mtime_ns}")
+    return "\x00".join(rows).encode("utf-8", "surrogateescape")
+
+
+def note_full_noop() -> None:
+    """The full install changed nothing (install/summary._note_full_noop)."""
+    if _ACTIVE:
+        _FULL_NOOP[:] = [True]
 
 
 def note_claude_routing(prefixes: Any) -> None:
@@ -935,6 +969,9 @@ def recording(argv: list[str]) -> Iterator[None]:
         _VERIFIED_NOOP,
         _UNKNOWN,
         _CLAUDE_ROUTING,
+        _FULL_NOOP,
+        _DEPLOY_WRITES,
+        _ENTRY_HOME,
         _PROVEN_LOCK,
         _ATTESTED_INSTALL,
         _RUN_ENTRY,
@@ -946,6 +983,10 @@ def recording(argv: list[str]) -> Iterator[None]:
     entry = (_env_snapshot(), _presentation())
     _RUN_ENTRY.append(entry)
     _ENTRY_FILES[:] = [_entry_bytes("apm.yml"), _entry_bytes("apm.lock.yaml")]
+    try:
+        _ENTRY_HOME[:] = [home_fingerprint()]
+    except OSError:
+        _ENTRY_HOME.clear()
     from apm_cli.install.verdict_inputs import entry_stamp
 
     _ENTRY_TIME[:] = entry_stamp()

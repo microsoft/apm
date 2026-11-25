@@ -246,14 +246,18 @@ def key_claude_routing(digest: Any, root: Path, prefixes: list[str]) -> None:
     file), every ``.git`` between it and the root, and the compiled file's bytes.
     The compile record itself is keyed with APM home.
     """
+    import unicodedata
+
     from apm_cli.core.agents_md_compile_record import read_record
 
     directories = {"", *prefixes}
     compiled = sorted(rel for rel in read_record(root) if isinstance(rel, str))
     for rel in compiled:
         directories.add(os.path.dirname(rel))
-        _key_followed(digest, f"route-compiled:{rel}", root / rel)
+        _key_followed(digest, f"route-compiled:{rel}", root / rel, root)
     for rel in sorted(directories):
+        if unicodedata.normalize("NFC", rel) != rel:
+            raise ValueError("routed prefix not NFC")  # one spelling per directory
         directory = root / rel if rel else root
         digest.put(
             f"route-dir:{rel}",
@@ -265,7 +269,7 @@ def key_claude_routing(digest: Any, root: Path, prefixes: list[str]) -> None:
             ),
         )
         for name in _CARRIERS:
-            _key_followed(digest, f"route:{rel}/{name}", directory / name)
+            _key_followed(digest, f"route:{rel}/{name}", directory / name, root)
         try:
             same = (directory / "CLAUDE.md").samefile(directory / "AGENTS.md")
         except OSError:
@@ -278,7 +282,7 @@ def key_claude_routing(digest: Any, root: Path, prefixes: list[str]) -> None:
             current = current.parent
 
 
-def _key_followed(digest: Any, tag: str, path: Path) -> None:
+def _key_followed(digest: Any, tag: str, path: Path, root: Path) -> None:
     """A path as routing reads it: its own kind, a link's target, and the bytes it opens to."""
     kind = _kind(str(path))
     target = os.readlink(path).encode("utf-8", "surrogateescape") if kind == b"link" else b""

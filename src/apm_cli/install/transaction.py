@@ -588,6 +588,9 @@ class InstallTransaction:
         self, path: Path, contents: bool, expected: str | None = None, size: int | None = None
     ) -> None:
         """Keep *path*'s prior state the first time this attempt touches it."""
+        from apm_cli.install import verdict_record
+
+        verdict_record.note_deploy_write()  # a run that wrote is no full no-op (#5451)
         journal = self._deploy_journal
         if journal is not None:
             journal.record(path, contents=contents, expected=expected, size=size)

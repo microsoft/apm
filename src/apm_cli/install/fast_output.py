@@ -156,6 +156,7 @@ def render(
         apm_diagnostics=logger.diagnostics,
         force=False,
         elapsed_seconds=time.perf_counter() - started,
+        fast=True,  # a fast render proves nothing about a full run (#5451)
     )
     if frozen_disposition.replay and lock.dependencies:
         from apm_cli.install.outcome import frozen_verified_line

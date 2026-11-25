@@ -83,6 +83,12 @@ def _record_after(
         if key != "."
         for rel in getattr(dep, "deployed_file_hashes", None) or {}
     )
+    if attested and vr._FULL_NOOP and _claude_decided() and _full_noop_settled():
+        # #5451: the fast path never serves a Claude-routed project, so this full
+        # no-op keeps its own output; a replay prints the full pipeline's bytes.
+        out_text, err_text = "".join(out.parts), "".join(err.parts)
+        _write_at_entry(entry, argv, out_text, err_text, deployed, provenance=vr.FULL)
+        return
     if attested:
         _write_at_entry(entry, argv, "", "", deployed, kind=ATTESTED, provenance=ATTESTED)
         return
@@ -217,6 +223,9 @@ def _write(
             return
         from apm_cli.install import verdict_policy
 
+        if kind != ATTESTED and _unsafe_output(stdout_text + stderr_text):
+            vr._trace("no record (output too large or carrying a credential)")
+            return  # W3d C11/C12: a record never persists a secret or unbounded bytes
         if kind != ATTESTED:
             stdout_text, stamps = vr._ELAPSED_RE.subn(rf"\g<1>{vr._ELAPSED}\g<2>", stdout_text)
             templated = verdict_policy._template_ages(stdout_text)
@@ -306,3 +315,55 @@ def _write(
     except (OSError, ValueError, TypeError) as exc:
         vr._trace(f"no record ({type(exc).__name__})")
         return
+
+
+def _claude_decided() -> bool:
+    """The run routed Claude rules, or a root carrier or compile record could carry
+    them: the fast path declines such a project, so only a replay can serve it."""
+    from apm_cli.core.agents_md_compile_record import may_carry
+
+    return bool(vr._CLAUDE_ROUTING) or may_carry(Path.cwd())
+
+
+def _full_noop_settled() -> bool:
+    """A full no-op changed nothing (W3d C8): no deploy write, the lock bytes and
+    APM home (records, cache and locks aside) as they were at the run's entry."""
+    _manifest, lock_at_entry = vr._ENTRY_FILES or (None, None)
+    if vr._DEPLOY_WRITES or lock_at_entry is None or not vr._ENTRY_HOME:
+        vr._trace(f"full no-op unsettled (writes {bool(vr._DEPLOY_WRITES)})")
+        return False
+    if vr._read_nofollow(Path.cwd() / "apm.lock.yaml") != lock_at_entry:
+        return False
+    try:
+        same = vr.home_fingerprint() == vr._ENTRY_HOME[0]
+    except OSError:
+        same = False
+    if not same:
+        vr._trace("full no-op unsettled (APM home changed)")
+    return same
+
+
+_OUTPUT_LIMIT = 1024 * 1024
+_CREDENTIAL_ENV = (
+    "GITHUB_TOKEN",
+    "GITHUB_APM_PAT",
+    "GH_TOKEN",
+    "ADO_APM_PAT",
+    "ARTIFACTORY_APM_TOKEN",
+    "GITLAB_TOKEN",
+)
+_AUTH_PATTERN = re.compile(
+    r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|glpat-[A-Za-z0-9_-]{16,}"
+    r"|(?i:bearer|basic)\s+[A-Za-z0-9+/=._-]{12,}|x-access-token:"
+)
+
+
+def _unsafe_output(text: str) -> bool:
+    """Whether recorded output would be unbounded or carry a credential (W3d C11/C12)."""
+    if len(text) > _OUTPUT_LIMIT:
+        return True
+    for name in _CREDENTIAL_ENV:
+        value = os.environ.get(name)
+        if value and len(value) >= 8 and value in text:
+            return True
+    return _AUTH_PATTERN.search(text) is not None

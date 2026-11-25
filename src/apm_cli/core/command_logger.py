@@ -568,6 +568,10 @@ class InstallLogger(CommandLogger):
         """Keep metadata-only persistence out of the unchanged summary."""
         self._lockfile_written = True
 
+    def changed_state(self) -> bool:
+        """Whether this run updated local content, removed MCP servers or wrote the lock."""
+        return bool(self._local_content_updated or self._mcp_removed or self._lockfile_written)
+
     def record_local_content_updated(self) -> None:
         """Record that the project's own .apm/ content changed deployed files (#4184)."""
         self._local_content_updated = True
