@@ -776,9 +776,9 @@ def test_prune_keeps_the_parent_chain_when_equally_near_parents_disagree(
     """f is reached at one depth from sub/z (../../f) and m (../f): prune keeps e's chain.
 
     A path from one parent paired with the other would point outside vendor,
-    so prune changes no lock bytes. Install itself cannot yet resolve this
-    graph once d is dropped (with or without --frozen, with or without
-    prune); the multi-path rule is tracked in #5126.
+    so prune changes no lock bytes. Install then resolves the graph with and
+    without --frozen (#5238 item 1, fixed by #5390); that convergence is
+    checked in test_prune_multi_parent_survivor_lifecycle.py.
     """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
