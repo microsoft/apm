@@ -1540,3 +1540,37 @@ def test_terminal_styling_never_hides_a_deferral_warning(
 
 def _assert_replays(expected: bool) -> None:
     assert verdict_record.replay(["install"]) is expected
+
+
+# RT1 hostile cells (scratch): the full run reads a root AGENTS.md / CLAUDE.md to
+# decide whether a Claude rule is carried (compiled_agents_md_may_carry, #5343).
+_CARRIER = "## Global Instructions\n\nAlways run the linter.\n"
+
+
+@pytest.mark.parametrize("name", ["AGENTS.md", "CLAUDE.md"])
+def test_rt1_a_root_carrier_appearing_after_the_record_misses(
+    project: Path, capsys, name: str
+) -> None:
+    _record()
+    (project / name).write_text(_CARRIER, encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+
+
+def test_rt1_a_root_carrier_removed_after_the_record_misses(project: Path, capsys) -> None:
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    (project / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    _record()
+    (project / "AGENTS.md").unlink()
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+
+
+def test_rt1_control_the_record_hits_with_a_carrier_unchanged(project: Path, capsys) -> None:
+    (project / "AGENTS.md").write_text(_CARRIER, encoding="utf-8")
+    _record()
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is True
