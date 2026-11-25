@@ -30,6 +30,9 @@ def main() -> None:
         command.main(args=sys.argv[1:])
         return
 
+    from apm_cli.utils import research_oresolve
+
+    research_oresolve.install()
     from apm_cli.install import verdict_record
 
     argv = sys.argv[1:]
