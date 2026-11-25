@@ -1,0 +1,16 @@
+{
+  "issue": 5457,
+  "fixed_in": "Unreleased",
+  "summary": "On a case- or normalization-folding volume, a local diamond whose parents spelled the shared directory with leaves differing only by case or Unicode normalization (F-Pkg and f-pkg) kept the first edge's local_path under the ranked parent, so install or install --frozen failed; such respellings now take the ranked parent's edge, while a symlink alias keeps the first edge.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/deps/test_apm_resolver_diamond_declaring_parent.py::test_a_respelled_leaf_takes_the_ranked_edge",
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_a_respelled_diamond_records_the_ranked_parents_edge",
+    "tests/unit/deps/test_apm_resolver_diamond_declaring_parent.py::test_a_case_only_symlink_alias_is_its_own_entry"
+  ]
+}

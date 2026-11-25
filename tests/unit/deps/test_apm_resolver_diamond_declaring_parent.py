@@ -67,3 +67,56 @@ def test_a_diamond_node_takes_its_recorded_parents_declaration(
         "../d",
         "vendor/d",
     )
+
+
+@pytest.mark.parametrize(
+    ("first_path", "ranked_path", "one_entry", "takes_ranked"),
+    [
+        ("../../shared/F-Pkg", "../shared/f-pkg", True, True),
+        ("../../shared/f-pkg", "../shared/F-PKG", True, True),
+        ("../../shared/caf\u00e9", "../shared/cafe\u0301", True, True),
+        ("../../shared/cafe\u0301", "../shared/CAF\u00c9", True, True),
+        ("../../shared/F-Pkg", "../shared/f-pkg", False, False),
+        ("../../shared/F-Pkg", "../shared/f-pkg", None, False),
+        ("../../shared/d", "../shared/d", None, True),
+        ("../../shared/d", "../shared/d-alias", True, False),
+        ("../../shared/cafe", "../shared/caf\u00e9", True, False),
+    ],
+    ids=[
+        "case",
+        "case-upper",
+        "nfc-nfd",
+        "nfd-nfc-case",
+        "case-symlink-alias",
+        "case-no-volume-check",
+        "same",
+        "alias",
+        "accent-differs",
+    ],
+)
+def test_a_respelled_leaf_takes_the_ranked_edge(
+    first_path, ranked_path, one_entry, takes_ranked
+) -> None:
+    """#5457: a leaf respelled only by case or Unicode normalization takes the ranked
+    parent's edge when the volume stores both as one entry; a symlink alias (two
+    entries, #5386), a caller without a volume check, or another leaf keeps the first."""
+    from apm_cli.deps.local_identity import recorded_declaring_edge
+
+    first, ranked = {"path": first_path}, {"path": ranked_path}
+    same_entry = None if one_entry is None else (lambda _first, _ranked: one_entry)
+    chosen = recorded_declaring_edge(first, ranked, lambda edge: edge["path"], same_entry)
+    assert chosen is (ranked if takes_ranked else first)
+
+
+def test_a_case_only_symlink_alias_is_its_own_entry(tmp_path: Path) -> None:
+    """#5386 stays: on a case-sensitive volume ``f -> F`` is a second entry, so the
+    two spellings are not one stored leaf; the exact spelling is one entry."""
+    from apm_cli.deps.local_identity import same_stored_leaf
+
+    (tmp_path / "F").mkdir()
+    try:
+        (tmp_path / "f").symlink_to(tmp_path / "F", target_is_directory=True)
+    except (OSError, FileExistsError):
+        pytest.skip("this volume folds case or cannot link")
+    assert not same_stored_leaf(tmp_path / "F", tmp_path / "f")
+    assert same_stored_leaf(tmp_path / "F", tmp_path / "F")
