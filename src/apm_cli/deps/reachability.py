@@ -897,9 +897,72 @@ def retained_lock_keys(
         retained,
         reasons,
     )
+    _retain_recorded_parents(
+        lockfile,
+        project_root,
+        apm_modules_dir,
+        walks[-1] if walks else None,
+        candidates,
+        retained,
+        reasons,
+        anchored if anchored is not None else {},
+    )
     if unverified is not None:
         unverified.update(reasons)
     return frozenset(retained)
+
+
+def _retain_recorded_parents(
+    lockfile: LockFile,
+    project_root: Path,
+    apm_modules_dir: Path,
+    walk: ReachabilityResult | None,
+    candidates: set[str],
+    retained: set[str],
+    reasons: dict[str, str],
+    anchored: dict[str, str],
+) -> None:
+    """Keep the parent chain of a kept row the declared walk cannot re-parent (#5238).
+
+    A remote row kept by the remote transitive policy, not reached from a
+    declaration, still records its parent in ``resolved_by``; removing that
+    parent would leave it recorded under a row no longer in the lock. The
+    chain stays, named, with every pending row it still declares.
+    """
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    pending = candidates - retained
+    if not pending:
+        return
+    by_identity = {
+        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
+        for key in pending
+        if key in lockfile.dependencies
+    }
+    reached = walk.reachable if walk is not None and walk.complete else frozenset()
+    kept: dict[str, str] = {}
+    for key in sorted(retained):
+        row = lockfile.dependencies.get(key)
+        # Replaced rows have their own parent rule; only the remote policy's keeps count.
+        if row is None or key in reached or row.replacement is not None or row.source == "local":
+            continue
+        parent = by_identity.get(row.resolved_by)
+        while parent is not None and parent not in kept:
+            kept[parent] = f"{row.repo_url} is still recorded under it"
+            parent = by_identity.get(lockfile.dependencies[parent].resolved_by)
+    if not kept:
+        return
+    anchored.update(kept)
+    retained |= set(kept)
+    _retain_reached_from(
+        lockfile,
+        project_root,
+        apm_modules_dir,
+        [lockfile.dependencies[key].to_dependency_ref() for key in sorted(kept)],
+        candidates,
+        retained,
+        reasons,
+    )
 
 
 def _retain_reached_from(
