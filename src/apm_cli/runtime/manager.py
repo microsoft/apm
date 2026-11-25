@@ -31,7 +31,7 @@ def _required_helper(*names: str) -> str:
         if path is not None:
             return path
     raise FileNotFoundError(
-        _exclusion.not_found_message(names[0], f"{names[0]} executable not found on PATH")
+        _exclusion.not_found_message(f"{names[0]} executable not found on PATH", *names)
     )
 
 

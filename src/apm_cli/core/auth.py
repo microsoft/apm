@@ -1163,7 +1163,10 @@ class AuthResolver:
                 )
             if not az_available:
                 # Case 1: no az, no PAT
+                az_note = getattr(provider, "shadow_notice", None)
+                shadow_line = f"\n    {az_note}\n" if isinstance(az_note, str) else ""
                 return (
+                    f"{shadow_line}"
                     f"\n    Azure DevOps requires authentication. You have two options:\n\n"
                     f"    1. Install Azure CLI and sign in (recommended for Entra ID users):\n"
                     f"         brew install azure-cli            # macOS\n"

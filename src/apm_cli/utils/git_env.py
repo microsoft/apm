@@ -321,7 +321,7 @@ def _resolve_trusted_executable(name: str) -> str:
         resolved = Path(candidate).resolve()
         try:
             if _inside_project(resolved, exclusion_root):
-                skipped_hit = skipped_hit or str(resolved)
+                skipped_hit = skipped_hit or candidate
                 continue
         except (OSError, ValueError):
             continue
@@ -441,11 +441,11 @@ def trusted_executable(name: str) -> str | None:
     The single owner for locating a helper (git, az, npm, codex, PowerShell, ...).
     It searches only PATH directories outside the current project, never the
     working directory, so a program shipped inside a checkout cannot stand in
-    for the real tool. Launch the returned path, never a bare name; see
-    ``executable_exclusion.not_found_message``.
+    for the real tool. Launch the returned path, never a bare name.
     """
+    _exclusion.forget_shadow(name)
     try:
-        return _exclusion.forget_shadow(name, _resolve_trusted_executable(name))
+        return _resolve_trusted_executable(name)
     except FileNotFoundError as error:
         return _exclusion.note_shadow(name, error)
 

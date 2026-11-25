@@ -156,7 +156,7 @@ def _get_installer_run_command(script_path: str) -> list[str]:
         if not powershell_path:
             raise FileNotFoundError(
                 _exclusion.not_found_message(
-                    "powershell", "PowerShell executable not found in PATH"
+                    "PowerShell executable not found in PATH", "powershell", "pwsh"
                 )
             )
         return [powershell_path, "-ExecutionPolicy", "Bypass", "-File", script_path]
@@ -168,7 +168,7 @@ def _get_installer_run_command(script_path: str) -> list[str]:
         else:
             raise FileNotFoundError(
                 _exclusion.not_found_message(
-                    "bash", "bash executable not found; cannot run installer script"
+                    "bash executable not found; cannot run installer script", "bash"
                 )
             )
     return [shell_path, script_path]

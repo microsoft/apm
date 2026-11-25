@@ -233,9 +233,9 @@ class CodexNativeClient:
         if executable is None:
             raise CodexNativeError(
                 _exclusion.not_found_message(
-                    "codex",
                     f"Codex native registration requires Codex CLI {MINIMUM_CODEX_VERSION} "
                     "or later on PATH. Install a qualified client and retry.",
+                    "codex",
                 )
             )
         try:

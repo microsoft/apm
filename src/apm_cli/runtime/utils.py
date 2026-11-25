@@ -73,5 +73,5 @@ def require_runtime_binary(name: str) -> str:
     if path is None:
         from apm_cli.utils.executable_exclusion import not_found_message
 
-        raise FileNotFoundError(not_found_message(name, f"{name} executable not found on PATH"))
+        raise FileNotFoundError(not_found_message(f"{name} executable not found on PATH", name))
     return path

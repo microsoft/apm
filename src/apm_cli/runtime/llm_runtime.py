@@ -5,6 +5,7 @@ import subprocess
 from typing import Any
 
 from ..core.tls_trust import build_child_tls_env
+from ..utils.executable_exclusion import not_found_message
 from .base import RuntimeAdapter, _stream_subprocess_output
 from .utils import require_runtime_binary
 
@@ -31,7 +32,9 @@ class LLMRuntime(RuntimeAdapter):
                 env=build_child_tls_env(os.environ),
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
-            raise RuntimeError("llm CLI not found. Please install: pip install llm")  # noqa: B904
+            raise RuntimeError(  # noqa: B904
+                not_found_message("llm CLI not found. Please install: pip install llm", "llm")
+            )
 
     def execute_prompt(self, prompt_content: str, **kwargs) -> str:
         """Execute a single prompt using llm CLI and return the response.

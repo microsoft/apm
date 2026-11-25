@@ -102,6 +102,11 @@ class AzureCliBearerProvider:
             from apm_cli.utils.git_env import trusted_executable
 
             self._az_command = trusted_executable(az_command)
+        self.shadow_notice: str | None = None
+        if self._az_command is None:
+            from apm_cli.utils.executable_exclusion import not_found_message
+
+            self.shadow_notice = not_found_message("", az_command) or None
         # Cache stores (token, expires_at_epoch_seconds). expires_at is None
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring
@@ -160,10 +165,8 @@ class AzureCliBearerProvider:
             # az availability check (also under lock so we don't race with
             # a hypothetical clear_cache + chdir/PATH change in another thread).
             if not self.is_available():
-                from apm_cli.utils.executable_exclusion import not_found_message
-
                 raise AzureCliBearerError(
-                    not_found_message("az", "az CLI is not installed or not on PATH"),
+                    self.shadow_notice or "az CLI is not installed or not on PATH",
                     kind="az_not_found",
                 )
 

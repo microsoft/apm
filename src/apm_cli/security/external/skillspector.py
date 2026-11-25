@@ -48,7 +48,7 @@ _LLM_KEY_ENV_VARS = ("OPENAI_API_KEY", "NVIDIA_INFERENCE_KEY")
 
 
 def _not_found_prefix() -> str:
-    return _exclusion.not_found_message(_BINARY, "SkillSpector CLI not found on PATH.")
+    return _exclusion.not_found_message("SkillSpector CLI not found on PATH.", _BINARY)
 
 
 class SkillSpectorAdapter:

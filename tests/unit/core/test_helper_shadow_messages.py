@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -56,13 +57,91 @@ def test_az_missing_everywhere_keeps_not_installed_text(
             provider.get_bearer_token()
 
 
-def test_shadow_message_reports_stored_spelling() -> None:
-    root = Path("/proj")
-    with patch("os.path.realpath", return_value="/proj/bin/git.exe"):
-        error = ProjectShadowedExecutableError("git", "/proj/bin/git.EXE", root)
+def test_shadow_message_reports_stored_spelling(tmp_path: Path) -> None:
+    (tmp_path / "git.exe").write_bytes(b"")
 
-    assert "git at /proj/bin/git.exe is inside" in str(error)
+    error = ProjectShadowedExecutableError("git", str(tmp_path / "git.EXE"), tmp_path)
+
+    assert f"git at {tmp_path.resolve() / 'git.exe'} is inside" in str(error)
     assert "git.EXE" not in str(error)
+
+
+def test_symlinked_entry_is_the_skipped_tool_and_target_is_info(tmp_path: Path) -> None:
+    target = tmp_path / "outside" / "real-az"
+    target.parent.mkdir()
+    target.write_bytes(b"")
+    link = tmp_path / "project" / "az"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+
+    message = str(ProjectShadowedExecutableError("az", str(link), tmp_path / "project"))
+
+    assert (
+        f"az at {link.parent.resolve() / 'az'} (symlink to {target.resolve()}) is inside" in message
+    )
+
+
+def test_powershell_message_names_whichever_candidate_was_shadowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.commands import self_update
+
+    _project, bindir, _tool = _project_with_tool(tmp_path, monkeypatch, "pwsh")
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    with (
+        patch("os.get_exec_path", return_value=[str(bindir)]),
+        pytest.raises(FileNotFoundError) as excinfo,
+    ):
+        self_update._get_installer_run_command("install.ps1")
+
+    assert "pwsh at" in str(excinfo.value)
+    assert "is inside the project" in str(excinfo.value)
+
+
+def test_runtime_helper_names_later_candidate_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.runtime.manager import _required_helper
+
+    _project, bindir, _tool = _project_with_tool(tmp_path, monkeypatch, "powershell")
+
+    with (
+        patch("os.get_exec_path", return_value=[str(bindir)]),
+        pytest.raises(FileNotFoundError, match="is inside the project"),
+    ):
+        _required_helper("pwsh", "powershell")
+
+
+def test_llm_runtime_surfaces_the_shadow_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.runtime.llm_runtime import LLMRuntime
+
+    _project, bindir, _tool = _project_with_tool(tmp_path, monkeypatch, "llm")
+
+    with (
+        patch("os.get_exec_path", return_value=[str(bindir)]),
+        pytest.raises(RuntimeError, match="is inside the project"),
+    ):
+        LLMRuntime()
+
+
+def test_ado_auth_failure_context_names_shadowed_az(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.core.azure_cli import AzureCliBearerProvider
+
+    _project, bindir, tool = _project_with_tool(tmp_path, monkeypatch, "az")
+
+    with patch("os.get_exec_path", return_value=[str(bindir)]):
+        provider = AzureCliBearerProvider()
+
+    assert provider.is_available() is False
+    assert str(tool.resolve()) in (provider.shadow_notice or "")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PATHEXT spelling is a Windows behavior")
