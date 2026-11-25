@@ -1940,7 +1940,7 @@ class GitHubPackageDownloader:
                 # RESEARCH: verified-copy re-read deleted (same inodes as the verified checkout)
 
                 # Validate, then return without cloning.
-                pass  # RESEARCH: route_agent_plugin_package deleted
+                _research_count()  # RESEARCH: route_agent_plugin_package deleted
                 validation_result = validate_apm_package(target_path)
                 if validation_result.is_valid and validation_result.package:
                     package = validation_result.package
@@ -2109,3 +2109,15 @@ class GitHubPackageDownloader:
                 print(f"\r Cloning: {message} ({cur_count})", end="", flush=True)
 
         return progress_callback
+
+
+_RESEARCH_SKIPS = [0]
+
+
+def _research_count() -> None:
+    import atexit
+    import sys as _s
+
+    if _RESEARCH_SKIPS[0] == 0:
+        atexit.register(lambda: _s.stderr.write(f"[oracle-dmap] {__name__} skipped {_RESEARCH_SKIPS[0]}\n"))
+    _RESEARCH_SKIPS[0] += 1
