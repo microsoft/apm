@@ -23,6 +23,10 @@ def snapshot(project: Path) -> dict[str, str]:
             if rel in SKIP_FILES or rel.endswith("/.apm-local/installation"):
                 continue
             data = path.read_bytes() if not path.is_symlink() else b"LINK:" + os.readlink(path).encode()
+            # Each side installs into its own project dir; #5418 embeds that absolute
+            # path in the lockfile, so fold it to a token before comparing.
+            for form in {str(project), project.as_posix()}:
+                data = data.replace(form.encode(), b"<PROJECT>")
             if name.endswith(".lock.yaml") or name == "apm.lock.yaml":
                 data = b"\n".join(l for l in data.splitlines() if not any(v.encode() in l for v in VOLATILE))
             mode = stat.S_IMODE(os.lstat(path).st_mode)
@@ -35,6 +39,7 @@ def snapshot(project: Path) -> dict[str, str]:
 
 
 failures = 0
+SUMMARY = []
 work = Path(tempfile.mkdtemp()).resolve()  # W: long form, as in the bench world
 def _one(name):
     global failures
@@ -52,7 +57,9 @@ def _one(name):
     base, new = shots["base"], shots["new"]
     broot, nroot = shots["base_root"], shots["new_root"]
     diffs = sorted(k for k in base.keys() | new.keys() if base.get(k) != new.get(k))
-    print(f"DIFF {name}: files base={len(base)} new={len(new)} differing={len(diffs)}", flush=True)
+    line = f"DIFF {name}: files base={len(base)} new={len(new)} differing={len(diffs)}"
+    SUMMARY.append(line + ("" if not diffs else " first=" + ",".join(diffs[:3])))
+    print(line, flush=True)
     for rel in diffs[:40]:
         print(f"   {rel}: base={base.get(rel, '-')[:12]} new={new.get(rel, '-')[:12]}")
     for rel in diffs[:3]:
@@ -68,6 +75,9 @@ for name in FIXTURES:
         _one(name)
     except BaseException as exc:  # a failed install is unequal output, not a pass
         failures += 1
-        print(f"DIFF {name}: ERROR {type(exc).__name__}: {str(exc)[-600:]}", flush=True)
+        SUMMARY.append(f"DIFF {name}: ERROR {type(exc).__name__}: {str(exc)[-200:]}")
+        print(SUMMARY[-1], flush=True)
+for line in SUMMARY:
+    print("SUMMARY " + line.replace("\n", " "), flush=True)
 print("DIFF RESULT:", "IDENTICAL" if not failures else f"{failures} fixture(s) differ")
 sys.exit(1 if failures else 0)
