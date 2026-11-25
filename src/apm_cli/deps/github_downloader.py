@@ -3,6 +3,7 @@
 import contextlib
 import logging
 import os
+import shutil
 import re
 import subprocess
 import sys
@@ -1936,7 +1937,7 @@ class GitHubPackageDownloader:
                         if os.path.islink(_src):
                             robust_copy_entry(Path(_src), _dest / _name)
                         else:
-                            os.link(_src, _dest / _name)
+                            shutil.copyfile(_src, _dest / _name)  # RESEARCH: plain copy, no copystat, no reflink try
                 # RESEARCH: verified-copy re-read deleted (same inodes as the verified checkout)
 
                 # Validate, then return without cloning.
