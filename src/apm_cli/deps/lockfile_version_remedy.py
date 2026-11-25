@@ -46,7 +46,8 @@ def _with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
         # Under `apm install --root` a bare `apm install` would act on the source repo.
         deploy_dir = path.resolve().parent
         regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.resolve())
-        regen = regen.with_command(f"apm install --root {deploy_dir}")
+        shown = f'"{deploy_dir}"' if any(c.isspace() for c in str(deploy_dir)) else deploy_dir
+        regen = regen.with_command(f"apm install --root {shown}")
     else:
         regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
         if is_user_scope_root(path.parent):

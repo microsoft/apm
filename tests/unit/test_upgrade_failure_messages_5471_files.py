@@ -53,6 +53,22 @@ def test_lockfile_parse_error_under_root_override_names_absolute_path_and_root(
     assert f"run 'apm install --root {deploy.resolve()}'" in text
 
 
+def test_lockfile_parse_error_root_with_space_is_double_quoted(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    deploy = tmp_path / "deploy root"
+    source.mkdir()
+    deploy.mkdir()
+    lock = deploy / "apm.lock.yaml"
+    lock.write_text("lockfile_version: '1'\ndependencies: [unclosed\n", encoding="utf-8")
+    set_source_root_override(source)
+    try:
+        with pytest.raises(LockfileFormatError) as refusal:
+            LockFile.read(lock)
+    finally:
+        set_source_root_override(None)
+    assert f"run 'apm install --root \"{deploy.resolve()}\"'" in str(refusal.value)
+
+
 def test_frozen_under_blocking_mcp_policy_leads_with_the_policy_refusal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
