@@ -46,3 +46,5 @@
 01:39 | harness fold pushed ceo-report a4998801, nongithub-host 3a93e3d9 (#5381 skipped: no helper); #5377 W real 0.542 [45519097336] in body | CI+Copilot ~30 min | none
 01:55 | #5382 f755bf58 H8-ready (green, Copilot@head, 0 threads); #5377 a81928ff green, Copilot pending | Copilot ~15 min | none
 02:05 | #5382 H8 SIGNED f755bf58 (after #5374); #5377 a81928ff Copilot@head, 0 threads, green -> QL pinged for H8 | train | none
+02:06 | H8 SIGNED #5377 a81928ff + #5382 f755bf58; both admitted to train (CI&MQ) | landing | none
+02:08 | v0.40 integrate-shape prep started; profiles main W/L t50 dispatched (PROFILE=1) | shapes 03:30 | none
