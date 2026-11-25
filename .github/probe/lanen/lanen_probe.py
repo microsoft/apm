@@ -33,6 +33,21 @@ def lock_digest(root: Path) -> str:
     return hashlib.sha256(b"\n".join(lines)).hexdigest()[:12]
 
 
+def deployed_digest(root: Path) -> str:
+    """Every file outside apm_modules/.git/.apm-local, path + bytes + mode."""
+    h = hashlib.sha256()
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in ("apm_modules", ".git", ".apm-local"))
+        for name in sorted(files):
+            if name == "apm.lock.yaml":
+                continue
+            p = Path(dirpath) / name
+            h.update(p.relative_to(root).as_posix().encode())
+            h.update(oct(p.lstat().st_mode & 0o777).encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
 work = Path(tempfile.mkdtemp())
 fixture = prepare_fixture(FIX, work)
 with open_world(fixture, work / "world") as world:
@@ -47,7 +62,10 @@ with open_world(fixture, work / "world") as world:
         with tempfile.TemporaryFile() as o, tempfile.TemporaryFile() as e:
             rc, cpu = _run_measured(argv, 900, cwd=root, env=env or world.env, stdout=o, stderr=e)
             e.seek(0)
-            return rc, cpu, e.read().decode(errors="replace")
+            err = e.read().decode(errors="replace")
+            if rc != 0:
+                say("cmd_failed", {"argv": [str(a) for a in argv][:4], "rc": rc, "stderr_tail": err[-1500:]})
+            return rc, cpu, err
 
     modfile = work / "modules.txt"
     root = cold()
@@ -84,7 +102,7 @@ with open_world(fixture, work / "world") as world:
     say("counts", {"rc": rc, **json.loads(out.read_text())})
 
     if os.name != "nt":
-        env = dict(world.env, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES")
+        env = dict(world.env, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES")  # both modes get exactly this env
         srv = subprocess.Popen([str(PY), str(HERE / "server.py"), str(modfile)], cwd=root, env=env,
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         say("forkserver", json.loads(srv.stdout.readline()))
@@ -93,7 +111,7 @@ with open_world(fixture, work / "world") as world:
             for side in (("sub", "fork") if i % 2 == 0 else ("fork", "sub")):
                 root = cold()
                 if side == "sub":
-                    rc, cpu, _ = measured([str(NEW), "install"], root)
+                    rc, cpu, _ = measured([str(NEW), "install"], root, env=env)
                     base.append(cpu)
                 else:
                     srv.stdin.write(json.dumps({"cwd": str(root), "env": env}) + "\n")
@@ -103,7 +121,7 @@ with open_world(fixture, work / "world") as world:
                     fork.append(cpu)
                 if rc != 0:
                     say("error", {"side": side, "rc": rc})
-                digests.add((side, lock_digest(root)))
+                digests.add((side, lock_digest(root), deployed_digest(root)))
         srv.stdin.close()
         ratios = [f / b for f, b in zip(fork, base)]
         say("fork_oracle", {"pairs": len(base), "sub_cpu_p50": round(statistics.median(base), 3),
