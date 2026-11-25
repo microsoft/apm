@@ -279,3 +279,7 @@
 03:30 | tick; notes dc4b631479a1ac1457feeeb7b91099531c35665e | SoL W stacked ~03:55; QL re-H8 #5382 | none
 03:33 | W stacked 0.568 (~7.1 s, at target) [45532025700]; sec1 FINAL; SoL starts Lane N | doc assembly; QL #5382 | none
 03:35 | design doc REVIEW COPY v1 assembled (620 lines) -> arch-notes ea4427ac, VP review by 10:00; Lane N plan approved (oracles first) | VP review; SoL oracles; QL #5382 | none
+03:37 | doc v2: VP edits 1-6,8 applied; W softened 'at or near' pending schannel 9V74 calibration (SoL) | notes 8a05b6a971220b93b7389c347154cb370d2efe14 | none
+03:40 | tick quiet | SoL schannel calib ~20 min + oracles; QL #5382 | none
+03:42 | #5382 QL re-H8 pending ~40 min -> VP nudge; default eject at 04:45 | QL; SoL calib | #5382 H8 latency
+03:43 | #5382 H8 already signed 03:07 (desk row 387, desk DB d42f94a1 inbox.db); my risk flag was wrong; check desk H8 rows first | SoL calib | none
