@@ -19,6 +19,7 @@ import pytest
 pytestmark = [
     pytest.mark.component,
     pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
+    pytest.mark.platform_sensitive,
     pytest.mark.skipif(sys.platform != "darwin", reason="macOS extended ACLs"),
 ]
 

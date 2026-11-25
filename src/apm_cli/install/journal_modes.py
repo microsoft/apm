@@ -208,8 +208,19 @@ def _macos_acl_api() -> Any:
 def _macos_acl(path: Path) -> bool:
     """Whether *path* itself (never a link's target) has an extended ACL entry (#5178).
 
-    ``OSError`` when the ACL cannot be read; none, unsupported or nothing there is False.
+    ``OSError`` when the ACL cannot be read, including any failure of the libc
+    binding itself, so the caller keeps the unit; none, unsupported or nothing
+    there is False.
     """
+    try:
+        return _read_macos_acl(path)
+    except OSError:
+        raise
+    except Exception as exc:  # a broken binding is an unreadable ACL, never a crash
+        raise OSError(errno.EIO, f"cannot read the ACL: {exc}", str(path)) from exc
+
+
+def _read_macos_acl(path: Path) -> bool:
     import ctypes
 
     libc = _macos_acl_api()
