@@ -1103,3 +1103,53 @@ def test_hook_swapped_to_link_during_sharing_retry_is_consent_kept(
     assert result.skipped_user_edit == []
     assert rel in result.skipped_unmanaged
     assert rel in evidence.kept_under_consent()
+
+
+def _held_then_swapped_to_dir(target: Path):
+    """A Path.unlink double: the first unlink of *target* swaps in a non-empty dir, held."""
+    real_unlink = Path.unlink
+    calls = []
+
+    def swap(path, *args, **kwargs):
+        if path != target:
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        real_unlink(path)
+        path.mkdir()
+        (path / "keep.txt").write_text("precious\n", encoding="utf-8")
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    return swap, calls
+
+
+@pytest.mark.parametrize("content", ["as deployed\n", ""], ids=["content", "empty-file"])
+def test_directory_swapped_in_during_sharing_retry_is_never_deleted(
+    project_root, diagnostics, content
+):
+    """A held file replaced by a non-empty directory mid-backoff is kept intact (#5441)."""
+    rel = ".github/prompts/held.prompt.md"
+    target = _make_managed_file(project_root, rel, content)
+    recorded = _recorded(project_root, rel)
+    swap, calls = _held_then_swapped_to_dir(target)
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=swap),
+    ):
+        result = remove_stale_deployed_files(
+            [rel],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
+            recorded_hashes=recorded,
+        )
+
+    assert len(calls) == 1
+    assert result.deleted == []
+    assert (target / "keep.txt").read_text(encoding="utf-8") == "precious\n"
+    assert rel in result.skipped_user_edit or rel in result.failed

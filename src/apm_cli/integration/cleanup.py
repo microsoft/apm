@@ -46,6 +46,7 @@ import io
 import os
 import posixpath
 import shlex
+import stat
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
@@ -1967,9 +1968,19 @@ def _stale_content_outcome(
             return None
         return lambda: _keep_replaced_by_link(result, diagnostics, stale_path, dep_key)
     verdict = evidence.verdict(stale_path, stale_target)
+    if verdict == AUTHORIZED and not _is_regular_or_gone(stale_target):
+        verdict = UNREADABLE  # a hash of a non-file is the empty hash: never proof
     if verdict == AUTHORIZED:
         return None
     return lambda: _keep_without_evidence(result, diagnostics, stale_path, verdict, dep_key)
+
+
+def _is_regular_or_gone(path: Path) -> bool:
+    """Whether *path* is a regular file (or absent, which unlink reports itself)."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return True
 
 
 def _keep_replaced_by_link(
