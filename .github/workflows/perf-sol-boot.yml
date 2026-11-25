@@ -1,15 +1,15 @@
-name: Perf SoL trace (research)
+name: Perf SoL fast-path differential (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace]
+    branches: [perf-research/arch-fastdiff]
 
 permissions:
   contents: read
 
 jobs:
-  trace:
-    name: trace ${{ matrix.os }}
+  diff:
+    name: diff ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -30,27 +30,20 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: false
-      - name: Install product e62f520f
+      - name: Install product (main)
         run: |
           set -euo pipefail
-          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git e62f520f4bfc569d7a07e02d93d8273613742678
+          git -C harness fetch --quiet --no-tags https://github.com/${GITHUB_REPOSITORY}.git 1e4a208e073a3ea1484f71ceba8d065f23a815ec
           git -C harness worktree add --quiet --detach ../side FETCH_HEAD
           (cd side && uv sync --frozen --no-editable --quiet)
           if [ "$RUNNER_OS" = Windows ]; then APM=side/.venv/Scripts/apm.exe; else APM=side/.venv/bin/apm; fi
           echo "APM_ABS=$GITHUB_WORKSPACE/$APM" >> "$GITHUB_ENV"
           (cd harness && uv sync --frozen --extra dev --quiet)
-      - name: Traced locked-warm + warm
+      - name: Differential
         working-directory: harness
-        env:
-          APM_INSTALL_FAST_PATH: trace
-          APM_BENCH_PASS_ENV: APM_INSTALL_FAST_PATH
-          APM_BENCH_NO_IMPORTTIME: "1"
-        run: |
-          set -euo pipefail
-          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-locked-warm,install-warm --rtt 0 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
-          grep -h "install fast path" "$GITHUB_WORKSPACE"/out/stderr/*.txt | sort | uniq -c
+        run: uv run --frozen python scripts/perf/fastpath_diff.py "$APM_ABS" "$GITHUB_WORKSPACE/work" "$GITHUB_WORKSPACE/out/diff-${{ matrix.os }}.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: trace-${{ matrix.os }}
+          name: diff-${{ matrix.os }}
           path: out/
