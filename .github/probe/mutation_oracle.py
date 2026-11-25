@@ -12,7 +12,7 @@ sys.path.insert(0, os.getcwd())
 from tests.benchmarks.journeys import Context, open_world, prepare_fixture  # noqa: E402
 
 FIXTURES = os.environ.get("ORACLE_FIXTURES", "tree-10-mcp").split(",")
-LIMIT = int(os.environ.get("ORACLE_LIMIT", "160"))
+LIMIT = int(os.environ.get("ORACLE_LIMIT", "260"))
 NEW_APM = os.environ["NEW_APM"]
 PY = str(Path(NEW_APM).parent / "python")
 NO_HIT = ("CI", "GITHUB_ACTIONS", "TF_BUILD", "JENKINS_URL", "BUILD_ID", "TEAMCITY_VERSION",
@@ -30,6 +30,17 @@ def hook(event, args):
     elif event in ("os.listdir", "os.scandir") and args and args[0] is not None:
         reads.add(("dir", os.fsdecode(args[0]) if not isinstance(args[0], int) else str(args[0])))
 sys.addaudithook(hook)
+_stat, _lstat = os.stat, os.lstat
+def _probe(real):
+    def wrapped(path, *a, **k):
+        try:
+            return real(path, *a, **k)
+        except FileNotFoundError:
+            if isinstance(path, (str, bytes, os.PathLike)):
+                reads.add(("absent", os.fsdecode(path)))
+            raise
+    return wrapped
+os.stat, os.lstat = _probe(_stat), _probe(_lstat)
 sys.argv = ["apm", "install"]
 from apm_cli.entrypoint import main
 try:
@@ -82,6 +93,17 @@ def mutate(path: str, kind: str):
             probe.write_text("oracle\n")
             return lambda: probe.unlink(missing_ok=True)
         return None
+    if kind == "absent-dir":
+        if not p.exists() and p.parent.is_dir():
+            p.mkdir()
+            (p / "oracle.md").write_text("oracle\n")
+            return lambda: shutil.rmtree(p, ignore_errors=True)
+        return None
+    if kind == "absent":
+        if not p.exists() and p.parent.is_dir():
+            p.write_text("oracle\n")
+            return lambda: p.unlink(missing_ok=True)
+        return None
     if p.is_file() and not p.is_symlink():
         data = p.read_bytes()
         p.write_bytes(data + (b"\n# oracle\n" if not data.endswith(b"\0") else b"\0"))
@@ -114,16 +136,23 @@ for name in FIXTURES:
         roots = [str(root), str(world.apm_home), str(Path(world.env.get("HOME", root)))]
         cands = [(k, p) for k, p in reads if any(p.startswith(r) for r in roots)
                  and "/verdicts/" not in p and not p.endswith((".pyc", ".py")) and "/.venv/" not in p]
-        cands = sorted(set(cands))[:LIMIT]
+        extra = [("absent-dir", p) for k, p in cands if k == "absent" and "." not in os.path.basename(p)]
+        rank = lambda c: (0 if c[1].startswith(str(root)) else 1 if c[1].startswith(str(world.apm_home)) is False else 2, c)
+        cands = sorted(set(cands) | set(extra), key=rank)[:LIMIT]
+        counts = {"hit": 0, "miss": 0, "skip": 0}
         print(f"ORACLE {name}: {len(reads)} reads, {len(cands)} candidates", flush=True)
         watched = [str(root), str(world.apm_home), str(Path(world.env.get("HOME", root)))]
         for kind, path in cands:
             undo = mutate(path, kind)
             if undo is None:
+                counts["skip"] += 1
                 continue
             try:
                 code, out, err = run(world, root, APM_INSTALL_FAST_PATH="verdict")
                 hit = "verdict record: hit" in err or "attested hit" in err
+                counts["hit" if hit else "miss"] += 1
+                if os.environ.get("ORACLE_VERBOSE"):
+                    print(f"ORACLE {'HIT ' if hit else 'miss'} {kind} {path}", flush=True)
                 if hit:
                     before = state(watched)
                     fcode, fout, _ferr = run(world, root, APM_INSTALL_FAST_PATH="0")
@@ -141,6 +170,7 @@ for name in FIXTURES:
                 if not converge(world, root):
                     print(f"ORACLE {name}: could not reconverge after {path}", flush=True)
                     break
+    print(f"ORACLE {name} counts: {counts}", flush=True)
 print(f"ORACLE RESULT: {len(findings)} finding(s)")
 for f in findings:
     print("ORACLE ROW", *f)
