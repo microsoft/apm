@@ -1683,12 +1683,19 @@ def test_the_engine_fast_path_declines_for_a_routable_instruction(
     diff_apply._refuse_claude_carried_rules(project, [SimpleNamespace(compile_family="x")], lock)
 
 
-def test_the_replay_and_the_engine_share_one_carrier_owner(project: Path) -> None:
+def test_the_replay_and_the_engine_share_one_carrier_owner(project: Path, capsys) -> None:
+    """Every root carrier the engine's predicate names also stops the record and the replay."""
     from apm_cli.compilation.claude_agents_md import compiled_agents_md_may_carry
-    from apm_cli.core.agents_md_compile_record import ROOT_CARRIERS, may_carry
+    from apm_cli.core.agents_md_compile_record import ROOT_CARRIERS
 
     for name in ROOT_CARRIERS:
         (project / name).write_text(_CARRIER, encoding="utf-8")
-        assert may_carry(project) and compiled_agents_md_may_carry(project)
+        assert compiled_agents_md_may_carry(project)
+        _record()
+        capsys.readouterr()
+        _assert_replays(False)
         (project / name).unlink()
-    assert not may_carry(project) and not compiled_agents_md_may_carry(project)
+    assert not compiled_agents_md_may_carry(project)
+    _record()
+    capsys.readouterr()
+    _assert_replays(True)
