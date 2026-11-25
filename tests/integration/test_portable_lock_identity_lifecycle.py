@@ -73,8 +73,8 @@ def test_two_clones_write_byte_identical_lockfiles(tmp_path: Path, apm_binary_pa
     world.apm("install", cwd=app_a)
     world.apm("install", cwd=app_b)
 
-    assert lock_bytes(app_a) == lock_bytes(app_b)
-    text = lock_bytes(app_a).decode("utf-8")
+    text = (app_a / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert (app_b / "apm.lock.yaml").read_text(encoding="utf-8") == text
     assert str(world.sources) not in text
     assert str(world.sources.resolve()) not in text
     (row,) = _transitive_rows(app_a)
@@ -98,11 +98,16 @@ def test_outside_repository_and_no_repository_keep_absolute(
     app = _monorepo(world, repo, outside=outside)
     world.git(repo, "init", "-q", "--initial-branch=main")
     world.apm("install", cwd=app)
+    text = (app / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert f"anchored_local_path: {outside.resolve().as_posix()}" in text
+    assert "anchored_local_path: ../../packages/lib-b" in text
     anchors = {row["anchored_local_path"] for row in _transitive_rows(app)}
     assert anchors == {"../../packages/lib-b", outside.resolve().as_posix()}
 
     plain = world.sources / "plain"
     plain_app = _monorepo(world, plain)
     world.apm("install", cwd=plain_app)
+    plain_text = (plain_app / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert "anchored_local_path: ../" not in plain_text
     (row,) = _transitive_rows(plain_app)
     assert row["anchored_local_path"] == (plain / "packages" / "lib-b").resolve().as_posix()

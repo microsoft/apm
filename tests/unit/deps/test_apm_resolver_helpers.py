@@ -10,7 +10,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
-from apm_cli.deps.local_identity import root_local_dirs, transitive_local_identity
+from apm_cli.deps.local_identity import (
+    portable_anchor_identity,
+    root_local_dirs,
+    transitive_local_identity,
+)
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
 from apm_cli.models.apm_package import DependencyReference
@@ -712,3 +716,116 @@ def test_production_reaches_a_shared_leaf_in_either_dev_order(
     assert dev_flags["./packages/lib"] is False, dev_flags
     assert dev_flags["local:packages/leaf"] is False, dev_flags
     assert dev_flags["./packages/a"] is True, dev_flags
+
+
+class TestRepositoryRelativeAnchorIdentity:
+    """#5418: a monorepo sibling (outside the project root, inside its
+    repository) is recorded relative to the project root with ``../``, so two
+    clones at different paths write one identity. Anything outside the
+    repository keeps the resolved absolute identity.
+    """
+
+    @staticmethod
+    def _monorepo(root: Path, git: str = "dir") -> tuple[Path, Path]:
+        app = root / "apps" / "app"
+        lib = root / "packages" / "lib-a"
+        app.mkdir(parents=True)
+        lib.mkdir(parents=True)
+        if git == "dir":
+            (root / ".git").mkdir()
+        elif git == "file":
+            (root / ".git").write_text("gitdir: ../.git/worktrees/x\n", encoding="ascii")
+        return app, lib
+
+    @pytest.fixture(autouse=True)
+    def _home_elsewhere(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+
+    def test_inside_base_unchanged(self, tmp_path: Path) -> None:
+        app, _ = self._monorepo(tmp_path / "repo")
+        identity = portable_anchor_identity(app / "vendor" / "x", app)
+        assert identity == "vendor/x"
+
+    @pytest.mark.parametrize("git", ["dir", "file"])
+    def test_sibling_in_same_repository_is_dotdot_relative(self, tmp_path: Path, git: str) -> None:
+        app, lib = self._monorepo(tmp_path / "repo", git)
+        identity = portable_anchor_identity(lib, app)
+        assert identity == "../../packages/lib-a"
+
+    def test_two_clones_write_one_identity(self, tmp_path: Path) -> None:
+        app_a, lib_a = self._monorepo(tmp_path / "A")
+        app_b, lib_b = self._monorepo(tmp_path / "nested" / "B")
+        assert portable_anchor_identity(lib_a, app_a) == portable_anchor_identity(lib_b, app_b)
+
+    def test_sibling_across_submodule_boundary_stays_absolute(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        app, lib = self._monorepo(repo)
+        (repo / "packages" / ".git").write_text("gitdir: ../.git/modules/p\n", encoding="ascii")
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+        sub_app = repo / "packages" / "app"
+        sub_app.mkdir()
+        identity = portable_anchor_identity(repo / "apps", sub_app)
+        assert identity == (repo / "apps").resolve().as_posix()
+
+    def test_symlinked_sibling_is_keyed_by_its_target(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        app, lib = self._monorepo(repo)
+        link = repo / "linked"
+        try:
+            link.symlink_to(lib, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        assert portable_anchor_identity(link, app) == ("../../packages/lib-a")
+        outside = tmp_path / "outside-pkg"
+        outside.mkdir()
+        escape = repo / "escape"
+        escape.symlink_to(outside, target_is_directory=True)
+        assert portable_anchor_identity(escape, app) == (outside.resolve().as_posix())
+
+    def test_outside_repository_stays_absolute(self, tmp_path: Path) -> None:
+        app, _ = self._monorepo(tmp_path / "repo")
+        outside = tmp_path / "elsewhere" / "pkg"
+        outside.mkdir(parents=True)
+        identity = portable_anchor_identity(outside, app)
+        assert identity == outside.resolve().as_posix()
+
+    def test_no_repository_stays_absolute(self, tmp_path: Path) -> None:
+        app, lib = self._monorepo(tmp_path / "plain", git="none")
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+
+    def test_dotfiles_home_repository_does_not_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "dotfiles-home"
+        app, lib = self._monorepo(home)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+
+    def test_repository_above_home_does_not_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app, lib = self._monorepo(tmp_path / "top")
+        home = tmp_path / "top" / "users" / "me"
+        home.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="drive letters are Windows-only")
+    def test_different_drive_stays_absolute(self, tmp_path: Path) -> None:
+        from apm_cli.deps import local_identity
+
+        app, _ = self._monorepo(tmp_path / "repo")
+        other = Path("Z:/pkg") if tmp_path.drive.upper() != "Z:" else Path("Y:/pkg")
+        with patch.object(local_identity, "repository_root", return_value=tmp_path / "repo"):
+            identity = local_identity.portable_anchor_identity(other, app)
+        assert ":" in identity
+        assert not identity.startswith("..")
