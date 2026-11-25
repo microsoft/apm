@@ -8206,8 +8206,8 @@ def test_every_stale_deleter_consumes_the_skip_set(
         pytest.param(
             "install-deployment-bundle-admission-owner",
             "src/apm_cli/install/local_bundle_handler.py",
-            "            bundled_deps=bundle_policy_subjects(bundle_info),\n",
-            "",
+            "        policy_subjects = bundle_policy_subjects(bundle_info)\n",
+            "        policy_subjects = ()\n",
             id="bundle-identity-skips-dependency-deny",
         ),
         pytest.param(
