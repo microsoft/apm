@@ -30,6 +30,16 @@ def main() -> None:
         command.main(args=sys.argv[1:])
         return
 
+    import os as _os
+
+    if _os.environ.get("APM_RESEARCH_PHASECPU"):
+        import atexit
+        import time as _time
+
+        sys.stderr.write(f"[phasecpu] main_at {_time.process_time():.4f} 0\n")
+        atexit.register(
+            lambda: sys.stderr.write(f"[phasecpu] exit_at {_time.process_time():.4f} 0\n")
+        )
     from apm_cli.install import verdict_record
 
     argv = sys.argv[1:]

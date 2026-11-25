@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import builtins
 import contextlib
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -99,6 +100,28 @@ list = builtins.list
 dict = builtins.dict
 
 
+def _research_phase_cpu(name, fn):
+    """RESEARCH ONLY: process CPU (all threads) + waited-for children CPU per phase."""
+    import sys as _sys
+
+    def _children() -> float:
+        try:
+            import resource
+
+            usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+            return usage.ru_utime + usage.ru_stime
+        except ImportError:
+            return 0.0
+
+    cpu0, kids0 = time.process_time(), _children()
+    try:
+        return fn()
+    finally:
+        _sys.stderr.write(
+            f"[phasecpu] {name} {time.process_time() - cpu0:.4f} {_children() - kids0:.4f}\n"
+        )
+
+
 def _run_phase(name: str, phase, ctx):
     """Invoke ``phase.run(ctx)`` with verbose-only timing (F6, #1116).
 
@@ -109,6 +132,8 @@ def _run_phase(name: str, phase, ctx):
     CI logs) can locate the phase responsible for a slow install
     without instrumenting individual sources.
     """
+    if os.environ.get("APM_RESEARCH_PHASECPU"):
+        return _research_phase_cpu(name, lambda: phase.run(ctx))
     logger = getattr(ctx, "logger", None)
     verbose = bool(getattr(ctx, "verbose", False))
     if not verbose or logger is None:
@@ -430,6 +455,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         allow_insecure_hosts: Extra approved hosts for transitive HTTP dependencies
         marketplace_provenance: Marketplace provenance data for packages
     """
+    if os.environ.get("APM_RESEARCH_PHASECPU"):
+        import sys as _sys
+
+        _sys.stderr.write(f"[phasecpu] pipeline_start_at {time.process_time():.4f} 0\n")
     # Late import: the ``APM_DEPS_AVAILABLE`` guard in commands/install.py
     # already prevents callers from reaching here when deps are missing, but
     # keep the check as a defensive belt-and-suspenders measure.
@@ -889,7 +918,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         # The lockfile is staged in its writer scope (#4086): the commit gate
         # checks it before that scope commits it (install/commit_gate.py).
-        LockfileBuilder(ctx).build_and_save()
+        _research_phase_cpu(
+            "lockfile_build", lambda: LockfileBuilder(ctx).build_and_save()
+        ) if os.environ.get("APM_RESEARCH_PHASECPU") else LockfileBuilder(ctx).build_and_save()
         check_before_lockfile(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
 
         # ------------------------------------------------------------------
