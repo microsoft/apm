@@ -29,7 +29,6 @@ import hashlib
 import json
 import os
 import shlex
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -85,16 +84,24 @@ def _lock_identity(workspace: Path) -> str | None:
         return None
 
 
-def shell_words(words: list[str]) -> str:
-    """*words* as one command line the user can paste into this platform's shell."""
+_WINDOWS_SPECIAL = frozenset(" \t\"&|^%$<>()!;,'`@{}")
+
+
+def _windows_word(word: str) -> str:
+    """Double-quote a word cmd or PowerShell would split or interpret; keep backslashes."""
+    if word and not _WINDOWS_SPECIAL.intersection(word):
+        return word
+    return '"' + word.replace('"', '""') + '"'
+
+
+def shell_words(words: list[str], *, windows: bool | None = None) -> str:
+    """*words* as one command line for this platform's shell (*windows* overrides it)."""
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     # The record is data on disk: never echo control or ANSI bytes to the terminal.
     safe = [printable_ascii_text(w) for w in words]
-    if os.name == "nt":
-        return subprocess.list2cmdline(
-            safe
-        )  # cmd/PowerShell quoting; backslash paths stay as typed
+    if os.name == "nt" if windows is None else windows:
+        return " ".join(_windows_word(w) for w in safe)
     return " ".join(shlex.quote(w) for w in safe)
 
 
@@ -270,6 +277,7 @@ def _same_link(record: dict[str, Any], target: Path, path: Path, logger: Any) ->
     followed: replay refuses and names the fix.
     """
     from apm_cli.install.errors import InstallFailureAlreadyRendered
+    from apm_cli.utils.diagnostics import printable_ascii_text
 
     link, resolved = record.get("link"), record.get("resolved")
     if _link_text(target) == link and (link is None or str(_resolved(target)) == resolved):
@@ -277,7 +285,8 @@ def _same_link(record: dict[str, Any], target: Path, path: Path, logger: Any) ->
     if logger is not None:
         logger.error(
             f"{target} is not the link an interrupted install found "
-            f"(it pointed to {link or 'no other file'}), so it was not restored. "
+            f"(it pointed to {printable_ascii_text(link) if link else 'no other file'}), "
+            "so it was not restored. "
             f"Check that {target.name} declares what you want, delete {path}, "
             "then run the command again."
         )
@@ -372,7 +381,7 @@ def replay_abandoned_manifest(workspace: Path, logger: Any, manifest: Path) -> N
             )
         return
     if prior is None:
-        target.unlink()
+        restore_to.unlink()  # the file the install created, never a link to it
     else:
         _restore_manifest_from_snapshot(restore_to, prior)  # a link stays a link
     _remove(path)

@@ -280,3 +280,24 @@ def test_a_symlinked_apm_yml_is_restored_through_its_link(workspace: Path) -> No
     assert other.read_bytes() == added.encode()
     assert journal.path.exists()
     assert f"delete {journal.path}" in logger.error.call_args.args[0]
+
+
+def test_a_dangling_link_bootstrap_removes_the_created_file_not_the_link(
+    workspace: Path,
+) -> None:
+    """With no prior apm.yml behind a link, replay removes the file the add created."""
+    (workspace / "apm.yml").unlink()
+    try:
+        (workspace / "apm.yml").symlink_to("created.yml")
+    except OSError:
+        pytest.skip("this platform cannot create a symbolic link here")
+    journal = ManifestJournal(workspace / "apm.yml", workspace, None, ["./x"])
+    journal.publish("name: proj\nversion: 1.0.0\ndependencies:\n  apm: [./x]\n")
+    assert (workspace / "created.yml").is_file()
+
+    replay_abandoned_manifest(workspace, MagicMock(), workspace / "apm.yml")
+
+    assert (workspace / "apm.yml").is_symlink(), "replay removed the link, not the file"
+    assert os.readlink(workspace / "apm.yml") == "created.yml"
+    assert not (workspace / "created.yml").exists()
+    assert not journal.path.exists()
