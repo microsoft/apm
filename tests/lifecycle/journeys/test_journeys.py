@@ -47,7 +47,6 @@ Journey YAML schema (``schema: 1``)
         key_lines: ["[+] ..."]   # must print (substring of the normalized output)
         file_lines: {apm.sarif: ['"level": "error"']}  # KEY: substrings of project files
         forbidden_lines: ["[!]"] # must not print
-        forbid_except: ["Claude Code does not load"]  # a forbidden line may print only with this
         docs:                    # O13 / O2 source of the step
           page: quickstart.mdx   # or /README.md (repository root)
           fence: <title>         # optional: the fence with this title= attribute
@@ -156,7 +155,7 @@ _JOURNEY_KEYS = {"schema", "id", "persona", "title", "docs", "steps"}
 _STEP_KEYS = {
     "n", "run", "exit", "edit", "cold_cache", "chdir", "converged", "drift", "git_clean",
     "files", "key_lines", "forbidden_lines", "docs", "help_docs", "remediate", "rerun",
-    "remediate_from", "note", "scope", "env", "file_lines", "diagnose", "forbid_except",
+    "remediate_from", "note", "scope", "env", "file_lines", "diagnose",
 }  # fmt: skip
 # O8 is split (#4571): O8a remediation advice, O8b diagnostic advice.
 _O_IDS = frozenset({*(f"O{i}" for i in range(1, 14) if i != 8), "O8a", "O8b"})
@@ -802,20 +801,9 @@ class JourneyRun:
     def _forbid(self, facts: _StepFacts) -> list[str]:
         found = []
         forbidden = [str(line) for line in facts.step.get("forbidden_lines") or ()]
-        # forbid_except: substrings of the one documented line a step may print
-        # despite a forbidden marker (an intended "[!]" warning, #5344).
-        excepted = [str(text) for text in facts.step.get("forbid_except") or ()]
-        guard = "".join(f"(?!.*{re.escape(text)})" for text in excepted)
-        facts.record(
-            "FORBID",
-            Evidence(output_forbids=[f"^{guard}.*{re.escape(line)}" for line in forbidden]),
-        )
+        facts.record("FORBID", Evidence(output_forbids=[re.escape(line) for line in forbidden]))
         for line in forbidden:
-            hits = [
-                t.strip()
-                for t in facts.text.splitlines()
-                if line in t and not any(text in t for text in excepted)
-            ]
+            hits = [t.strip() for t in facts.text.splitlines() if line in t]
             if hits:
                 found.append(f"forbidden {line!r} printed: {hits[0]!r}")
         return found

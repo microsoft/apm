@@ -18,6 +18,7 @@ from apm_cli.utils.yaml_io import load_yaml
 from tests.integration.test_required_lifecycle_state_machine import (
     _INSTALL_ARGS,
     _OWNER,
+    _PARALLEL_INSTALL_ARGS,
     _instruction,
     _new_scenario,
     _publish,
@@ -59,7 +60,7 @@ def test_apm_format_pack_ships_rules_claude_compiles_into_agents_md(
     _run_success(
         scenario, producer, _INSTALL_ARGS, environment=source.environment, scenario_id="install"
     )
-    assert not (producer.root / _RULE).exists(), "always-on rule now compiles into AGENTS.md"
+    assert (producer.root / _RULE).read_bytes() == legacy_rule, "no compile, so the rule stays"
 
     out = tmp_path / "bundles"
     _run_success(
@@ -118,7 +119,8 @@ def test_default_plugin_pack_ships_routed_instructions_like_legacy_layout(
             environment=source.environment,
             scenario_id=f"install-{consumer.root.name}",
         )
-    assert not (producer.root / _RULE).exists()
+    # No compiled AGENTS.md carries it, so the producer keeps the rule (#5343).
+    assert (producer.root / _RULE).read_bytes() == (legacy.root / _RULE).read_bytes()
 
     expected = _files(_pack(scenario, legacy, source, tmp_path / "legacy-out"))
     shipped = _files(_pack(scenario, producer, source, tmp_path / "producer-out"))
@@ -157,9 +159,8 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
 ) -> None:
     """``--target claude`` on a ``.claude/`` + ``.cursor/`` producer without ``targets:``.
 
-    Pack cannot see the CLI target. A recorded Claude deployment decides
-    (recorded targets win); without one, pack warns instead of dropping the
-    routed rule silently.
+    Pack cannot see the CLI target, but install keeps and records the rule
+    (#5343), so the recorded Claude deployment decides and the bundle ships it.
     """
     scenario = _new_scenario(tmp_path / "cli-target", apm_binary_path)
     source = _publish(
@@ -175,7 +176,7 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
         environment=source.environment,
         scenario_id="install",
     )
-    assert not (producer.root / _RULE).exists()
+    assert (producer.root / _RULE).is_file()
 
     out = tmp_path / "apm-out"
     packed = _run_success(
@@ -186,12 +187,9 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
         scenario_id="pack",
     )
     (bundle,) = [path for path in out.iterdir() if path.is_dir()]
-    if with_skill:
-        assert (bundle / _RULE).is_file()
-    else:
-        assert not (bundle / _RULE).exists()
-        text = packed.stdout + packed.stderr
-        assert "Skipped 1 Claude rule(s) routed to AGENTS.md" in " ".join(text.split()), text
+    assert (bundle / _RULE).read_bytes() == (producer.root / _RULE).read_bytes()
+    text = packed.stdout + packed.stderr
+    assert "Skipped" not in text, text
 
 
 def test_pack_refuses_routed_rules_from_an_apm_modules_copy_the_lock_does_not_attest(
@@ -226,7 +224,11 @@ def test_pack_refuses_routed_rules_from_an_apm_modules_copy_the_lock_does_not_at
 def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A routed rule never vanishes behind another dependency's same-path rule."""
+    """Same-named instructions from two packages never vanish silently (#5343).
+
+    Install keeps the first-declared package's rule whatever the fetch
+    order, names both packages, and pack refuses the bundle.
+    """
     scenario = _new_scenario(tmp_path / "shared-path", apm_binary_path)
     routed = _publish(scenario, "guard-kit", instruction="guard")
     scoped = _publish(
@@ -241,8 +243,30 @@ def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     environment = scenario.repositories.url_rewrite_subprocess_env_many(
         ((routed.repository, routed.remote_url), (scoped.repository, scoped.remote_url))
     )
-    _run_success(scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install")
-    assert "**/*.py" in (producer.root / _RULE).read_text(encoding="ascii")
+    collision = (
+        f"{_RULE}: guard-kit and python-kit both ship an instruction named 'guard'; kept "
+        "guard-kit's (declared first), skipped python-kit's. Rename one of the instruction files."
+    )
+    first = _run_success(
+        scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install"
+    )
+    assert collision in " ".join((first.stdout + first.stderr).split()), first.stdout
+    rule = (producer.root / _RULE).read_bytes()
+    assert b'- "**"' in rule and b"**/*.py" not in rule
+
+    # Refetch the first-declared package, in parallel, while the other stays
+    # cached: a different fetch order keeps the same winner.
+    (kit,) = [path for path in (producer.root / "apm_modules").rglob("guard-kit") if path.is_dir()]
+    shutil.rmtree(kit)
+    again = _run_success(
+        scenario,
+        producer,
+        _PARALLEL_INSTALL_ARGS,
+        environment=environment,
+        scenario_id="install-refetch",
+    )
+    assert collision in " ".join((again.stdout + again.stderr).split()), again.stdout
+    assert (producer.root / _RULE).read_bytes() == rule
 
     out = tmp_path / "bundles"
     result = scenario.runner.run(
@@ -254,6 +278,8 @@ def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode != 0, output
     assert f"Cannot pack {_RULE}" in output, output
+    assert "guard-kit" in output and "python-kit" in output, output
+    assert "Rename one of the instruction files." in output, output
     assert not out.exists() or not any(out.iterdir())
 
 

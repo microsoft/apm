@@ -71,11 +71,9 @@ def _bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-def _expect_install(
-    binary: Path, project: Path, env: dict[str, str], *, command: str = "install"
-) -> str:
+def _expect_install(binary: Path, project: Path, env: dict[str, str]) -> str:
     result = subprocess.run(
-        (str(binary), command),
+        (str(binary), "install"),
         cwd=project,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -96,8 +94,6 @@ def test_converged_install_reports_no_change(apm_binary_path: Path, tmp_path: Pa
 
     first = _expect_install(apm_binary_path, project, env)
     assert "Installed 1 APM dependency" in first, first
-    # Install warns until routed Claude instructions are compiled (#5344).
-    _expect_install(apm_binary_path, project, env, command="compile")
     converged = _bytes(project)
 
     second = _expect_install(apm_binary_path, project, env)

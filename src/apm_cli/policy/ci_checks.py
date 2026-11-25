@@ -23,7 +23,6 @@ from ..core import remediation
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
-from .claude_instructions_check import claude_instructions_result
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -2080,13 +2079,6 @@ def run_baseline_checks(
                     else project_root / APM_MODULES_DIR
                 ),
                 policy_provider=policy_provider,
-            )
-        )
-        # 8e: routed Claude instructions are compiled (#5344); project scope only.
-        or (
-            not user_scope
-            and _run(
-                claude_instructions_result(project_root, resolved_targets, prepared_replay, lock)
             )
         )
     ):
