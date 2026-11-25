@@ -48,7 +48,7 @@ POLICY_DOCUMENT = {
     "version": "1.0",
     "enforcement": "block",
     "dependencies": {"deny": ["evil-org/**", "**/forbidden-*"]},
-    "mcp": {"deny": ["evil-org/*"]},
+    "mcp": {"deny": ["evil-org/*"], "trust_transitive": True},
 }
 
 

@@ -189,6 +189,7 @@
     "P-OWN-user-invocable-resolution": "architecture owner (core-runtime.json): Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
     "P-OWN-user-root-scoped-instruction-eligibility": "architecture owner (hooks-integrations.json): User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
     "P-OWN-windows-stable-executable-path": "architecture owner (transport-auth-platform.json): Windows stable executable path",
+    "P-PERF-bench-same-output": "perf bench: a base-vs-new cell is a like-for-like measurement only when both sides deploy the same files and lockfile; otherwise the report marks it INVALID and fails",
     "req-cf-001": "spec openapm-v0.1 12.5 (MUST, consumer)",
     "req-cf-002": "spec openapm-v0.1 12.3 (MUST, consumer)",
     "req-ext-001": "spec openapm-v0.1 4.1 (MUST, consumer)",
