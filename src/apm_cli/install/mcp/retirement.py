@@ -166,6 +166,40 @@ def record_refused_retirement(
     )
 
 
+def reconcile_skipped_baseline(
+    name: str,
+    configs: tuple[dict, dict],
+    managed_target_servers: dict[str, builtins.set],
+    native_hashes: dict[str, dict[str, str]],
+    *,
+    skipped: builtins.set,
+) -> None:
+    """Keep the old declaration of *name* for the runtimes this run skipped (#4949).
+
+    A skipped runtime whose native key differs between the old and new
+    declaration drops its claim (its entry stays, unowned) and the new
+    declaration stays in the lock: the old baseline would retire the wrong key
+    and mask what the active runtimes wrote.
+    """
+    new_configs, old_configs = configs
+    stale = {
+        runtime
+        for runtime in skipped
+        if name in managed_target_servers.get(runtime, ())
+        and not declarations_share_native_key(
+            [runtime], name, old_configs.get(name), new_configs.get(name)
+        )
+    }
+    if not stale:
+        new_configs[name] = old_configs[name]
+        return
+    for runtime in stale:
+        managed_target_servers[runtime].discard(name)
+        native_hashes.get(runtime, {}).pop(name, None)
+        if not managed_target_servers[runtime]:
+            del managed_target_servers[runtime]
+
+
 def _concrete_retirements(
     planned: list[Retirement],
     owners: dict,

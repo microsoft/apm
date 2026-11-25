@@ -792,6 +792,7 @@ def run_mcp_integration(  # noqa: PLR0913
             names_owned_by_active_peers,
         )
         from apm_cli.install.mcp.retirement import (
+            reconcile_skipped_baseline,
             record_refused_retirement,
             retire_mcp_claims,
             stale_claim_remover,
@@ -815,6 +816,7 @@ def run_mcp_integration(  # noqa: PLR0913
             manifest_runtimes = _declared_manifest_runtimes(apm_package, user_scope=user_scope)
         retired_by_target: builtins.dict[str, builtins.set] = {}
         retained_names: builtins.set = builtins.set()
+        skipped_targets: builtins.set = builtins.set()
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
             if owned_target in managed_target_servers:
                 # Declared servers whose `targets:` no longer select this runtime.
@@ -834,6 +836,7 @@ def run_mcp_integration(  # noqa: PLR0913
             if kept:
                 managed_target_servers[owned_target] = kept
                 retained_names |= kept
+                skipped_targets.add(owned_target)
             retired_by_target[owned_target] = builtins.set(owned) - kept
         # A skipped target still holds the old declaration: keep that baseline
         # so its next install sees the drift and applies the new one.
@@ -841,7 +844,13 @@ def run_mcp_integration(  # noqa: PLR0913
             [dep for dep in mcp_deps if getattr(dep, "name", None) in retained_names],
             old_mcp_configs,
         ):
-            new_mcp_configs[name] = old_mcp_configs[name]
+            reconcile_skipped_baseline(
+                name,
+                (new_mcp_configs, old_mcp_configs),
+                managed_target_servers,
+                native_hashes,
+                skipped=skipped_targets,
+            )
         for removed_target, retired_names in retired_by_target.items():
             # An entry in a file the removed runtime shares (.mcp.json) stays
             # while an active runtime still owns it.
