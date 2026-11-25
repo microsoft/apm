@@ -39,3 +39,10 @@
 21:57 | QL: #5376 H8-signed 95017245, lands before #5377 -> at #5377 re-merge switch _caps_get AND _post to _requests_verify(trust[1]); W3d delta then H8. Do when PERF schedules (after 07:00). | 07:00 | none
 22:45 | QL reds on #5382 4737862e: AQ004 (test_realpath.py:239/247 win32 cell monkeypatch) -> rework via owner API; update fs.lstat_calls 3774 vs 3270 -> K lstats (_proven_answer leaf; _record_proof R1 head lstat even when head already proven); trim: skip _record_proof lstat when head in proofs, then counter run + justify remainder to PERF VP; Shard 2 = uv http2 infra, rerun. All at 07:00. | 07:00 | none
 22:44 | QL ack 07:00 plan. b) trim = SRC -> W3d walks vs R1/R2/R4 before H8; AQ004 rework carries. Rerun Shard 2 (run 45480188881) at 07:00 (night mode: no runs). | 07:00 | none
+01:03 | #5377 9ae2a685 W3d ACCEPT, benches dispatched; #5382 0bca2c4b (K only where no kernel form; merge #5374 427c0876 w/ #5372) pushed, W3d+Copilot+cells+benches | ~25 min | none
+01:16 | #5377 a81928ff W3d ACCEPT; #5382 0bca2c4b W3d ACCEPT, A/A + 15p W running; schannel probe dispatched perf-research/arch-probe-schannel on main 1e4a208e | 03:00 report | none
+01:23 | #5382 c8eb343f W3d ACCEPT (clear-all forget, .. guard); macOS rebench running; probe v2 re-dispatched (file missing first time) | ~20 min | none
+01:34 | schannel probe answered: harness artifact (isolated real world hides GfW system sslBackend); product engages on default GfW (run 45518723251). Harness fix perf-research/arch-bench-real-schannel; #5377 W real bench running. #5382 f755bf58 (macOS 0.900/0.890). SSH broken -> HTTPS via gh. | ~20 min | none
+01:39 | harness fold pushed ceo-report a4998801, nongithub-host 3a93e3d9 (#5381 skipped: no helper); #5377 W real 0.542 [45519097336] in body | CI+Copilot ~30 min | none
+01:55 | #5382 f755bf58 H8-ready (green, Copilot@head, 0 threads); #5377 a81928ff green, Copilot pending | Copilot ~15 min | none
+02:05 | #5382 H8 SIGNED f755bf58 (after #5374); #5377 a81928ff Copilot@head, 0 threads, green -> QL pinged for H8 | train | none

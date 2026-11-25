@@ -1,0 +1,498 @@
+ Current runner version: '2.338.2'
+##[group]Runner Image Provisioner
+Hosted Compute Agent
+Version: 20261111.635
+Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+Build Date: 2026-11-11T01:49:01Z
+Worker ID: {96082f46-3ac4-41a8-bd90-3d4a42ce2bcc}
+Region: eastus3
+Cloud: Azure
+##[endgroup]
+##[group]Operating System
+Microsoft Windows Server 2025
+10.0.26100
+Datacenter
+##[endgroup]
+##[group]Runner Image
+Image: windows-2025-vs2026
+Version: 20261116.315.1
+Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261116.315/images/windows/Windows2025-VS2026-Readme.md
+Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261116.315
+##[endgroup]
+##[group]GITHUB_TOKEN Permissions
+Contents: read
+Metadata: read
+##[endgroup]
+Secret source: Actions
+Cache mode: write
+Prepare workflow directory
+Prepare all required actions
+Getting action download info
+Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Download action repository 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0' (SHA:6d4fd22b20465ccc0f7354476588e8df7c9ca0e0)
+Download action repository 'astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2' (SHA:68559e99cc807c1eb7e9238fd43a15bba460eec2)
+Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+Complete job name: ABAB shard 3
+##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+with:
+  path: harness
+  persist-credentials: false
+  repository: microsoft/apm
+  token: ***
+  ssh-strict: true
+  ssh-user: git
+  clean: true
+  sparse-checkout-cone-mode: true
+  fetch-depth: 1
+  fetch-tags: false
+  show-progress: true
+  lfs: false
+  submodules: false
+  set-safe-directory: true
+  allow-unsafe-pr-checkout: false
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+##[endgroup]
+Syncing repository: microsoft/apm
+##[group]Getting Git version info
+Working directory is 'D:\a\apm\apm\harness'
+[command]"C:\Program Files\Git\bin\git.exe" version
+git version 2.56.1.windows.1
+##[endgroup]
+Temporarily overriding HOME='D:\a\_temp\6c6daafa-0cbc-4068-976f-8af18b97c04d' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+[command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\apm\apm\harness
+##[group]Determining repository object format
+##[endgroup]
+##[group]Initializing the repository
+[command]"C:\Program Files\Git\bin\git.exe" init D:\a\apm\apm\harness
+Initialized empty Git repository in D:/a/apm/apm/harness/.git/
+[command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/microsoft/apm
+##[endgroup]
+##[group]Disabling automatic garbage collection
+[command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+##[endgroup]
+##[group]Setting up auth
+Removing SSH command configuration
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Removing HTTP extra header
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Removing includeIf entries pointing to credentials config files
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+[command]"C:\Program Files\Git\bin\git.exe" config --file D:\a\_temp\git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+[command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/apm/apm/harness/.git.path D:\a\_temp\git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/apm/apm/harness/.git/worktrees/*.path D:\a\_temp\git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/harness/.git.path /github/runner_temp/git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/harness/.git/worktrees/*.path /github/runner_temp/git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+##[endgroup]
+##[group]Fetching the repository
+[command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +7006b4e93ea9f62b29a4b25d1d24abb45795de9c:refs/remotes/origin/perf-bench/a81928ff-1795566198-9f53fa
+From https://github.com/microsoft/apm
+ * [new ref]         7006b4e93ea9f62b29a4b25d1d24abb45795de9c -> origin/perf-bench/a81928ff-1795566198-9f53fa
+[command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/perf-bench/a81928ff-1795566198-9f53fa
+  origin/perf-bench/a81928ff-1795566198-9f53fa
+[command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/perf-bench/a81928ff-1795566198-9f53fa
+7006b4e93ea9f62b29a4b25d1d24abb45795de9c
+##[endgroup]
+##[group]Determining the checkout info
+##[endgroup]
+[command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+##[group]Checking out the ref
+[command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B perf-bench/a81928ff-1795566198-9f53fa refs/remotes/origin/perf-bench/a81928ff-1795566198-9f53fa
+Updating files:  72% (4058/5629)
+Updating files:  73% (4110/5629)
+Updating files:  74% (4166/5629)
+Updating files:  75% (4222/5629)
+Updating files:  76% (4279/5629)
+Updating files:  77% (4335/5629)
+Updating files:  78% (4391/5629)
+Updating files:  79% (4447/5629)
+Updating files:  80% (4504/5629)
+Updating files:  81% (4560/5629)
+Updating files:  82% (4616/5629)
+Updating files:  83% (4673/5629)
+Updating files:  84% (4729/5629)
+Updating files:  85% (4785/5629)
+Updating files:  86% (4841/5629)
+Updating files:  87% (4898/5629)
+Updating files:  88% (4954/5629)
+Updating files:  89% (5010/5629)
+Updating files:  90% (5067/5629)
+Updating files:  91% (5123/5629)
+Updating files:  92% (5179/5629)
+Updating files:  93% (5235/5629)
+Updating files:  94% (5292/5629)
+Updating files:  95% (5348/5629)
+Updating files:  96% (5404/5629)
+Updating files:  97% (5461/5629)
+Updating files:  98% (5517/5629)
+Updating files:  99% (5573/5629)
+Updating files: 100% (5629/5629)
+Updating files: 100% (5629/5629), done.
+Switched to a new branch 'perf-bench/a81928ff-1795566198-9f53fa'
+branch 'perf-bench/a81928ff-1795566198-9f53fa' set up to track 'origin/perf-bench/a81928ff-1795566198-9f53fa'.
+##[endgroup]
+[command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+7006b4e93ea9f62b29a4b25d1d24abb45795de9c
+##[group]Removing auth
+Removing SSH command configuration
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Removing HTTP extra header
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Removing includeIf entries pointing to credentials config files
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+includeif.gitdir:D:/a/apm/apm/harness/.git.path
+includeif.gitdir:D:/a/apm/apm/harness/.git/worktrees/*.path
+includeif.gitdir:/github/workspace/harness/.git.path
+includeif.gitdir:/github/workspace/harness/.git/worktrees/*.path
+[command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/apm/apm/harness/.git.path
+D:\a\_temp\git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/apm/apm/harness/.git.path D\:\\a\\_temp\\git\-credentials\-bfe7d75f\-7e1d\-4faa\-9cb8\-552d4cc1de6b\.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/apm/apm/harness/.git/worktrees/*.path
+D:\a\_temp\git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/apm/apm/harness/.git/worktrees/*.path D\:\\a\\_temp\\git\-credentials\-bfe7d75f\-7e1d\-4faa\-9cb8\-552d4cc1de6b\.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/harness/.git.path
+/github/runner_temp/git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/harness/.git.path \/github\/runner_temp\/git\-credentials\-bfe7d75f\-7e1d\-4faa\-9cb8\-552d4cc1de6b\.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/harness/.git/worktrees/*.path
+/github/runner_temp/git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/harness/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-bfe7d75f\-7e1d\-4faa\-9cb8\-552d4cc1de6b\.config
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+Removing credentials config 'D:\a\_temp\git-credentials-bfe7d75f-7e1d-4faa-9cb8-552d4cc1de6b.config'
+##[endgroup]
+##[group]Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+with:
+  python-version: 3.12
+  check-latest: false
+  token: ***
+  mirror: https://raw.githubusercontent.com/actions/python-versions/main
+  update-environment: true
+  allow-prereleases: false
+  freethreaded: false
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+##[endgroup]
+##[group]Installed versions
+Successfully set up CPython (3.12.10)
+##[endgroup]
+##[group]Run astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+with:
+  enable-cache: false
+  activate-environment: false
+  no-project: false
+  working-directory: D:\a\apm\apm
+  github-token: ***
+  cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+  restore-cache: true
+  save-cache: auto
+  prune-cache: false
+  cache-python: false
+  ignore-nothing-to-cache: false
+  ignore-empty-workdir: false
+  download-from-astral-mirror: true
+  add-problem-matchers: true
+  quiet: false
+  resolution-strategy: highest
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+##[endgroup]
+Trying to find version for uv in: D:\a\apm\apm\uv.toml
+Could not find file: D:\a\apm\apm\uv.toml
+Trying to find version for uv in: D:\a\apm\apm\pyproject.toml
+Could not find file: D:\a\apm\apm\pyproject.toml
+Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+Fetching manifest data from https://releases.astral.sh/github/versions/main/v1/uv.ndjson ...
+Downloading uv from "https://releases.astral.sh/github/uv/releases/download/0.13.10/uv-x86_64-pc-windows-msvc.zip" ...
+[command]C:\Windows\system32\tar.exe x -C D:\a\_temp\ba2f3cde-ff4d-4c09-9318-14a9344c6b75 -f D:\a\_temp\cfa6ad73-d2a3-47d0-8b91-342802f8a620
+Set UV_TOOL_BIN_DIR to D:\a\_temp\uv-tool-bin-dir
+Added D:\a\_temp\uv-tool-bin-dir to the path
+Added C:\hostedtoolcache\windows\uv\0.13.10\x86_64 to the path
+Set UV_TOOL_DIR to D:\a\_temp\uv-tool-dir
+Set UV_PYTHON_INSTALL_DIR to D:\a\_temp\uv-python-dir
+Added D:\a\_temp\uv-python-dir to the path
+Successfully installed uv version 0.13.10
+##[group]Run set -euo pipefail
+[36;1mset -euo pipefail[0m
+[36;1mfor side in base new; do[0m
+[36;1m  sha=$([ "$side" = base ] && echo "$BASE" || echo "$NEW")[0m
+[36;1m  git -C harness fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$sha"[0m
+[36;1m  git -C harness worktree add --quiet --detach "../$side" FETCH_HEAD[0m
+[36;1m  (cd "$side" && uv sync --frozen --no-editable --quiet)[0m
+[36;1m  echo "$side: $(git -C "$side" rev-parse HEAD) $("$side/$VENV_APM" --version)"[0m
+[36;1mdone[0m
+shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  UV_TOOL_BIN_DIR: D:\a\_temp\uv-tool-bin-dir
+  UV_TOOL_DIR: D:\a\_temp\uv-tool-dir
+  UV_PYTHON_INSTALL_DIR: D:\a\_temp\uv-python-dir
+##[endgroup]
+base: a81928ff8d58892051d1a0bfd6dd56edd77786d9 Agent Package Manager (APM) CLI version 0.38.1
+new: a81928ff8d58892051d1a0bfd6dd56edd77786d9 Agent Package Manager (APM) CLI version 0.38.1
+##[group]Run uv sync --frozen --extra dev --quiet
+[36;1muv sync --frozen --extra dev --quiet[0m
+shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  UV_TOOL_BIN_DIR: D:\a\_temp\uv-tool-bin-dir
+  UV_TOOL_DIR: D:\a\_temp\uv-tool-dir
+  UV_PYTHON_INSTALL_DIR: D:\a\_temp\uv-python-dir
+##[endgroup]
+##[group]Run "$GITHUB_WORKSPACE/new/.venv/Scripts/python.exe" harness/.github/probe/real_probe.py 2>&1 | tee probe.log
+[36;1m"$GITHUB_WORKSPACE/new/.venv/Scripts/python.exe" harness/.github/probe/real_probe.py 2>&1 | tee probe.log[0m
+shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  UV_TOOL_BIN_DIR: D:\a\_temp\uv-tool-bin-dir
+  UV_TOOL_DIR: D:\a\_temp\uv-tool-dir
+  UV_PYTHON_INSTALL_DIR: D:\a\_temp\uv-python-dir
+  HARNESS_DIR: D:\a\apm\apm/harness
+  PYTHONUNBUFFERED: 1
+##[endgroup]
+
+===== WORLD plain user env
+LOG in-process fetch https://github.com/microsoft/apm-sample-package: hit
+RESULT microsoft/apm-sample-package#v1.0.0 full sha=fb285168 HIT 0.72s git_rc=0
+LOG in-process fetch https://github.com/microsoft/apm: sparse hit
+RESULT microsoft/apm/packages/apm-guide#v0.37.0 sparse sha=c0c6e25d HIT 0.86s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/review-and-refactor#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.11s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/documentation-writer#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.11s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/agent-governance#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.11s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/api-breaking-change-detector#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.44s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/agents/janitor.agent.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 1.09s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/agents/principal-software-engineer.agent.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 1.17s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/instructions/go.instructions.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 1.08s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/instructions/security-and-owasp.instructions.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 1.14s git_rc=0
+
+===== WORLD bench real world (isolated + tunnel)
+LOG in-process fetch https://github.com/microsoft/apm-sample-package: hit
+RESULT microsoft/apm-sample-package#v1.0.0 full sha=fb285168 HIT 0.30s git_rc=0
+LOG in-process fetch https://github.com/microsoft/apm: sparse hit
+RESULT microsoft/apm/packages/apm-guide#v0.37.0 sparse sha=c0c6e25d HIT 0.98s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/review-and-refactor#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.33s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/documentation-writer#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.33s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/agent-governance#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.27s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: sparse hit
+RESULT github/awesome-copilot/skills/api-breaking-change-detector#f10fdb8b2660ce85c98f220b2f1ca24653768a5c sparse sha=f10fdb8b HIT 1.55s git_rc=0
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/agents/janitor.agent.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 0.62s git_rc=0
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 58230)
+Traceback (most recent call last):
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\http\server.py", line 436, in handle
+    self.handle_one_request()
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "D:\a\apm\apm/harness\tests\fixtures\perf\real_network.py", line 94, in do_CONNECT
+    self._pump(self.connection, upstream)
+  File "D:\a\apm\apm/harness\tests\fixtures\perf\real_network.py", line 112, in _pump
+    target.sendall(data)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+----------------------------------------
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/agents/principal-software-engineer.agent.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 0.59s git_rc=0
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 58238)
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/instructions/go.instructions.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 0.58s git_rc=0
+Traceback (most recent call last):
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\http\server.py", line 436, in handle
+    self.handle_one_request()
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "D:\a\apm\apm/harness\tests\fixtures\perf\real_network.py", line 94, in do_CONNECT
+    self._pump(self.connection, upstream)
+  File "D:\a\apm\apm/harness\tests\fixtures\perf\real_network.py", line 112, in _pump
+    target.sendall(data)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 58242)
+LOG in-process fetch https://github.com/github/awesome-copilot: fallback: response exceeds the size cap
+RESULT github/awesome-copilot/instructions/security-and-owasp.instructions.md#f10fdb8b2660ce85c98f220b2f1ca24653768a5c full sha=f10fdb8b NONE 0.62s git_rc=0
+Traceback (most recent call last):
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\http\server.py", line 436, in handle
+    self.handle_one_request()
+  File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "D:\a\apm\apm/harness\tests\fixtures\perf\real_network.py", line 94, in do_CONNECT
+    self._pump(self.connection, upstream)
+  File "D:\a\apm\apm/harness\tests\fixtures\perf\real_network.py", line 112, in _pump
+    target.sendall(data)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+----------------------------------------
+##[group]Run PROFILE_FLAG=()
+[36;1mPROFILE_FLAG=()[0m
+[36;1mif [ "$PROFILE" = 1 ] && [ "$SHARD" = 1 ]; then PROFILE_FLAG=(--profile); fi[0m
+[36;1muv run --frozen python -m tests.benchmarks.ci_bench abab "${PROFILE_FLAG[@]}" \[0m
+[36;1m  --base-apm "$GITHUB_WORKSPACE/base/$VENV_APM" \[0m
+[36;1m  --new-apm "$GITHUB_WORKSPACE/new/$VENV_APM" \[0m
+[36;1m  --pairs "$PAIRS" --fixtures "$FIXTURES" --journeys "$JOURNEYS" --rtt "$RTT" \[0m
+[36;1m  --out "$GITHUB_WORKSPACE/out/shard-$SHARD"[0m
+shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  UV_TOOL_BIN_DIR: D:\a\_temp\uv-tool-bin-dir
+  UV_TOOL_DIR: D:\a\_temp\uv-tool-dir
+  UV_PYTHON_INSTALL_DIR: D:\a\_temp\uv-python-dir
+  PAIRS: 1
+  FIXTURES: tree-10
+  JOURNEYS: install-cold
+  RTT: 30
+  SHARD: 3
+  PROFILE: 0
+  APM_BENCH_REAL_TOKEN: 
+##[endgroup]
+[>] pair 1/1 side base
+[+] tree-10 rtt=30 install-cold: p50=6.4351 p90=6.4351 valid=1/1 traffic={'connects': 4, 'requests': 21, 'round_trips': 29}
+[>] pair 1/1 side new
+[+] tree-10 rtt=30 install-cold: p50=5.437 p90=5.437 valid=1/1 traffic={'connects': 4, 'requests': 21, 'round_trips': 29}
+##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+with:
+  name: perf-bench-shard-3
+  path: out/shard-3/runs/**/*.json
+out/shard-3/runs/**/*.md
+out/shard-3/profile/*.md
+*.txt
+*.prof
+
+  if-no-files-found: warn
+  compression-level: 6
+  overwrite: false
+  include-hidden-files: false
+  archive: true
+env:
+  PYTHON_VERSION: 3.12
+  BASE: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  NEW: a81928ff8d58892051d1a0bfd6dd56edd77786d9
+  VENV_APM: .venv/Scripts/apm.exe
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  UV_TOOL_BIN_DIR: D:\a\_temp\uv-tool-bin-dir
+  UV_TOOL_DIR: D:\a\_temp\uv-tool-dir
+  UV_PYTHON_INSTALL_DIR: D:\a\_temp\uv-python-dir
+##[endgroup]
+Multiple search paths detected. Calculating the least common ancestor of all paths
+The least common ancestor is D:\a\apm\apm\out\shard-3. This will be the root directory of the artifact
+With the provided path, there will be 4 files uploaded
+Artifact name is valid!
+Root directory input is valid!
+Uploading artifact: perf-bench-shard-3.zip
+Beginning upload of artifact content to blob storage
+Uploaded bytes 3781
+Finished uploading artifact content to blob storage!
+SHA256 digest of uploaded artifact is 876a55911da6d763f3fc56147ae288f671c5fddaed6c4fdaff4537d3133b8bb1
+Finalizing artifact upload
+Artifact perf-bench-shard-3 successfully finalized. Artifact ID 14979540392
+Artifact perf-bench-shard-3 has been successfully uploaded! Final size is 3781 bytes. Artifact ID is 14979540392
+Artifact download URL: https://github.com/microsoft/apm/actions/runs/45517706712/artifacts/14979540392
+Post job cleanup.
+UV_PYTHON_INSTALL_DIR is already set to D:\a\_temp\uv-python-dir
+Post job cleanup.
+Post job cleanup.
+[command]"C:\Program Files\Git\bin\git.exe" version
+git version 2.56.1.windows.1
+Temporarily overriding HOME='D:\a\_temp\f41a81e2-4b75-4357-a717-ff7a54bc98d6' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+[command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\apm\apm\harness
+Removing SSH command configuration
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Removing HTTP extra header
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Removing includeIf entries pointing to credentials config files
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+Cleaning up orphan processes

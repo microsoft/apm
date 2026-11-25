@@ -14,7 +14,7 @@ User code mid-command (a lifecycle script) clears every proof through `forget_in
 
 Proofs never outlive what they saw:
 - R1: a directory is proven only when `lstat` sees it as a real directory now, never a missing tail.
-- R2/R4: `realpath_win.release_held(path)` drops proofs at or below *path* on every platform. It runs before every APM rename, delete or link creation: the existing held-release seams, `write_seam.rename/rmdir/rmtree`, the deploy journal's removals and link restore, `journal_modes` and `file_ops.robust_copy_entry`. The closed-world rule `transport-platform-held-directory-release` now also counts `os.symlink` and `Path.symlink_to`.
+- R2/R4: `realpath_win.release_held(path)` drops every proof on every platform (a prefix drop would miss link and case aliases). It runs before every APM rename, delete or link creation: the existing held-release seams, `write_seam.rename/rmdir/rmtree`, the deploy journal's removals and link restore, `journal_modes` and `file_ops.robust_copy_entry`. The closed-world rule `transport-platform-held-directory-release` now also counts `os.symlink` and `Path.symlink_to`.
 - R3: nothing under a volatile component (`.git`, staging, `.inc.`, `.tmp`, backup, migration, refresh) is proven.
 
 The W3d ruling `w3d:ruling:containment-once` (K1-K9) maps as follows:
@@ -27,22 +27,24 @@ The W3d ruling `w3d:ruling:containment-once` (K1-K9) maps as follows:
 - K8: one owner (`utils/realpath.py`).
 - K9: cells below.
 
-W3d accepted at rows `w3d:5382:31f6b88d` (R1-R4) and `w3d:5382:de08a54d` (K off on win32). The Windows Paths reviewer acked the Windows seam.
+W3d accepted at rows `w3d:5382:31f6b88d` (R1-R4) and `w3d:5382:de08a54d` (K off on win32); `w3d:5382:0bca2c4b` (K only where no kernel form applies) and `w3d:5382:c8eb343f` (clear-all invalidation, no `..` proofs). The Windows Paths reviewer acked the Windows seam.
 
-K is not applied on win32: Windows keeps no proofs and every resolve takes #5374's exact forms (with K on top of #5374, Windows measured about +1% CPU).
+K applies only where no fast platform form does (macOS and other POSIX). Linux keeps no proofs: the kernel forms (O_PATH, and #5372's `openat2` with `RESOLVE_NO_SYMLINKS`) already prove a link-free path in one syscall. Windows keeps no proofs: every resolve takes #5374's exact forms. On both, K measured no faster, so they run exactly main's and #5374's code.
 
-This stacks on #5374 (Windows held directories). Measured at de08a54d against #5374's final head c109777b on offline tree-50, paired CPU including children. Population: all. Request, round-trip and connect counts are equal in every row.
+This stacks on #5374 (Windows held directories), measured against its head 427c0876. Offline tree-50, paired CPU including children. Population: all.
 
-| OS / world | journey | pairs | base -> new CPU p50 | paired new/base | run |
-|---|---|---|---|---|---|
-| macOS | cold | 6 | 8.00 -> 6.67 s | 0.874 | 45475587367 |
-| macOS | warm | 6 | 8.95 -> 7.23 s | 0.798 | 45475587367 |
-| Linux | cold | 6 | 6.61 -> 6.21 s | 0.975 | 45475637858 |
-| Linux | warm | 6 | 6.25 -> 5.94 s | 0.983 | 45475637858 |
-| Windows (bench world, OpenSSL) | cold | 9 | 15.28 -> 15.39 s | 1.008 | 45475540833 |
-| Windows (bench world, OpenSSL) | warm | 9 | 18.47 -> 18.48 s | 0.988 | 45475540833 |
+| OS | journey | pairs | paired new/base | run |
+|---|---|---|---|---|
+| macOS | cold | 6 | 0.900 | 45517564444 |
+| macOS | warm | 6 | 0.890 | 45517564444 |
+| Linux | cold / warm | 6 | 1.010 / 0.995 (same resolve code as base) | 45515025450 |
+| Windows | cold | 15 | 0.993 (same resolve code as base) | 45516164352 |
+| Windows | warm | 9 | 0.987 | 45514979849 |
+| Windows A/A (427c0876 vs itself) | cold | 9 | 1.007 (noise floor) | 45516140729 |
 
-macOS -15%, Linux -1-2%, Windows unchanged (K not applied on win32). An earlier 15-pair Linux run on #5374 186e16d8 read 0.990 cold and 0.977 warm (45468238215).
+Request, round-trip and connect counts are equal in every row.
+
+macOS: cold -10%, warm -11% CPU (measured at c8eb343f, where any APM mutation drops every proof; before that change macOS read 0.827 / 0.836, run 45514998880). Linux and Windows unchanged (K not applied there).
 
 ## Issue and approved scope
 
@@ -65,9 +67,8 @@ This does not complete #4939.
 - [x] All existing tests pass
 - [x] Added tests for new functionality (if applicable)
 
-Hosted-runner cells at de08a54d, x3 per OS (`tests/unit/utils`, `tests/unit/install`, `tests/unit/integration`, `tests/integration/test_inprocess_fetch_world.py`, `tests/integration/test_architecture_held_directory_release.py`):
-- Linux: 8648 passed [45475315488]. Windows: 8126 passed [45475430802]. macOS: 8644 passed [45475487105].
-- The only other failure was the install LOC budget after the #5374 merge, fixed in 4737862e by a docstring rewrap (no budget raise).
+Hosted-runner cells at 0bca2c4b, x3 per OS (`tests/unit/utils`, `tests/unit/install`, `tests/unit/integration`, `tests/integration/test_inprocess_fetch_world.py`, `tests/integration/test_architecture_held_directory_release.py`):
+- Linux: 8704 passed [45514905028]. Windows: 8165 passed [45514956695]. macOS: 8695 passed [45514929769].
 - macOS also fails 2 cells in `test_deploy_snapshot.py` (read-only directory restore). These are pre-existing: the same two fail on main 7521c350 [45470681317].
 
 New cells in `tests/unit/utils/test_realpath.py`:
@@ -78,7 +79,7 @@ New cells in `tests/unit/utils/test_realpath.py`:
 - a leaf link under a proven directory is still found by `first_symlink_component`;
 - nothing is proven outside a command;
 - on Windows, a case-variant leaf resolves to the disk case;
-- Windows keeps no proofs: every resolve takes the platform form;
+- Linux (kernel forms) and Windows (exact forms) keep no proofs;
 - a missing directory is not proven before it exists, so a link created there later is found (R1);
 - `release_held` drops the proofs below it (R2), and nothing under a volatile component is proven (R3);
 - a proven directory that APM replaces with a link (via `write_seam.rmtree`, via `write_seam.rename`, or via a link copy) is refused (R4);

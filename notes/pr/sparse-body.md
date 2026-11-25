@@ -19,14 +19,17 @@ The in-process sparse path is ON by default: no flag or config is needed to enga
 
 Merge order: #5383 lands first; this PR rebases onto it (both touch `install/verdict_record.py`).
 
-Measured at this head vs main 2ff53cdf on real github.com (the bench's `real` fixture: 10 public packages, 9 of them monorepo subdirectory or file dependencies; cold, 6 interleaved pairs, paired CPU including children). Population: public github.com, anonymous.
+Measured at 9ae2a685 against its merge-base with main, bb4744f6 (which already includes #5353 and #5376), on real github.com: the bench's `real` fixture, 10 public packages, 9 of them monorepo subdirectory or file dependencies. Cold, 6 interleaved pairs, paired CPU including children. Population: public github.com, anonymous.
 
-| OS | base CPU p50 | new CPU p50 | paired new/base | spawns | run |
+| OS / world | base CPU p50 | new CPU p50 | paired new/base | spawns | run |
 |---|---|---|---|---|---|
-| Linux | 6.29 s | 3.15 s | 0.502 | 78 -> 12 | 45447827880 |
-| macOS | 7.51 s | 3.50 s | 0.478 | 86 -> 12 | 45447786322 |
+| Linux | 6.21 s | 2.45 s | 0.450 | 78 -> 12 | 45513153542 |
+| macOS | 6.99 s | 2.83 s | 0.386 | 86 -> 12 | 45513174573 |
+| Windows (default Git for Windows, `schannel`) | 12.19 s | 7.00 s | 0.542 | 104 -> 45 | 45519097336 |
 
-The control `tree-50` (no subdirectory deps) is neutral: Linux 0.995, macOS 0.961. Windows engages only where the in-process fetch does, that is Git for Windows' OpenSSL backend with a named CA; the default `schannel` backend uses git by design.
+The Windows row runs the bench's real world with Git for Windows' system TLS config carried into it, as a default install has it (`schannel`). Before that harness fix, the isolated world hid `http.sslBackend=schannel`, so git ran OpenSSL with no named CA and neither main nor this PR fetched in process there (run 45513122272). A probe of the real `apm install` on a default runner shows the in-process hits (run 45518723251).
+
+The control `tree-50` (no subdirectory deps), cold, 6 pairs, is neutral: Linux 1.010 (45513198595), Windows 0.995 (45513232286).
 
 ## Issue and approved scope
 
