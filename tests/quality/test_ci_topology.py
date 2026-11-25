@@ -3219,6 +3219,9 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     assert env["APM_ARCH_CACHE_SHARD"] == "${{ strategy.job-index }}/${{ strategy.job-total }}"
     assert job["strategy"]["fail-fast"] is False
     assert len(job["strategy"]["matrix"]["shard"]) > 1
+    # Each shard reports its wall time against its own cap in the job summary.
+    assert "GITHUB_STEP_SUMMARY" in step["run"]
+    assert f"cap {job['timeout-minutes']}m" in step["run"]
     tokens = step["run"].replace("\\\n", " ").split()
     assert CACHE_FULL_MATRIX_NODE in tokens
     assert ("-m", "benchmark") in set(pairwise(tokens))

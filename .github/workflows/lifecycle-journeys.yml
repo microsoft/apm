@@ -277,9 +277,21 @@ jobs:
           PYTEST_PERF: "1"
           APM_ARCH_CACHE_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
         run: |
+          set -o pipefail
+          # Each shard records its wall time in the job summary, so growth
+          # shows up well before a shard reaches its cap.
+          start=$SECONDS
+          status=0
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers -s \
             -m benchmark \
-            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix
+            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix \
+            2>&1 | tee replay.log || status=$?
+          elapsed=$((SECONDS - start))
+          cases=$(grep -o 'cases=[0-9]*/[0-9]*' replay.log || echo 'cases=unknown')
+          printf -- '- Architecture cache shard `%s`: %s in %dm%02ds (cap 30m, exit %d)\n' \
+            "$APM_ARCH_CACHE_SHARD" "$cases" $((elapsed / 60)) $((elapsed % 60)) "$status" \
+            >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   signal:
     name: Lifecycle Journeys Nightly Signal
