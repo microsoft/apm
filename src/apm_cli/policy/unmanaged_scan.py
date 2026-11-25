@@ -64,14 +64,33 @@ def _lexical_posix(path: str) -> str:
     return posixpath.normpath(path)
 
 
+def _walked_label(project_root: Path, file_path: Path) -> str:
+    """Return the workspace-relative label of a walked file.
+
+    The lexical form is used only when it names the same file: a ``..`` after
+    a symlinked directory leads elsewhere, so the as-walked form is kept and
+    can never pose as an exempt path (fail closed). Only a path holding ``.``
+    or ``..`` pays for the realpath comparison.
+    """
+    walked = file_path.relative_to(project_root).as_posix()
+    lexical = _lexical_posix(walked)
+    if lexical == walked:
+        return walked
+    lexical_parent = project_root / posixpath.dirname(lexical)
+    if os.path.realpath(file_path.parent) == os.path.realpath(lexical_parent):
+        return lexical
+    return walked
+
+
 def _candidate_files(project_root: Path, dirs: Sequence[str]) -> Iterator[Path]:
     """Yield every non-directory file under each governance entry.
 
-    A directory entry is walked; an entry naming a file yields that file.
+    A directory entry is walked; an entry naming any other existing path (a
+    file, a FIFO or other special file, a link) yields that path.
     """
     for gov_dir in dirs:
         entry_path = project_root / gov_dir
-        if entry_path.is_file():
+        if os.path.lexists(entry_path) and not entry_path.is_dir():
             if not (
                 entry_path.is_symlink() and _symlink_escapes_workspace(entry_path, project_root)
             ):
@@ -104,7 +123,7 @@ def scan_governed_files(project_root: Path, directories: Sequence[str] | None) -
     scan = GovernedScan()
     seen: set[str] = set()
     for file_path in _candidate_files(project_root, directories or _DEFAULT_GOVERNANCE_DIRS):
-        rel = _lexical_posix(file_path.relative_to(project_root).as_posix())
+        rel = _walked_label(project_root, file_path)
         if rel in seen:
             continue
         seen.add(rel)

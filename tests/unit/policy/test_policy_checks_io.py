@@ -314,6 +314,24 @@ class TestUnmanagedFiles:
         assert self._flagged(result) != [self._LOCAL], result.details
         assert result.notes == ()
 
+    def test_deny_never_relabels_a_path_through_a_symlinked_dir_as_exempt(self, tmp_path):
+        """#5472: ``.claude/link/..`` walks ``.claude/commands`` when link points to
+        ``commands/deep``; its settings.local.json keeps the as-walked label and is
+        reported, never skipped as the exempt path (fail closed)."""
+        self._write(tmp_path, ".claude/commands/settings.local.json")
+        (tmp_path / ".claude" / "commands" / "deep").mkdir()
+        try:
+            (tmp_path / ".claude" / "link").symlink_to(
+                Path("commands") / "deep", target_is_directory=True
+            )
+        except OSError:
+            pytest.skip("symlinks unavailable")
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".claude/link/.."])
+        result = _check_unmanaged_files(tmp_path, None, policy)
+        assert not result.passed
+        assert self._flagged(result) == [".claude/link/../settings.local.json"], result.details
+        assert result.notes == ()
+
     def test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file(self, tmp_path):
         """#5472: a symlinked local settings file skips its link path only; the governed
         file it points to is still reported at its own path."""

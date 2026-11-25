@@ -784,6 +784,33 @@ def test_unmanaged_files_deny_skips_harness_owned_local_files(
     assert _text(audit).count(_LOCAL_SETTINGS_NOTE) == 1, _text(audit)
 
 
+def test_unmanaged_files_warn_enforcement_audit_keeps_the_harness_local_skip_line(
+    lifecycle_world,
+) -> None:
+    """enforcement: warn -- text audit --ci still prints the skip line for
+    .claude/settings.local.json beside the downgraded deny report (#5472)."""
+    _serve_policy(
+        lifecycle_world,
+        "policy-g7-unmanaged-harness-local-warn",
+        {
+            "name": "g7",
+            "version": "1.0",
+            "enforcement": "warn",
+            "unmanaged_files": {"action": "deny"},
+        },
+    )
+    _hand_written_file(lifecycle_world)
+    local = lifecycle_world.project / _LOCAL_SETTINGS
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text("{}\n", encoding="utf-8")
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    text = _text(audit)
+    assert audit.returncode == 0, text
+    assert "(enforcement: warn)" in text, text
+    assert "hand-written.instructions.md" in text, text
+    assert text.count(_LOCAL_SETTINGS_NOTE) == 1, text
+
+
 # -- G8: security.audit.fail_on_drift (policy-schema.md, security section) ----------
 
 

@@ -912,6 +912,7 @@ def _audit_ci_gate(
                             + (" (enforcement: warn)" if not check.passed else ""),
                             details=check.details,
                             warned=not check.passed,
+                            notes=check.notes,
                         )
                     )
 

@@ -13,6 +13,9 @@
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_harness_local_settings_only_at_their_exact_path",
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_governs_harness_local_settings_the_policy_names",
     "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_governs_respelled_harness_local_names",
-    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file"
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_never_relabels_a_path_through_a_symlinked_dir_as_exempt",
+    "tests/unit/policy/test_unmanaged_special_files.py::test_a_fifo_the_policy_names_is_unmanaged",
+    "tests/lifecycle/scenarios/test_policy_promises.py::test_unmanaged_files_warn_enforcement_audit_keeps_the_harness_local_skip_line"
   ]
 }
