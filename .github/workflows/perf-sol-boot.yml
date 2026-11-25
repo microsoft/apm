@@ -2,7 +2,7 @@ name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace6]
+    branches: [perf-research/arch-trace7]
 
 permissions:
   contents: read
@@ -15,8 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04]
-        product: [f598993cbf6c82bc71b229a50210b911afbf4cba]
+        include:
+          - {os: ubuntu-24.04, product: 411577d8784d26e255c47507439fc39f24550cb2}
+          - {os: ubuntu-24.04, product: da480a1c7538d72c3c120c803245aca55e86b306}
+          - {os: macos-15, product: 411577d8784d26e255c47507439fc39f24550cb2}
+          - {os: macos-15, product: da480a1c7538d72c3c120c803245aca55e86b306}
+          - {os: windows-2025, product: 8128fe786665adf99b2611aa8e557b56db9a299a}
+          - {os: windows-2025, product: cf1216fa073b92d40c18dd36cd821a4d4422cae7}
     defaults:
       run:
         shell: bash
@@ -50,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 30 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
-          for f in "$GITHUB_WORKSPACE"/out/stderr/*.txt; do echo "== $f"; grep -h "owalk\|install fast path" "$f"; done
+          for f in "$GITHUB_WORKSPACE"/out/stderr/*.txt; do echo "== $f"; grep -h "oracle-\|install fast path" "$f"; done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
