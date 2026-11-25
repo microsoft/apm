@@ -9,7 +9,7 @@
     "transaction.failed_command_preserves_state"
   ],
   "regression_tests": [
-    "tests/unit/core/test_script_executors.py::TestCommandExecutor::test_interrupt_while_spawning_still_reaps_the_script",
+    "tests/integration/test_spawn_interrupt_deferral.py::test_interrupt_while_spawning_still_reaps_the_script",
     "tests/integration/test_lifecycle_script_interrupt_lifecycle.py::test_interrupted_compile_stops_its_pre_compile_script"
   ]
 }
