@@ -838,6 +838,12 @@ def run_mcp_integration(  # noqa: PLR0913
                 retained_names |= kept
                 skipped_targets.add(owned_target)
             retired_by_target[owned_target] = builtins.set(owned) - kept
+        for removed_target, retired_names in retired_by_target.items():
+            # An entry in a file the removed runtime shares (.mcp.json) stays
+            # while an active runtime still owns it.
+            retired_names -= names_owned_by_active_peers(
+                removed_target, retired_names, managed_target_servers, user_scope=user_scope
+            )
         # A skipped target still holds the old declaration: keep that baseline
         # so its next install sees the drift and applies the new one.
         for name in MCPIntegrator._detect_mcp_config_drift(
@@ -850,12 +856,6 @@ def run_mcp_integration(  # noqa: PLR0913
                 managed_target_servers,
                 native_hashes,
                 skipped=skipped_targets,
-            )
-        for removed_target, retired_names in retired_by_target.items():
-            # An entry in a file the removed runtime shares (.mcp.json) stays
-            # while an active runtime still owns it.
-            retired_names -= names_owned_by_active_peers(
-                removed_target, retired_names, managed_target_servers, user_scope=user_scope
             )
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers

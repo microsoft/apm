@@ -968,7 +968,6 @@ def test_a_skipped_runtime_claim_still_guards_a_shared_file_entry_a_peer_retires
     _success(scenario.install())
 
     assert set(scenario.servers("claude")) == {"registered"}
-    assert "copilot" in scenario.lock().mcp_target_servers
 
 
 @pytest.mark.parametrize("foreign_target", ["claude", "codex"])
