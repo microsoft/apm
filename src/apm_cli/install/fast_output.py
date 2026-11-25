@@ -113,6 +113,8 @@ def render(
 
     logger = InstallLogger(verbose=False, dry_run=False, partial=False)
     logger.resolution_start(to_install_count=0, lockfile_count=0, update_count=0)
+    if frozen_disposition.replay:
+        _frozen_preflight(project_root, manifest, logger)
     locked = [d for d in lock.get_all_dependencies() if d.get_unique_key() != "."]
     for dep in locked:
         if dep.get_unique_key() in fetched:
@@ -153,6 +155,20 @@ def render(
         # --frozen verified the lockfile and deployed hashes (req-lk-017).
         logger.info(frozen_verified_line(result), symbol="info")
     return services
+
+
+def _frozen_preflight(project_root: Path, manifest: Any, logger: Any) -> None:
+    """The full frozen run's preflight at its point (InstallService.run), with its notices.
+
+    The fast path already passed it before committing; with byte-identical inputs it
+    passes again and prints what the full run prints there (direct MCP trust).
+    """
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+
+    request = InstallRequest(manifest, logger=logger, scope=InstallScope.PROJECT)
+    InstallService.enforce_frozen(request)
 
 
 def _announce_targets(project_root: Path, manifest: Any, logger: Any) -> None:

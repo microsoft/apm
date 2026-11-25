@@ -1265,9 +1265,25 @@ def _target_line(project: Path) -> str:
     return format_provenance(resolve_targets(project, yaml_targets=restriction))
 
 
-def _attest(project: Path, line: str | None = None, during=None, printed: str = "") -> None:
+def _frozen(argv: list[str]) -> None:
+    """The run's frozen decision, through its single reader (which notes it)."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.service import InstallService
+
+    InstallService.frozen_disposition(SimpleNamespace(frozen="--frozen" in argv))
+
+
+def _attest(
+    project: Path,
+    line: str | None = None,
+    during=None,
+    printed: str = "",
+    argv: tuple[str, ...] = ("install",),
+) -> None:
     """A converged full install: it announced its targets and attested the state."""
-    with verdict_record.recording(["install"]):
+    with verdict_record.recording(list(argv)):
+        _frozen(list(argv))
         sys.stdout.write(printed + "[+] Installed 1 APM dependency.\n")
         verdict_attest.note_run_targets(line if line is not None else _target_line(project))
         verdict_attest.note_attested_install()
@@ -1278,6 +1294,7 @@ def _attest(project: Path, line: str | None = None, during=None, printed: str = 
 def _attested_hit(argv: list[str] | None = None) -> bool:
     """What the next install's engine sees, inside its own recorded run."""
     with verdict_record.recording(argv or ["install"]):
+        _frozen(argv or ["install"])
         return verdict_attest.attested_state(argv or ["install"], Path.cwd())
 
 
@@ -1429,6 +1446,98 @@ def test_an_unprefixed_warning_the_install_printed_is_never_attested(project: Pa
     _attest(project, during=lambda: _rich_warning("Hook file h.json contributes no entries"))
 
     _assert_proves_itself()
+
+
+_FROZEN = ["install", "--frozen"]
+
+
+def test_a_plain_attestation_serves_the_first_frozen_install(project: Path) -> None:
+    """#4770: CI's install-then-frozen path; the frozen refusals re-run on the hit."""
+    _attest(project)
+
+    assert _attested_hit(_FROZEN) is True
+    _assert_keyed(project, ["install"], "plain")
+
+
+def test_a_frozen_attestation_never_serves_a_plain_install(project: Path) -> None:
+    """W3d AF1/AF5: the argv class is one-way."""
+    _attest(project, argv=tuple(_FROZEN))
+    assert _attested_hit(_FROZEN) is True, "positive control: frozen serves frozen"
+
+    _assert_proves_itself()
+    _assert_keyed(project, _FROZEN, "frozen")
+
+
+def _assert_keyed(project: Path, argv: list[str], disposition: str) -> None:
+    """The durable attested record names what it was keyed with (MAC-bound)."""
+    stored = _stored(project)
+    assert (stored["kind"], stored["argv"], stored["disposition"]) == (
+        "attested",
+        argv,
+        disposition,
+    )
+
+
+@pytest.mark.parametrize("forged", [{"argv": ["install"]}, {"disposition": "plain"}])
+def test_a_forged_attestation_argv_never_serves(project: Path, forged: dict) -> None:
+    """The argv and frozen disposition are bound by the record's MAC."""
+    import json
+
+    _attest(project, argv=tuple(_FROZEN))
+    (path,) = (_home(project) / "verdicts").rglob("*.json")
+    path.write_text(json.dumps({**_stored(project), **forged}), encoding="utf-8")
+
+    assert _attested_hit(_FROZEN) is False
+    _assert_proves_itself()
+
+
+@pytest.mark.parametrize("change", ["manifest", "lock", "deployed bytes", "package copy"])
+def test_a_changed_input_never_serves_a_frozen_install(project: Path, change: str) -> None:
+    _attest(project)
+    assert _attested_hit(_FROZEN) is True, "positive control"
+    if change == "manifest":
+        (project / "apm.yml").write_text(_MANIFEST + "# edited\n", encoding="utf-8")
+    elif change == "lock":
+        with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+            handle.write("# edited\n")
+    elif change == "deployed bytes":
+        (project / _REL).write_bytes(b"# tampered\n")
+    else:
+        (project / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: q\n", encoding="utf-8")
+
+    assert _attested_hit(_FROZEN) is False
+    _assert_keyed(project, ["install"], "plain")  # the record stays; only the hit misses
+
+
+def test_every_frozen_only_owner_is_classified_for_an_attested_hit() -> None:
+    """W3d AF2, closed world: the frozen owner row's modules and every frozen method of
+    InstallService are classified live or implied (install/verdict_attest.py)."""
+    import inspect
+    import json
+
+    from apm_cli.install.service import InstallService
+
+    owners = json.loads(
+        (Path(__file__).parents[2] / ".apm/architecture/owners/install-deployment.json").read_text(
+            encoding="utf-8"
+        )
+    )["owners"]
+    (row,) = (o for o in owners if o["id"] == "frozen-install-mutation-eligibility")
+    modules = {Path(sel).stem for sel in row["selectors"]} - {"service"}
+    methods = {
+        f"service:{name}"
+        for name, _ in inspect.getmembers(InstallService, inspect.isfunction)
+        if "frozen" in name
+    }
+    classified = verdict_attest.FROZEN_OWNERS
+
+    _assert_classified(modules | methods, classified)
+
+
+def _assert_classified(names: set[str], classified: dict) -> None:
+    missing = sorted(names - set(classified))
+    assert not missing, f"classify these frozen owners in FROZEN_OWNERS: {missing}"
+    assert all(kind in ("live", "implied") and why for kind, why in classified.values())
 
 
 def _assert_proves_itself() -> None:

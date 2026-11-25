@@ -256,6 +256,11 @@ def _write(
         git_system = verdict_git._git_system()
         digest = vr._Digest(key)
         vr._inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed, notice)
+        if kind == ATTESTED:
+            if not vr._RUN_FROZEN:
+                vr._trace("no record (frozen disposition unknown)")
+                return
+            digest.put("disposition", vr.run_disposition().encode())
         stderr_kept = "".join(
             line
             for line in stderr_text.splitlines(keepends=True)
@@ -276,6 +281,8 @@ def _write(
             "kind": kind,
             "provenance": provenance,
         }
+        if kind == ATTESTED:  # MAC-bound: the "argv" and "disposition" inputs above
+            record["argv"], record["disposition"] = list(argv), vr.run_disposition()
         vr._body(digest, record)
         record["mac"] = digest.hexdigest()
         record["tags"] = digest.tags

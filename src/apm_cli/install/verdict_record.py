@@ -207,6 +207,9 @@ _ATTESTED_INSTALL: list[str] = []
 # recording()'s entry state, which an attested check inside the CLI keys (O3).
 _RUN_ENTRY: list[Any] = []
 _RUN_TARGETS: list[str] = []
+# The run's effective --frozen disposition (CI-implied included), noted by its
+# single reader (InstallService.frozen_disposition); attestations key it (W3d AF1).
+_RUN_FROZEN: list[bool] = []
 # Same values as install/noop_diff.disabled() (APM_INSTALL_FAST_PATH kill switch).
 _KILL_VALUES = frozenset({"0", "false", "no", "off"})
 # O1: the summary's elapsed seconds are templated; any other clock-dependent
@@ -775,7 +778,10 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
         raise _Miss("lock")
     digest = _Digest(key)
     rels = _deployed_rels(lock)
-    _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, rels, notice)
+    keyed = _keyed_argv(record, argv) if attested else argv
+    _inputs(digest, root, keyed, lock_text, run_env, surfaces, git_system, rels, notice)
+    if attested:
+        digest.put("disposition", str(record.get("disposition")).encode())
     _body(digest, record)
     now = time.time()
     issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
@@ -790,6 +796,42 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
     from apm_cli.install import verdict_policy
 
     return record, verdict_policy._render_ages(str(record.get("stdout", "")))
+
+
+# One-way argv class of an attested record (#4770): what a plain install
+# converged on, ``install --frozen`` replays from byte-identical inputs, and
+# re-judges its own frozen refusals live; a frozen attestation never serves a
+# plain install. The keyed argv is bound by the record's MAC ("argv" input).
+_ATTESTED_SERVES = {("install", "--frozen"): (("install", "--frozen"), ("install",))}
+
+
+def _keyed_argv(record: dict, argv: list[str]) -> list[str]:
+    """The argv (and frozen disposition) an attested record was keyed with, when it
+    may serve this run: a frozen run accepts a plain or frozen attestation, a plain
+    run only a plain one (W3d AF1). Both are bound by the record's MAC."""
+    keyed, disposition = record.get("argv"), record.get("disposition")
+    if not _RUN_FROZEN or not _names(keyed) or disposition not in _DISPOSITIONS:
+        raise _Miss("frozen disposition unknown")
+    run_frozen = _RUN_FROZEN[-1]
+    allowed = _ATTESTED_SERVES.get(tuple(argv), (tuple(argv),)) if run_frozen else (tuple(argv),)
+    if tuple(keyed) not in allowed or (disposition == "frozen" and not run_frozen):
+        raise _Miss("inputs changed: argv")
+    return list(keyed)
+
+
+_DISPOSITIONS = ("plain", "frozen")
+
+
+def run_disposition() -> str:
+    """The noted disposition of this run, as an attested record keys it."""
+    return _DISPOSITIONS[_RUN_FROZEN[-1]]
+
+
+def note_frozen(replay: bool) -> bool:
+    """Note the run's effective frozen disposition (its single reader); returns it."""
+    if _ACTIVE:
+        _RUN_FROZEN[:] = [bool(replay)]
+    return replay
 
 
 def replay(argv: list[str]) -> bool:
@@ -878,6 +920,7 @@ def recording(argv: list[str]) -> Iterator[None]:
         _ATTESTED_INSTALL,
         _RUN_ENTRY,
         _RUN_TARGETS,
+        _RUN_FROZEN,
     ):
         state.clear()
     _ENV_READS.clear()
