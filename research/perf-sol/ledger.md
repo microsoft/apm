@@ -52,3 +52,4 @@
 00:39 WAKE godspeed: records cut, locked whole-phase, read night runs
 01:44 F23 #5414 killed (main fast path now cheaper); F24 warm cache-hit design-doc
 02:16 main phase map written; frozen-mcp sizing in flight
+03:34 sec1 final; Lane N plan sent, awaiting OK
