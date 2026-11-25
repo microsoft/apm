@@ -5,20 +5,16 @@ registered groups and rules) linter invocations in the architecture-linter test
 suite, each computed once via a module-scoped fixture and reused by every
 assertion that needs it:
 
-* `clean_shell_run` -- the argument-free shell wrapper (forced to two worker
-  processes, the CI default) plus one direct single-process Python CLI
-  invocation with `--metrics-json`, both against the real repository, so the
-  clean run's empty output and zero exit are proven on both paths. The
-  wrapper has no configuration surface; benchmarks retain the internal
+* `clean_shell_run` -- the argument-free shell wrapper plus one direct Python
+  CLI invocation with `--metrics-json`, both against the real repository.
+  The wrapper has no configuration surface; benchmarks retain the internal
   Python-only metrics option.
 * `mutated_report` -- a filesystem copy of the real repository with two
   independent, real-content corruptions, linted via the Python `runner.run`
   API directly (not a subprocess, to avoid a second expensive full
   process). Proves the engine aggregates multiple diagnostics from one run
   and that the owner-guard-executes-exactly-once invariant still holds
-  under content corruption. The copy also carries one owner-guard mutation
-  per rule group, and the CLI lints it once more with four worker processes:
-  the merged output and exit code must equal the single-process report.
+  under content corruption.
 
 Every other test here is deliberately cheap: CLI argument-surface checks
 fail fast in argparse before any linting happens, the metrics-write-error
@@ -30,7 +26,6 @@ catalog.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -42,12 +37,11 @@ from typing import NamedTuple
 import pytest
 
 from scripts import lint_architecture_boundaries as cli
-from scripts.architecture_linter import parallel, runner
+from scripts.architecture_linter import runner
 from scripts.architecture_linter.diagnostics import render_violations_and_failures
 from scripts.architecture_linter.inventory import EXCLUDED_ROOTS, build_inventory
 from scripts.architecture_linter.models import Rule, RunReport
 from scripts.architecture_linter.registry import load_registry
-from tests.integration.test_architecture_owner_rule_mutations import MUTATIONS, MutationCase
 
 pytestmark = [
     # Two module-scoped fixtures below each pay for one expensive, full,
@@ -111,7 +105,6 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
     result = subprocess.run(
         ["bash", str(SHELL_SCRIPT)],
         cwd=str(ROOT),
-        env={**os.environ, parallel.WORKERS_ENV: "2"},
         capture_output=True,
         text=True,
         check=False,
@@ -127,7 +120,6 @@ def clean_shell_run(tmp_path_factory: pytest.TempPathFactory) -> CleanShellRun:
             str(metrics_path),
         ],
         cwd=str(ROOT),
-        env={**os.environ, parallel.WORKERS_ENV: "1"},
         capture_output=True,
         text=True,
         check=False,
@@ -153,26 +145,6 @@ class MutatedRun(NamedTuple):
     report: RunReport
     copy_root: Path
     corrupted_paths: tuple[str, ...]
-    injected: dict[str, MutationCase]
-    parallel_result: subprocess.CompletedProcess[str]
-
-
-def _one_mutation_per_group(copy_root: Path, avoid: set[str]) -> dict[str, MutationCase]:
-    """Pick one applicable owner-guard mutation per rule group, on distinct files."""
-    group_by_guard = {
-        guard: rule.group for rule in runner.registered_rules() for guard in rule.guard_ids
-    }
-    picked: dict[str, MutationCase] = {}
-    for case in MUTATIONS:
-        group = group_by_guard[case.guard_id]
-        path = copy_root / case.path
-        if group in picked or case.path in avoid or not path.is_file():
-            continue
-        if case.old not in path.read_text(encoding="utf-8"):
-            continue
-        picked[group] = case
-        avoid.add(case.path)
-    return picked
 
 
 @pytest.fixture(scope="module")
@@ -200,51 +172,9 @@ def mutated_report(tmp_path_factory: pytest.TempPathFactory) -> MutatedRun:
         encoding="utf-8",
     )
 
-    corrupted = ("src/apm_cli/utils/console.py", "src/apm_cli/models/apm_package.py")
-    injected = _one_mutation_per_group(copy_root, set(corrupted))
-    for case in injected.values():
-        path = copy_root / case.path
-        text = path.read_text(encoding="utf-8")
-        count = -1 if case.replace_all else 1
-        path.write_text(text.replace(case.old, case.new, count), encoding="utf-8")
-
     report = runner.run(copy_root)
-    parallel_result = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "lint_architecture_boundaries.py"),
-            "--root",
-            str(copy_root),
-            "--workers",
-            "4",
-        ],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_FULL_RUN_TIMEOUT,
-    )
-    return MutatedRun(report, copy_root, corrupted, injected, parallel_result)
-
-
-def test_four_worker_run_matches_single_process_with_findings_in_every_group(
-    mutated_report: MutatedRun,
-) -> None:
-    """Every group bucket reports a finding, and the merged four-worker output
-    and exit code are byte-identical to the single-process report."""
-    report = mutated_report.report
-    assert set(mutated_report.injected) == set(runner.GROUP_MODULE_NAMES)
-    groups_with_findings = {
-        group.group for group in report.group_results if any(r.violations for r in group.rules)
-    }
-    assert groups_with_findings == set(runner.GROUP_MODULE_NAMES)
-    injected_rules = {case.rule_id for case in mutated_report.injected.values()}
-    assert injected_rules <= {violation.rule_id for violation in report.violations}
-
-    rendered = render_violations_and_failures(report.violations, report.failures)
-    assert mutated_report.parallel_result.stdout == rendered + "\n"
-    assert mutated_report.parallel_result.returncode == report.exit_code == 1
-    assert mutated_report.parallel_result.stderr == ""
+    corrupted = ("src/apm_cli/utils/console.py", "src/apm_cli/models/apm_package.py")
+    return MutatedRun(report, copy_root, corrupted)
 
 
 # ---------------------------------------------------------------------------

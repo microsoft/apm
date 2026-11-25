@@ -728,18 +728,68 @@ def _run(
     )
 
 
-def _partials_disagree(partials: Sequence[PartialRun]) -> str | None:
+def _partial_label(partial: PartialRun) -> str:
+    return "parallel:" + "+".join(partial.groups)
+
+
+def _partials_disagree(partials: Sequence[PartialRun]) -> Failure | None:
     first = partials[0]
     for partial in partials[1:]:
         if partial.inventory_ok != first.inventory_ok:
-            return "workers disagree on whether the inventory loaded"
-        if partial.inventory_digest != first.inventory_digest:
-            return "workers saw different repository inventories"
-        if partial.startup_failures != first.startup_failures:
-            return "workers disagree on startup diagnostics"
-        if partial.registered_guard_ids != first.registered_guard_ids:
-            return "workers disagree on the registered owner guards"
+            reason = "workers disagree on whether the inventory loaded"
+        elif partial.inventory_digest != first.inventory_digest:
+            reason = "workers saw different repository inventories"
+        elif partial.startup_failures != first.startup_failures:
+            reason = "workers disagree on startup diagnostics"
+        elif partial.registered_guard_ids != first.registered_guard_ids:
+            reason = "workers disagree on the registered owner guards"
+        else:
+            continue
+        return Failure(_partial_label(partial), reason)
     return None
+
+
+def _overlap_failures(partials: Sequence[PartialRun]) -> list[Failure]:
+    seen: set[str] = set()
+    failures = []
+    for partial in partials:
+        repeated = [group for group in partial.groups if group in seen]
+        if repeated:
+            failures.append(
+                Failure(
+                    _partial_label(partial),
+                    "groups already run by another worker: " + ", ".join(repeated),
+                )
+            )
+        seen.update(partial.groups)
+    return failures
+
+
+def _guard_failures(
+    partials: Sequence[PartialRun], registered: Sequence[str], guard_hits: Counter[str]
+) -> list[Failure]:
+    failures = []
+    for guard_id in registered:
+        count = guard_hits.get(guard_id, 0)
+        if count == 1:
+            continue
+        failures.append(
+            Failure(
+                "guard",
+                f"owner guard did not execute exactly once: {guard_id} (count={count})",
+            )
+        )
+        hitters = [p.groups for p in partials if guard_id in dict(p.guard_hits)]
+        if len(hitters) > 1:
+            # Only a parallel merge can see one guard in two workers; a count
+            # of zero renders exactly as it does in a single process.
+            label = ",".join("+".join(groups) for groups in hitters)
+            failures.append(
+                Failure(
+                    f"parallel:{label}", f"owner guard {guard_id} ran in {len(hitters)} workers"
+                )
+            )
+    return failures
 
 
 def _merged_metrics(
@@ -800,7 +850,9 @@ def merge_partial_runs(
         collector.add_failure(failure)
     disagreement = _partials_disagree(partials)
     if disagreement is not None:
-        collector.add_failure(Failure("parallel", disagreement))
+        collector.add_failure(disagreement)
+    for failure in _overlap_failures(partials):
+        collector.add_failure(failure)
 
     if not first.inventory_ok:
         return RunReport(
@@ -830,15 +882,8 @@ def merge_partial_runs(
         guard_hits.update(dict(partial.guard_hits))
 
     if complete and first.registered_guard_ids is not None:
-        for guard_id in first.registered_guard_ids:
-            count = guard_hits.get(guard_id, 0)
-            if count != 1:
-                collector.add_failure(
-                    Failure(
-                        "guard",
-                        f"owner guard did not execute exactly once: {guard_id} (count={count})",
-                    )
-                )
+        for failure in _guard_failures(partials, first.registered_guard_ids, guard_hits):
+            collector.add_failure(failure)
 
     group_order = {name: index for index, name in enumerate(GROUP_MODULE_NAMES)}
     group_results = sorted(

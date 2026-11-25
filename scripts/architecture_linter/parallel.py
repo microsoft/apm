@@ -398,7 +398,23 @@ def _collect(worker: _Worker, timed_out: set[str], timeout: float) -> PartialRun
         return f"report invalid: {exc}"
     if partial.groups != worker.bucket:
         return "report covers groups " + ",".join(partial.groups)
-    return partial
+    return _hollow_report_reason(partial) or partial
+
+
+def _hollow_report_reason(partial: PartialRun) -> str | None:
+    """Reject a well-formed report that does not prove its groups executed."""
+    if not partial.inventory_ok:
+        if partial.group_results or not partial.startup_failures:
+            return "report invalid: an inventory failure must carry it and no group results"
+        return None
+    executed = tuple(result.group for result in partial.group_results)
+    if executed != partial.groups:
+        return "report invalid: group results " + ",".join(executed) + " do not match the bucket"
+    if partial.registered_guard_ids is None and not any(
+        failure.stage in {"registry", "rules"} for failure in partial.startup_failures
+    ):
+        return "report invalid: no registered guards and no registry failure"
+    return None
 
 
 def _failed_report(failures: Sequence[Failure], seconds: float) -> RunReport:
@@ -411,6 +427,26 @@ def _failed_report(failures: Sequence[Failure], seconds: float) -> RunReport:
     )
 
 
+def _bucket_plan_failures(buckets: Sequence[Sequence[str]]) -> list[Failure]:
+    """Every group must be in exactly one bucket, or no worker starts."""
+    failures = []
+    seen: set[str] = set()
+    for bucket in buckets:
+        repeated = [group for group in bucket if group in seen]
+        if repeated:
+            failures.append(
+                Failure(
+                    "parallel:" + "+".join(bucket),
+                    "groups already assigned to another worker: " + ", ".join(repeated),
+                )
+            )
+        seen.update(bucket)
+    missing = [group for group in GROUP_MODULE_NAMES if group not in seen]
+    if missing:
+        failures.append(Failure("parallel:" + "+".join(missing), "not assigned to any worker"))
+    return failures
+
+
 def run_parallel(
     root: Path,
     buckets: Sequence[Sequence[str]],
@@ -420,7 +456,9 @@ def run_parallel(
     """Lint `root` with one worker process per bucket and merge the partials."""
     start = time.perf_counter()
     partials: list[PartialRun] = []
-    failures: list[Failure] = []
+    failures = _bucket_plan_failures(buckets)
+    if failures:
+        return _failed_report(failures, time.perf_counter() - start)
     with tempfile.TemporaryDirectory(prefix="apm-arch-lint-") as scratch:
         workers: list[_Worker] = []
         try:

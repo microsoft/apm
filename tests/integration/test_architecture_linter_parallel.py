@@ -12,24 +12,32 @@ it honest without paying for a full lint of the real repository:
 * failure parity through real worker processes (a missing root);
 * the internal `--groups` / `--report-json` / `--workers` CLI surface.
 
-The two expensive real-repository parity runs (clean at the default worker
-count, injected violations in every group at four workers) live in
-`test_architecture_linter_entrypoint.py`, which already owns full runs.
+* real-repository parity -- a copy of this repository with one real
+  owner-guard mutation per rule group: one process vs 2, 3 and 4 workers give
+  identical output, exit code and guard hits, and the CLI at `--workers 4`
+  kills every mutation. These are the module's only full runs; they share
+  one fixture and one xdist group.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 import types
+from collections import Counter
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
 from scripts import lint_architecture_boundaries as cli
 from scripts.architecture_linter import parallel, runner
 from scripts.architecture_linter.diagnostics import render_violations_and_failures
-from scripts.architecture_linter.models import Rule, Violation
+from scripts.architecture_linter.inventory import EXCLUDED_ROOTS
+from scripts.architecture_linter.models import Rule, RunReport, Violation
+from tests.integration.test_architecture_owner_rule_mutations import MUTATIONS, MutationCase
 
 pytestmark = [
     pytest.mark.component,
@@ -37,6 +45,8 @@ pytestmark = [
 ]
 
 _FAILURE_LINE = "architecture-linter-failure"
+ROOT = Path(__file__).resolve().parents[2]
+_FULL_RUN_TIMEOUT = 360
 
 
 def _write_synthetic_repo(root: Path, guard_ids: list[str]) -> None:
@@ -214,6 +224,127 @@ def test_driver_fails_closed_and_names_the_broken_bucket(
     assert _FAILURE_LINE in out
 
 
+def _guard_of(group: str) -> str:
+    return f"guard-{group.replace('_', '-')}"
+
+
+def _drop_first_guard(doc: dict, buckets: tuple) -> None:
+    doc["registered_guard_ids"] = doc["registered_guard_ids"][1:]
+
+
+def _steal_other_bucket_guard(doc: dict, buckets: tuple) -> None:
+    doc["guard_hits"].append([_guard_of(buckets[0][0]), 1])
+
+
+def _drop_own_guards(doc: dict, buckets: tuple) -> None:
+    doc["guard_hits"] = []
+
+
+def _other_inventory(doc: dict, buckets: tuple) -> None:
+    doc["inventory_digest"] = "0" * 64
+
+
+def _other_bucket_groups(doc: dict, buckets: tuple) -> None:
+    doc["groups"] = list(buckets[0])
+
+
+def _drop_group_results(doc: dict, buckets: tuple) -> None:
+    doc["group_results"] = []
+
+
+def _null_registered_guards(doc: dict, buckets: tuple) -> None:
+    doc["registered_guard_ids"] = None
+
+
+# (tamper applied to the SECOND bucket's report, expected stage, expected text)
+_REPORT_TAMPERS = {
+    "groups-not-bucket": (_other_bucket_groups, "parallel:{b1}", "report covers groups"),
+    "inventory-digest": (
+        _other_inventory,
+        "parallel:{b1}",
+        "workers saw different repository inventories",
+    ),
+    "guard-set": (_drop_first_guard, "parallel:{b1}", "disagree on the registered owner guards"),
+    "guard-in-two-workers": (_steal_other_bucket_guard, "parallel:{b0},{b1}", "ran in 2 workers"),
+    "guard-in-no-worker": (_drop_own_guards, "guard", "did not execute exactly once"),
+    "no-group-results": (_drop_group_results, "parallel:{b1}", "do not match the bucket"),
+    "no-guards-no-registry-failure": (
+        _null_registered_guards,
+        "parallel:{b1}",
+        "no registered guards and no registry failure",
+    ),
+}
+
+
+@pytest.mark.parametrize("tamper", list(_REPORT_TAMPERS))
+def test_inconsistent_worker_reports_fail_the_run_and_name_the_bucket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tamper: str,
+) -> None:
+    repo = tmp_path / "repo"
+    _install_fake_groups(repo, monkeypatch, with_findings=False)
+    buckets = parallel.plan_buckets(2)
+    reports = dict(zip(buckets, _bucket_reports(repo, 2, tmp_path), strict=True))
+    edit, stage, text = _REPORT_TAMPERS[tamper]
+    doc = json.loads(reports[buckets[1]].read_text(encoding="ascii"))
+    edit(doc, buckets)
+    reports[buckets[1]].write_text(json.dumps(doc), encoding="ascii")
+
+    def scripted_argv(root: Path, bucket: tuple[str, ...], report_path: Path) -> list[str]:
+        copy = "import shutil, sys; shutil.copyfile(sys.argv[1], sys.argv[2]); sys.exit(2)"
+        return [sys.executable, "-c", copy, str(reports[tuple(bucket)]), str(report_path)]
+
+    monkeypatch.setattr(parallel, "worker_argv", scripted_argv)
+
+    exit_code = cli.main(["--root", str(repo), "--workers", "2"])
+
+    out = capsys.readouterr().out
+    expected_stage = stage.format(b0="+".join(buckets[0]), b1="+".join(buckets[1]))
+    assert exit_code == 1
+    assert any(
+        line.startswith(f"{expected_stage}:1:1: {_FAILURE_LINE}") and text in line
+        for line in out.splitlines()
+    ), out
+
+
+@pytest.mark.parametrize("plan", ["missing-group", "duplicate-group"])
+def test_a_bucket_plan_that_misses_or_repeats_a_group_starts_no_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: str
+) -> None:
+    groups = runner.GROUP_MODULE_NAMES
+    if plan == "missing-group":
+        buckets = [groups[:2], groups[2:-1]]
+        expected = (f"parallel:{groups[-1]}", "not assigned to any worker")
+    else:
+        buckets = [groups[:3], groups[2:]]
+        expected = ("parallel:" + "+".join(groups[2:]), "already assigned")
+    started: list[object] = []
+    monkeypatch.setattr(parallel, "_start", lambda *args: started.append(args))
+
+    report = parallel.run_parallel(tmp_path, buckets)
+
+    assert report.exit_code == 1
+    assert started == []
+    assert [(f.stage, expected[1] in f.message) for f in report.failures] == [(expected[0], True)]
+
+
+def test_merging_two_partials_for_the_same_groups_is_never_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_groups(tmp_path, monkeypatch, with_findings=False)
+    everything = runner.run_groups(tmp_path, runner.GROUP_MODULE_NAMES)
+
+    report = runner.merge_partial_runs([everything, everything])
+
+    assert report.exit_code == 2
+    label = "parallel:" + "+".join(runner.GROUP_MODULE_NAMES)
+    assert any(
+        f.stage == label and "already run by another worker" in f.message for f in report.failures
+    )
+
+
 def test_a_worker_that_cannot_start_fails_the_run_and_reaps_started_workers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -363,3 +494,126 @@ def test_buckets_cover_every_group_exactly_once(workers: int) -> None:
     flat = [group for bucket in buckets for group in bucket]
     assert sorted(flat) == sorted(runner.GROUP_MODULE_NAMES)
     assert len(buckets) == min(workers, len(runner.GROUP_MODULE_NAMES))
+
+
+# ---------------------------------------------------------------------------
+# Real-repository parity: the gate CI actually runs is the parallel path.
+# ---------------------------------------------------------------------------
+
+
+class ParityRuns(NamedTuple):
+    injected: dict[str, MutationCase]
+    single: RunReport
+    parallel: dict[int, RunReport]
+    cli: subprocess.CompletedProcess[str]
+
+
+def _one_mutation_per_group(copy_root: Path) -> dict[str, MutationCase]:
+    """Pick one applicable owner-guard mutation per rule group, on distinct files."""
+    group_by_guard = {
+        guard: rule.group for rule in runner.registered_rules() for guard in rule.guard_ids
+    }
+    picked: dict[str, MutationCase] = {}
+    used: set[str] = set()
+    for case in MUTATIONS:
+        group = group_by_guard[case.guard_id]
+        path = copy_root / case.path
+        if group in picked or case.path in used or not path.is_file():
+            continue
+        if case.old not in path.read_text(encoding="utf-8"):
+            continue
+        picked[group] = case
+        used.add(case.path)
+    return picked
+
+
+def _guard_hits(report: RunReport) -> Counter[str]:
+    return Counter(
+        guard
+        for group in report.group_results
+        for rule in group.rules
+        if rule.error is None
+        for guard in rule.guard_ids
+    )
+
+
+@pytest.fixture(scope="module")
+def parity_runs(tmp_path_factory: pytest.TempPathFactory) -> ParityRuns:
+    """Lint one mutated copy of the repository with 1, 2, 3 and 4 workers.
+
+    A copy, not the live tree: other xdist workers create files under the
+    checkout, and the driver fails closed when workers see different trees.
+    """
+    copy_root = tmp_path_factory.mktemp("parallel-parity") / "repo"
+    shutil.copytree(ROOT, copy_root, ignore=shutil.ignore_patterns(*EXCLUDED_ROOTS))
+    injected = _one_mutation_per_group(copy_root)
+    for case in injected.values():
+        path = copy_root / case.path
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace(case.old, case.new, -1 if case.replace_all else 1), encoding="utf-8"
+        )
+
+    single = runner.run(copy_root)
+    reports = {
+        workers: parallel.run_parallel(copy_root, parallel.plan_buckets(workers))
+        for workers in (2, 3, 4)
+    }
+    cli_run = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "lint_architecture_boundaries.py"),
+            "--root",
+            str(copy_root),
+            "--workers",
+            "4",
+        ],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_FULL_RUN_TIMEOUT,
+    )
+    return ParityRuns(injected, single, reports, cli_run)
+
+
+@pytest.mark.xdist_group(name="architecture_linter_parallel_parity")
+def test_real_repo_mutations_reach_every_group(parity_runs: ParityRuns) -> None:
+    single = parity_runs.single
+    assert set(parity_runs.injected) == set(runner.GROUP_MODULE_NAMES)
+    with_findings = {
+        group.group for group in single.group_results if any(r.violations for r in group.rules)
+    }
+    assert with_findings == set(runner.GROUP_MODULE_NAMES)
+    reported = {violation.rule_id for violation in single.violations}
+    assert {case.rule_id for case in parity_runs.injected.values()} <= reported
+    assert single.exit_code == 1
+
+
+@pytest.mark.xdist_group(name="architecture_linter_parallel_parity")
+@pytest.mark.parametrize("workers", [2, 3, 4])
+def test_real_repo_parallel_run_equals_one_process(parity_runs: ParityRuns, workers: int) -> None:
+    single = parity_runs.single
+    merged = parity_runs.parallel[workers]
+
+    assert render_violations_and_failures(
+        merged.violations, merged.failures
+    ) == render_violations_and_failures(single.violations, single.failures)
+    assert merged.exit_code == single.exit_code
+    assert _guard_hits(merged) == _guard_hits(single)
+    assert set(_guard_hits(merged).values()) == {1}
+    assert [r.rules for r in merged.group_results] == [r.rules for r in single.group_results]
+
+
+@pytest.mark.xdist_group(name="architecture_linter_parallel_parity")
+def test_cli_with_four_workers_kills_every_injected_mutation(parity_runs: ParityRuns) -> None:
+    single = parity_runs.single
+    result = parity_runs.cli
+
+    assert result.returncode == single.exit_code == 1
+    assert result.stderr == ""
+    assert (
+        result.stdout == render_violations_and_failures(single.violations, single.failures) + "\n"
+    )
+    for case in parity_runs.injected.values():
+        assert f" {case.rule_id} " in result.stdout
