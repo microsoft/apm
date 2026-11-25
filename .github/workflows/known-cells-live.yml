@@ -29,6 +29,36 @@ jobs:
         with:
           enable-cache: false
       - run: uv sync --frozen --extra dev --quiet
-      - name: RT3 cells
+      - name: v0.38.1 CLI
         shell: bash
-        run: uv run --frozen python -m pytest -p no:cacheprovider -p no:randomly -rA -v tests/unit/utils/test_rt3_windows_redteam.py tests/unit/install/test_gitignore_line_endings.py -k 'gitignore or line_ending or platform_ending or mixed_file'
+        run: |
+          git fetch --quiet --no-tags https://github.com/microsoft/apm.git a243ac325589566788e4b9a39ffec9188ca93551
+          git worktree add --quiet --detach ../v0381 FETCH_HEAD
+          (cd ../v0381 && uv sync --frozen --no-editable --quiet)
+      - name: Hooks and pack delta, v0.38.1 vs RC (content)
+        shell: bash
+        run: |
+          set +e +o pipefail
+          rel=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/apm.exe || echo .venv/bin/apm)
+          for side in v0381 rc; do
+            apm=$([ $side = v0381 ] && echo "$GITHUB_WORKSPACE/../v0381/$rel" || echo "$GITHUB_WORKSPACE/$rel")
+            for journey in install-bundle pack; do
+              work="$RUNNER_TEMP/w-$side-$journey"
+              uv run --frozen python -m tests.benchmarks.journeys run --apm "$apm" --fixtures tree-10-mcp \
+                --journeys $journey --rtt 0 --runs 1 --max-load 1000000 --load-wait-min 0 \
+                --work "$work" --out "$RUNNER_TEMP/o-$side-$journey" > /dev/null 2>&1 || echo "[x] $side $journey failed"
+            done
+            hooks="$RUNNER_TEMP/w-$side-install-bundle/runs/tree-10-mcp/bundle-consumer/.github/apm-hooks.json"
+            echo "===== $side apm-hooks.json ====="; od -c "$hooks" | head -4; cat "$hooks"; echo
+            cp "$hooks" "$RUNNER_TEMP/hooks-$side.json"
+            zip=$(ls "$RUNNER_TEMP"/w-$side-pack/runs/tree-10-mcp/dist/*.zip | head -1)
+            uv run --frozen python - "$zip" > "$RUNNER_TEMP/zip-$side.txt" <<'PY'
+          import hashlib, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              for i in sorted(z.infolist(), key=lambda i: i.filename):
+                  d = z.read(i)
+                  print(i.filename, hashlib.sha256(d).hexdigest()[:12], len(d))
+          PY
+          done
+          echo "===== hooks diff v0381 -> rc ====="; diff "$RUNNER_TEMP/hooks-v0381.json" "$RUNNER_TEMP/hooks-rc.json"
+          echo "===== zip members diff v0381 -> rc ====="; diff "$RUNNER_TEMP/zip-v0381.txt" "$RUNNER_TEMP/zip-rc.txt" | head -60
