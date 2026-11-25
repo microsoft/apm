@@ -19,12 +19,16 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-portability.byte
 _ENTRY = "{nl}{nl}# APM dependencies{nl}apm_modules/{nl}"
 
 
-def _update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bytes | None) -> bytes:
+def _update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bytes | None) -> None:
     monkeypatch.chdir(tmp_path)
     if existing is not None:
         (tmp_path / ".gitignore").write_bytes(existing)
     update_gitignore_for_apm_modules()
-    return (tmp_path / ".gitignore").read_bytes()
+
+
+def _assert_gitignore(tmp_path: Path, expected: bytes) -> None:
+    """The durable file the install leaves behind, byte for byte."""
+    assert (tmp_path / ".gitignore").read_bytes() == expected
 
 
 @pytest.mark.parametrize("nl", ["\r\n", "\n"])
@@ -33,9 +37,9 @@ def test_the_entry_uses_the_files_own_line_ending(
 ) -> None:
     existing = f"node_modules/{nl}.env{nl}".encode()
 
-    data = _update(tmp_path, monkeypatch, existing)
+    _update(tmp_path, monkeypatch, existing)
 
-    assert data == existing + _ENTRY.format(nl=nl).encode()
+    _assert_gitignore(tmp_path, existing + _ENTRY.format(nl=nl).encode())
 
 
 def test_a_mixed_file_keeps_its_bytes_and_follows_its_first_line_ending(
@@ -43,9 +47,9 @@ def test_a_mixed_file_keeps_its_bytes_and_follows_its_first_line_ending(
 ) -> None:
     existing = b"a/\r\nb/\nc/\r\n"
 
-    data = _update(tmp_path, monkeypatch, existing)
+    _update(tmp_path, monkeypatch, existing)
 
-    assert data == existing + _ENTRY.format(nl="\r\n").encode()
+    _assert_gitignore(tmp_path, existing + _ENTRY.format(nl="\r\n").encode())
 
 
 @pytest.mark.parametrize("platform_nl", ["\r\n", "\n"])
@@ -54,10 +58,10 @@ def test_a_new_or_unterminated_file_uses_the_platform_ending(
 ) -> None:
     monkeypatch.setattr(os, "linesep", platform_nl)
 
-    assert _update(tmp_path, monkeypatch, None) == (
-        f"{platform_nl}# APM dependencies{platform_nl}apm_modules/{platform_nl}".encode()
+    _update(tmp_path, monkeypatch, None)
+    _assert_gitignore(
+        tmp_path, f"{platform_nl}# APM dependencies{platform_nl}apm_modules/{platform_nl}".encode()
     )
     (tmp_path / ".gitignore").write_bytes(b"dist/")
-    assert _update(tmp_path, monkeypatch, None) == (
-        f"dist/{_ENTRY.format(nl=platform_nl)}".encode()
-    )
+    _update(tmp_path, monkeypatch, None)
+    _assert_gitignore(tmp_path, f"dist/{_ENTRY.format(nl=platform_nl)}".encode())
