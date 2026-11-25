@@ -1081,3 +1081,28 @@ def test_unmanaged_files_deny_passes_an_approved_bundle_upgrade(
         )
     )
     assert "echo p-exec-v2" in deployed, deployed
+
+
+@pytest.mark.parametrize("flags", [("--force", "--dry-run"), ()], ids=["dry-run", "refused"])
+def test_bundle_preview_leaves_the_provenance_store_unchanged(
+    lifecycle_world: World,  # noqa: F811
+    flags: tuple[str, ...],
+) -> None:
+    """#4956: the preview retires and rewrites hooks in a scratch tree, recording no receipts."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, "claude")
+    _assert_ok(world, "install", "--target", "claude", bundle)
+    settings = world.project / ".claude" / "settings.json"
+    document = json.loads(settings.read_text(encoding="utf-8"))
+    document["hooks"].setdefault("PreToolUse", []).append(_USER_HOOK)
+    settings.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    before = _state(world, None, keep_git_cache=False)
+
+    result = _apm(world, "install", *flags, "--target", "claude", bundle)
+
+    assert (result.returncode != 0) == (not flags or "--dry-run" not in flags), _evidence(result)
+    after = _state(world, None, keep_git_cache=False)
+    assert after == before
+    assert not [key for key, data in after.items() if b"apm-bundle-hook-preview" in data]

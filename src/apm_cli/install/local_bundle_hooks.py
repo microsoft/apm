@@ -246,10 +246,10 @@ def _preview_hook_claims(
         package_info.local_bundle_approval = approval_key
         from .local_bundle_hook_trust import retire_merged_bundle_entries
 
-        retire_merged_bundle_entries(scratch, hook_targets, slug)  # as the real run does
         integrator = HookIntegrator()
         scripts: set[str] = set()
         with replay_render():  # a preview records no receipts
+            retire_merged_bundle_entries(scratch, hook_targets, slug)  # as the real run does
             outcomes = list(
                 _integrate_hook_targets(
                     integrator,
