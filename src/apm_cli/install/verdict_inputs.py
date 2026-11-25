@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.install.verdict_record import _tree
+from apm_cli.utils.path_security import has_symlink_component, is_link_stat
 
 # version_checker.should_check_for_updates: the daily check falls due past this age.
 _NOTICE_PERIOD = 86400
@@ -108,23 +109,15 @@ def hash_blind(package: Path) -> bool:
 _MARK = {b"dir": "/", b"link": "@", b"file": "", b"absent": "?"}
 
 
-# path_security._is_link: a Windows name-surrogate reparse point (a junction) is a link.
-_REPARSE_POINT = 0x400
-_NAME_SURROGATE = 0x20000000
-
-
 def _kind(path: str) -> bytes:
-    """One lstat: dir, link (a symlink or a junction), file or absent."""
+    """One lstat: dir, link (a symlink or a junction, per path_security), file or absent."""
     try:
         info = os.lstat(path)
     except FileNotFoundError:
         return b"absent"
     except NotADirectoryError:
         return b"absent"
-    if stat.S_ISLNK(info.st_mode) or (
-        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
-        and getattr(info, "st_reparse_tag", 0) & _NAME_SURROGATE
-    ):
+    if is_link_stat(info):
         return b"link"
     return b"dir" if stat.S_ISDIR(info.st_mode) else b"file"
 
@@ -134,7 +127,9 @@ def walk_governed(base: str) -> Iterator[tuple[str, list[os.DirEntry[str]], list
 
     The engine never deploys through a link (diff_apply._within, #5438): a root or
     a subdirectory that is a link or a junction is no verdict a hit can prove, so
-    it raises (no record, a miss). One lstat per directory level.
+    it raises (no record, a miss). ``_tree`` lists a link to a directory (or a
+    dangling one) among the files, so a link that is not a link to a regular file
+    is refused too. One lstat per directory level.
     """
     if _kind(base) == b"link":
         raise ValueError("linked target directory")
@@ -142,23 +137,25 @@ def walk_governed(base: str) -> Iterator[tuple[str, list[os.DirEntry[str]], list
         for name in dirs:
             if _kind(os.path.join(base, rel, name)) == b"link":
                 raise ValueError("linked target directory")
+        for entry in files:
+            if entry.is_symlink() and not entry.is_file():
+                raise ValueError("linked target directory")
         yield rel, files, dirs
 
 
 def has_linked_parent(root: Path, rel: str, proven: set[str]) -> bool:
-    """Whether a directory between *root* and the file *rel* is a link or a junction.
+    """Whether a directory between *root* and the file *rel* is a link or a junction,
+    decided by the engine's owner (path_security.has_symlink_component, as
+    diff_apply._within does).
 
-    *proven* holds the directories already seen to be real in this check.
+    *proven* holds the parent directories already seen to be link-free in this check.
     """
     parent = os.path.dirname(rel)
-    chain = []
-    while parent and parent not in proven:
-        chain.append(parent)
-        parent = os.path.dirname(parent)
-    for here in reversed(chain):
-        if _kind(os.path.join(root, here)) != b"dir":
-            return True
-        proven.add(here)
+    if not parent or parent in proven:
+        return False
+    if has_symlink_component(root, root / parent):
+        return True
+    proven.add(parent)
     return False
 
 

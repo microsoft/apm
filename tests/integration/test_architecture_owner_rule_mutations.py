@@ -4663,6 +4663,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/verdict_inputs.py",
+        old="    if has_symlink_component(root, root / parent):\n",
+        new="    if os.path.islink(root / parent):\n",
+        intent="The no-op verdict judges a linked deployed parent itself, not through path_security (#5438).",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-path-security",
+        rule_id="transport-platform-url-path-security",
         path="src/apm_cli/install/local_bundle_hook_cwd.py",
         old="        ensure_path_within(spelled, root)\n",
         new="        Path(os.path.realpath(spelled)).relative_to(root)\n",
