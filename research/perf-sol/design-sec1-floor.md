@@ -114,3 +114,27 @@ Paired 6 pairs on main 1e4a208e, anon, t50:
   on cold (18 git spawns).
 - Floors are first-principles estimates from measured unit costs; file-count and parse costs are estimated.
   The floor total (~0.7 s L / ~1.2 s W) matches the morning SoL model (0.7 / 1.5).
+
+## Stacked ceiling: the doc's headline number (measured on one head, not a paper sum)
+Head = Bets' integrate ceiling (perf-research/arch-integrate-ceiling-skilltree ea0ec45e: main + A+B +
+parse-once + skill tree as one op; UNSAFE upper bound) + my M2 bound c2 (hardlink, no re-verify; UNSAFE).
+L/M: perf-research/arch-stack-ceiling-L d3881480 vs main 1e4a208e. W: perf-research/arch-stack-ceiling-W
+2a69add2 vs its base cc5aac78 (main + #5374), default schannel world. Cold t50, 6 pairs, anon, 0 errors.
+| OS | paired ratio | base -> new (bench runner) | ~s at 9V74 | target | run |
+|---|---|---|---|---|---|
+| L | 0.701 | 7.18 -> 5.03 s | 6.1 x 0.701 = **4.3 s** | 3.5 s (miss by ~0.8 s) | 45530064444 |
+| W | 0.719 (vs main+#5374) | 11.32 -> 7.97 s | 13.2 x r(#5374) x 0.719 = **~8.5-9.5 s** (r(#5374) ~0.9-1.0) | 7.5 s (miss by ~1-2 s) | 45530047000 |
+| M | 0.663 | 8.18 -> 5.37 s | n/a (no 9V74 class) | - | 45530082924 |
+Overlap vs paper (L): c2 alone 0.817, ceiling alone 0.899 (Bets 45528038721). Paper additive = 0.716,
+multiplicative = 0.734; measured 0.701. They stack slightly better than the paper (removing the copy also
+removes integrate-side walks of the copied tree). Per-shard ratios within +-1.5%.
+
+## Native-core gate (charter: "native only if the profile shows >= 25% of CPU in walk/stat/hash/copy")
+cpu_attr leaf kinds, L process CPU, one profiled sample each:
+| head | walk_scan | stat | hash | file_io (copy/read/write) | gate sum | + realpath | run |
+|---|---|---|---|---|---|---|---|
+| main 1e4a208e | 10.7% | 14.6% | 0.2% | 19.9% | **45.5%** | 54.2% | 45520769932 |
+| stacked ceiling d3881480 | 18.1% | 11.6% | 0.2% | 15.3% | **45.2%** | 65.1% | 45530101839 |
+**Gate MET on main and at the stacked head (45%, >= 25%).** Hash is negligible (0.2%): bytes are not the
+cost. The native-core candidate is the walk/stat/realpath/file-op layer (syscall-heavy Python), not hashing.
+Even at the stacked ceiling, 65% of L CPU is filesystem-syscall Python, plus 13% imports.

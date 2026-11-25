@@ -174,3 +174,6 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 - Per-file Python copy machinery, not bytes (~1.4 ms L / 3.5 ms W per file). W3d: M2 (fetch-to-final-tree) and M1 (reflink) OK under MS1-MS7; M3 hardlinks rejected.
 ## F28 (03:05) MCP services deletion on main 1.005 / 1.005 [45527692033 / 45527709409]: probe discrepancy closed (concurrent threads).
 ## F29 (02:50) Section 1 drafted: files/design-sec1-floor.md (probe run 45526028119; reachability 0.992-0.994).
+
+## F30 (03:20, 25 Nov) Stacked ceiling (Bets integrate ceiling + M2 bound): L 0.701 [45530064444] -> ~4.3 s @9V74 (target 3.5); W 0.719 vs main+#5374 [45530047000] -> ~8.5-9.5 s (target 7.5); M 0.663 [45530082924]. Paper 0.716-0.734 L.
+## F31 (03:20) Native-core gate MET: walk+stat+hash+copy = 45.5% (main) / 45.2% (stacked) of L process CPU; 54-65% incl. realpath; hash 0.2% [45520769932, 45530101839].
