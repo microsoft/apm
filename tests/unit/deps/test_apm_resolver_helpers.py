@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -439,6 +440,79 @@ class TestOneAnchoredDirectoryIsOneDependency:
         )
 
         assert edge.get_unique_key() == expected_key
+
+    @staticmethod
+    def _edge(tmp_path: Path, declared: str, roots: dict) -> DependencyReference:
+        return transitive_local_identity(
+            DependencyReference.parse(f"../{declared}"),
+            declaring_parent="_local/d",
+            anchored=(tmp_path / "vendor" / "d" / ".." / declared).resolve(),
+            root=tmp_path,
+            root_local_dirs=roots,
+        )
+
+    @pytest.mark.parametrize(
+        ("stored", "other"),
+        [("F-Pkg", "f-pkg"), ("f\u00e9", "fe\u0301")],
+        ids=["case", "nfd"],
+    )
+    @pytest.mark.parametrize(
+        "volume", ["folding", "sensitive", "exact-entry"], ids=lambda volume: volume
+    )
+    def test_spellings_of_one_directory_are_one_node_only_where_the_volume_folds(
+        self, tmp_path: Path, monkeypatch, stored: str, other: str, volume: str
+    ) -> None:
+        """#5424: the fold probe (samefile) decides, an exact entry always wins.
+
+        ``folding``: *other* opens *stored*, so it takes its identity (and the
+        root's). ``sensitive``: the probe denies it, so it never merges.
+        ``exact-entry``: *other* is its own entry, kept even when the probe agrees.
+        """
+        import apm_cli.utils.paths as paths_module
+
+        vendor = tmp_path / "vendor"
+        (vendor / stored).mkdir(parents=True)
+        monkeypatch.setattr(paths_module, "_same_entry", lambda *_: volume != "sensitive")
+        if volume == "exact-entry":
+            listdir = paths_module.os.listdir
+            monkeypatch.setattr(
+                paths_module.os,
+                "listdir",
+                lambda path: [*listdir(path), other] if Path(path) == vendor else listdir(path),
+            )
+        root_ref = DependencyReference.parse(f"./vendor/{stored}")
+        dirs = root_local_dirs([root_ref], tmp_path)
+
+        assert self._edge(tmp_path, stored, {}).get_unique_key() == f"local:vendor/{stored}"
+        if volume == "folding":
+            assert self._edge(tmp_path, other, {}).get_unique_key() == f"local:vendor/{stored}"
+            assert self._edge(tmp_path, other, dirs).get_unique_key() == "./vendor/" + stored
+        else:
+            assert self._edge(tmp_path, other, {}).get_unique_key() == f"local:vendor/{other}"
+            assert self._edge(tmp_path, other, dirs).get_unique_key() == f"local:vendor/{other}"
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+    def test_a_link_out_of_the_project_is_never_listed(self, tmp_path: Path, monkeypatch) -> None:
+        """#5424: the stored-spelling lookup lists only directories below the project root."""
+        import apm_cli.utils.paths as paths_module
+
+        project, outside = tmp_path / "project", tmp_path / "outside"
+        (outside / "Ext").mkdir(parents=True)
+        (project / "vendor" / "d").mkdir(parents=True)
+        try:
+            (project / "vendor" / "ext").symlink_to(outside / "Ext", target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks are not permitted here")
+        listed: list[Path] = []
+        listdir = paths_module.os.listdir
+        monkeypatch.setattr(
+            paths_module.os, "listdir", lambda path: listed.append(Path(path)) or listdir(path)
+        )
+
+        edge = self._edge(project, "ext", {})
+
+        assert edge.anchored_local_path == (outside / "Ext").resolve().as_posix()
+        assert not listed, listed
 
     @staticmethod
     def _lockfile(*rows: tuple[str, str, str | None]) -> LockFile:

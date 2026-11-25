@@ -380,6 +380,47 @@ def test_reanchor_with_a_case_variant_parent_spelling(
     _assert_reanchored_like_a_full_install(world)
 
 
+@pytest.mark.windows_compat
+def test_one_lock_row_for_a_case_variant_parent_spelling_and_a_clean_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5424: root ``./vendor/E-Pkg`` and d's ``../e-pkg`` are one directory, so one row.
+
+    Uninstalling the root spelling re-anchors that one row; it never refuses
+    because the new identity "already belongs to another entry".
+    """
+    if not _fs_folds_case(tmp_path):
+        pytest.skip("case-sensitive filesystem: the spellings name different directories")
+    world = ReplayWorld.create(tmp_path / "w", apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "E-Pkg", "e")
+    _skill_package(vendor / "d", "d", ("../e-pkg",))
+    _manifest(world, ["./vendor/E-Pkg"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert len(_lock_rows_named(world, "e")) == 1, _lock_rows_named(world, "e")
+
+    result = world.apm("uninstall", "./vendor/E-Pkg", expect=None)
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "already belongs to another entry" not in output, output
+    assert result.returncode == 0, output
+    assert len(_lock_rows_named(world, "e")) == 1, _lock_rows_named(world, "e")
+    _assert_reanchored_like_a_full_install(world)
+
+
+def _fs_folds_case(tmp_path: Path) -> bool:
+    probe = tmp_path / "Case-Fold-Probe"
+    probe.mkdir()
+    return (tmp_path / "case-fold-probe").is_dir()
+
+
+def _lock_rows_named(world: ReplayWorld, name: str) -> list[str]:
+    """Every lock row (not deduplicated by key) of the package *name*."""
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    return sorted(row["repo_url"] for row in lock["dependencies"] if row.get("name") == name)
+
+
 @pytest.mark.skipif(
     sys.platform == "win32" or not hasattr(os, "geteuid") or os.geteuid() == 0,
     reason="needs POSIX permissions enforced for a non-root user",
