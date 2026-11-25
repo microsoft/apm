@@ -26,7 +26,9 @@ from apm_cli.commands.policy import policy as policy_group
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
-from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy, ExecutablesPolicy
+
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-executable-item-admission")]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1018,11 +1020,71 @@ def _hook_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_tex
 
 
 _ORG_DENY = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+_EMPTY_DEPENDENCY_ALLOW = ApmPolicy(
+    enforcement="block", dependencies=DependencyPolicy(allow=())
+)
 
 
 def _org_denies():
     """Serve the org deny at the policy discovery boundary."""
     return _serve_policy(_ORG_DENY)
+
+
+def test_approve_refuses_unlocked_package_under_empty_org_dependency_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A no-lockfile fallback package cannot get an approval under an empty org allowlist."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    before = manifest.read_bytes()
+
+    with patch(
+        "apm_cli.commands.approve._load_org_policy", return_value=_EMPTY_DEPENDENCY_ALLOW
+    ):
+        result = CliRunner().invoke(approve_cmd, ["org-denied"])
+
+    assert result.exit_code == 1, result.output
+    assert manifest.read_bytes() == before
+    flat = " ".join(result.output.split())
+    assert "org-denied" in flat
+    assert "dependency-allowlist" in flat
+    assert "Nothing written." in flat
+    assert "Updated apm.yml" not in flat
+
+
+@pytest.mark.parametrize(
+    ("args", "policy"),
+    [
+        pytest.param(["--all"], _EMPTY_DEPENDENCY_ALLOW, id="all"),
+        pytest.param(
+            ["--recommended"],
+            ApmPolicy(
+                enforcement="block",
+                dependencies=DependencyPolicy(allow=()),
+                executables=ExecutablesPolicy(recommend=["org-denied"]),
+            ),
+            id="recommended",
+        ),
+    ],
+)
+def test_bulk_approval_skips_unlocked_package_under_empty_org_dependency_allowlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
+    policy: ApmPolicy,
+) -> None:
+    """Bulk approval names and skips no-lockfile packages outside an org allowlist."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    before = manifest.read_bytes()
+
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+        result = CliRunner().invoke(approve_cmd, args)
+
+    assert result.exit_code == 0, result.output
+    assert manifest.read_bytes() == before
+    flat = " ".join(result.output.split())
+    assert "Skipped org-denied" in flat
+    assert "dependency-allowlist" in flat
+    assert "Updated apm.yml" not in flat
 
 
 def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
