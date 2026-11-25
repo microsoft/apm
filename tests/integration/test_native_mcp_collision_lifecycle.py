@@ -939,6 +939,38 @@ def test_a_skipped_runtime_baseline_never_masks_a_native_key_change(
     assert "codex" not in scenario.lock().mcp_target_servers
 
 
+def test_a_skipped_runtime_claim_still_guards_a_shared_file_entry_a_peer_retires(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """Copilot is skipped but still claims the .mcp.json entry claude retires (#4949)."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    if scenario.user_scope:
+        pytest.skip("the shared project .mcp.json is the subject")
+    manifest = load_yaml(scenario.root / "apm.yml")
+    manifest["targets"] = ["claude", "codex", "copilot"]
+    dump_yaml(manifest, scenario.root / "apm.yml")
+    every = "claude,codex,copilot"
+    with _registry(scenario) as registry:
+        scenario.declare([{"name": "io.example/registered", "registry": registry.url}])
+        _success(scenario.install(targets=every))
+    assert set(scenario.servers("claude")) == {"registered"}
+    scenario.declare(
+        [
+            {
+                **_http("http://127.0.0.1:8000/registered"),
+                "name": "io.example/registered",
+                "targets": ["codex", "copilot"],
+            }
+        ]
+    )
+
+    _success(scenario.install())
+
+    assert set(scenario.servers("claude")) == {"registered"}
+    assert "copilot" in scenario.lock().mcp_target_servers
+
+
 @pytest.mark.parametrize("foreign_target", ["claude", "codex"])
 def test_registry_partial_conflict_does_not_skip_managed_self_defined_update(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
