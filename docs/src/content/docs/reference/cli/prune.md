@@ -44,6 +44,11 @@ lock entry goes, and its deployed files go only where APM can prove it wrote
 them. If a retained package's manifest cannot be read, prune keeps such
 packages rather than guess, and names each one it kept.
 
+A dropped package that a kept dependency is still recorded under in
+`apm.lock.yaml` is also kept, with the packages it still declares, so no lock
+entry points at a removed package. Prune names it, for example
+`Retained _local/a: acme/guard-kit is still recorded under it`.
+
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or
 `apm update` trims the old checkout to the requested subdirectories.
