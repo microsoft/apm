@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import json
 import math
 import os
@@ -77,6 +78,7 @@ NETWORK_JOURNEYS = (
     "install-cold",
     "install-warm",
     "install-noop",
+    "install-noop-replay",
     "install-frozen",
     "install-locked-warm",
     "install-frozen-warm",
@@ -545,17 +547,35 @@ class Context:
             tail += _redact(err.read().decode(errors="replace"))[-3000:]
         return returncode, tail, cpu
 
-    def checked(self, argv: list[str], cwd: Path) -> None:
+    def checked(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
+        """Run one untimed setup command; a nonzero exit fails the cell (redacted)."""
         result = self.run(argv, cwd)
         if result.returncode != 0:
             raise RuntimeError(
                 f"setup `apm {' '.join(argv)}` failed ({result.returncode}) in {cwd}:\n"
                 f"{_redact(result.stdout)[-3000:]}\n{_redact(result.stderr)[-3000:]}"
             )
+        return result
 
     # state helpers (untimed)
 
+    def fresh_user_state(self) -> None:
+        """Empty the isolated user home (APM home included); keep its git config."""
+        home = self.world.isolated.home
+        for entry in home.iterdir():
+            if entry.name == ".gitconfig":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                remove_tree(entry)
+            else:
+                entry.unlink()
+        self.world.apm_home.mkdir(parents=True, exist_ok=True)
+
     def fresh_project(self) -> None:
+        # A fresh checkout gets a fresh user home too: deployment receipts and
+        # verified-state records of the previous checkout at this path would
+        # otherwise read as "another checkout" (the download cache stays).
+        self.fresh_user_state()
         remove_tree(self.project)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
@@ -710,6 +730,57 @@ def _noop(_ctx: Context) -> None:
     return None
 
 
+# The verified-state record's own diagnostics ("[i] verdict record: hit|miss (...)",
+# stderr); the variable is never part of the verdict key (ENV_NOT_VERDICT).
+_REPLAY_TRACE = (("APM_INSTALL_FAST_PATH", "verdict"),)
+_REPLAY_LINE = "[i] verdict record: "
+# Journeys whose setup keeps the installed project between their own samples.
+# install-noop does not: a kept project would replay from sample 2 on.
+_KEEP_INSTALLED = ("install-noop-replay",)
+
+
+def _setup_replay(ctx: Context) -> None:
+    """A converged repeat-user state: installed, one no-op that records, one that hits.
+
+    ``fresh_project`` starts it from a clean user home (earlier journeys' receipts
+    would read as another checkout and the no-op would never converge). On a
+    CLI with the record, the last untimed no-op must replay; otherwise the cell
+    fails instead of timing a full re-proof.
+    """
+    if ctx.is_installed:
+        # Converged by this journey's first sample: later samples (and a profile
+        # rerun) replay the record the setup already proved.
+        return
+    ctx.installed()
+    for root in ctx.roots():
+        first = _replay_outcome(ctx.checked(["install"], root).stderr)
+        # The first unchanged re-install must record (a CLI without the record prints nothing).
+        if first and "recorded" not in first:
+            raise RuntimeError(
+                f"first no-op after install did not record in {root}: replay {first}"
+            )
+        # Up to three more untimed no-ops until one replays: a CLI may need more
+        # than one no-op to write its record (the count is in the trace).
+        seen = []
+        for _ in range(3):
+            outcome = _replay_outcome(ctx.checked(["install"], root).stderr)
+            seen.append(outcome or "-")
+            # No trace line: a CLI without the verified-state record (nothing to converge).
+            if not outcome or outcome == "hit":
+                break
+        else:
+            raise RuntimeError(f"setup no-op did not converge in {root}: replay {seen}")
+
+
+def _replay_outcome(tail: str) -> str:
+    """Every verdict-record outcome of a run, in order ("miss (expired), recorded")."""
+    return ", ".join(
+        line[len(_REPLAY_LINE) :].strip()
+        for line in tail.splitlines()
+        if line.startswith(_REPLAY_LINE)
+    )
+
+
 _AUTH = (("GITHUB_APM_PAT", "ghp_" + "0" * 36), ("APM_GITHUB_AUTH_FIRST", "1"))
 # The CI job's read-only token for real-network authenticated cells. Taken out of
 # the environment at import, so no world (and no anonymous cell) inherits it.
@@ -728,7 +799,18 @@ JOURNEYS: dict[str, Journey] = {
         # fixed placeholder token the offline mirror accepts, auth first.
         Journey("install-cold-auth", _setup_cold, lambda c: _per_root(c, ["install"]), _AUTH),
         Journey("install-warm-auth", _setup_warm, lambda c: _per_root(c, ["install"]), _AUTH),
-        Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
+        # install-noop is a user's first unchanged re-install (install #2): the
+        # engine proves the no-op and writes the verified-state record.
+        # install-noop-replay is every later one (#3+): it replays that record.
+        Journey(
+            "install-noop", Context.installed, lambda c: _per_root(c, ["install"]), _REPLAY_TRACE
+        ),
+        Journey(
+            "install-noop-replay",
+            _setup_replay,
+            lambda c: _per_root(c, ["install"]),
+            _REPLAY_TRACE,
+        ),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
         Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
         Journey(
@@ -798,6 +880,8 @@ class Sample:
     routes: dict = field(default_factory=dict)
     git_verbs: dict = field(default_factory=dict)
     fs: dict = field(default_factory=dict)
+    # Verified-state record outcome per step (noop journeys): "hit", "miss (...)".
+    replay: str = ""
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
@@ -814,10 +898,12 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     output = ""
     returncode = 0
     cpu = 0.0
+    replays: list[str] = []
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
         code, tail, step_cpu = ctx.timed_run(argv, cwd)
         cpu += step_cpu
+        replays.append(_replay_outcome(tail))
         if code != 0:
             returncode = code
             output = f"$ apm {' '.join(argv)}\n{tail}"
@@ -829,6 +915,7 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
     sample.git_verbs, sample.fs = counters["git_verbs"], counters["fs"]
     sample.routes = _routes(_observations(ctx.world)[seen:])
+    sample.replay = "; ".join(r for r in replays if r)
     return sample, output
 
 
@@ -924,8 +1011,12 @@ def _redact(text: str) -> str:
 
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
     journey = _for_world(ctx, journey)
-    with _journey_env(ctx, journey):
-        return _measure(ctx, journey, args)
+    try:
+        with _journey_env(ctx, journey):
+            return _measure(ctx, journey, args)
+    finally:
+        # Installed state kept between one journey's samples never leaks into the next.
+        ctx.is_installed = False
 
 
 def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
@@ -939,7 +1030,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
-        if journey.name != "install-noop":
+        if journey.name not in _KEEP_INSTALLED:
             ctx.is_installed = False
         sample.load1 = load
         sample.load_ok = load < args.max_load
@@ -972,6 +1063,7 @@ def _measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "routes": ok[-1].routes if ok else {},
         "git_verbs": ok[-1].git_verbs if ok else {},
         "fs": ok[-1].fs if ok else {},
+        "replay": ok[-1].replay if ok else "",
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
@@ -1014,8 +1106,9 @@ def _journeys_for(
             continue
         if rtt != 0 and name not in rtt_journeys:
             continue
-        # A monorepo has several roots and local-path deps, which pack refuses by design.
-        if name in (*_GLOBAL, *_PACKS) and len(fixture.roots) > 1:
+        # A monorepo has several roots and local-path deps, which pack refuses by design
+        # and the verified-state record never records, so it has nothing to replay.
+        if name in (*_GLOBAL, *_PACKS, *_KEEP_INSTALLED) and len(fixture.roots) > 1:
             continue
         # The served policy governs the project checkout only: global installs
         # and the bundle consumer have no governed remote, so they would not
@@ -1043,6 +1136,9 @@ def run(args: argparse.Namespace) -> dict:
             ).stdout.strip(),
             "platform": platform.platform(),
             "cpus": os.cpu_count(),
+            # Runner CPU class sets absolute CPU seconds; report absolutes per class.
+            "cpu_model": cpu_model(),
+            "yardstick_cpu_s": yardstick_cpu_s(),
             "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "runs": args.runs,
             "rtt_ms": args.rtt,
@@ -1077,6 +1173,51 @@ def run(args: argparse.Namespace) -> dict:
     report["meta"]["uptime_end"] = _uptime()
     _write(report, out)
     return report
+
+
+def cpu_model() -> str:
+    """The runner's CPU model name ("" when unknown)."""
+    try:
+        if sys.platform.startswith("linux"):
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+                if line.startswith("model name"):
+                    return line.partition(":")[2].strip()
+        elif sys.platform == "darwin":
+            return subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+        elif sys.platform == "win32":
+            import winreg
+
+            key = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as handle:
+                return str(winreg.QueryValueEx(handle, "ProcessorNameString")[0]).strip()
+    except OSError:
+        pass
+    return platform.processor()
+
+
+def yardstick_cpu_s() -> float:
+    """CPU seconds of a fixed single-thread workload: the runner's speed, not the CLI's.
+
+    Pure-Python arithmetic plus SHA-256 over fixed bytes; same work on every
+    runner, so the value tells CPU classes apart. Best of three; each pass runs
+    about half a second, well above Windows' 15.6 ms process-time tick.
+    """
+    data = b"apm-perf-yardstick" * 65536
+    best = math.inf
+    for _ in range(3):
+        start = time.process_time()
+        total = 0
+        for i in range(6_000_000):
+            total += i * i % 7
+        for _ in range(48):
+            hashlib.sha256(data).digest()
+        best = min(best, time.process_time() - start)
+    return round(best, 4)
 
 
 def _uptime() -> str:
