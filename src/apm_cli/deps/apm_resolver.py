@@ -1334,7 +1334,9 @@ class APMDependencyResolver:
         )
         edge = self._edge_refs.get((node.dependency_ref.get_unique_key(), id(chosen)))
         if edge is not None:
-            node.dependency_ref = with_declaring_edge(node.dependency_ref, edge)
+            node.dependency_ref = with_declaring_edge(
+                node.dependency_ref, edge, node.parent, chosen
+            )
         if chosen is node.parent:
             return
         node.parent = chosen
