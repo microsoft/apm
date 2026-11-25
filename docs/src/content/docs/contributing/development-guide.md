@@ -415,7 +415,9 @@ bash scripts/lint-architecture-boundaries.sh
 ```
 
 The check fails closed when metadata is malformed, missing, or not listed in the
-index.
+index. It runs the rule groups in up to four worker processes (half the CPU
+count) and prints the same findings as one process; set
+`APM_ARCH_LINT_WORKERS=1` to force a single process.
 
 Every module under `src/apm_cli/` must match one owner's `selectors` or appear in
 `.apm/architecture/unowned-modules.json`. That list only shrinks: a new module

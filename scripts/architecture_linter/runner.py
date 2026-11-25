@@ -27,6 +27,7 @@ one parse per file content, keyed by source and linter-source hashes, with
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -44,6 +45,7 @@ from scripts.architecture_linter.inventory import (
 from scripts.architecture_linter.models import (
     Failure,
     GroupResult,
+    PartialRun,
     Rule,
     RuleResult,
     RunMetrics,
@@ -481,6 +483,387 @@ def _execute_group(
     )
 
 
+def empty_metrics(
+    inventory_file_count: int,
+    excluded_root_count: int,
+    total_seconds: float,
+    child_processes: int,
+) -> RunMetrics:
+    return RunMetrics(
+        inventory_file_count=inventory_file_count,
+        excluded_root_count=excluded_root_count,
+        read_attempts=0,
+        read_successes=0,
+        read_errors=0,
+        max_reads_per_file=0,
+        parse_attempts=0,
+        parse_successes=0,
+        parse_errors=0,
+        max_parses_per_file=0,
+        ast_visits=0,
+        tree_index_builds=0,
+        tree_index_cache_hits=0,
+        max_tree_index_builds_per_file=0,
+        peak_tree_index_nodes=0,
+        per_group_seconds=tuple((name, 0.0) for name in GROUP_MODULE_NAMES),
+        total_seconds=total_seconds,
+        child_process_count=child_processes,
+    )
+
+
+def _provider_metrics(
+    provider: FactsProvider,
+    inventory_file_count: int,
+    excluded_root_count: int,
+    group_results: Sequence[GroupResult],
+    total_seconds: float,
+    child_processes: int,
+) -> RunMetrics:
+    return RunMetrics(
+        inventory_file_count=inventory_file_count,
+        excluded_root_count=excluded_root_count,
+        read_attempts=provider.source_cache.read_attempts,
+        read_successes=provider.source_cache.read_successes,
+        read_errors=provider.source_cache.read_errors,
+        max_reads_per_file=provider.source_cache.max_reads_per_file,
+        parse_attempts=provider.parse_cache.parse_attempts,
+        parse_successes=provider.parse_cache.parse_successes,
+        parse_errors=provider.parse_cache.parse_errors,
+        max_parses_per_file=provider.parse_cache.max_parses_per_file,
+        ast_visits=provider.ast_visits,
+        tree_index_builds=provider.tree_index_builds,
+        tree_index_cache_hits=provider.tree_index_cache_hits,
+        max_tree_index_builds_per_file=provider.max_tree_index_builds_per_file,
+        peak_tree_index_nodes=provider.peak_tree_index_nodes,
+        per_group_seconds=tuple(
+            (result.group, result.duration_seconds) for result in group_results
+        ),
+        total_seconds=total_seconds,
+        child_process_count=child_processes,
+    )
+
+
+def _inventory_digest(files: Iterable[str]) -> str:
+    return hashlib.sha256("\n".join(files).encode("utf-8")).hexdigest()
+
+
+def _select_rules(
+    runnable_by_group: Mapping[str, tuple[Rule, ...]],
+    selected_rule_ids: Collection[str] | None,
+    startup: DiagnosticCollector,
+) -> Mapping[str, tuple[Rule, ...]]:
+    if selected_rule_ids is None:
+        return runnable_by_group
+    selected = frozenset(selected_rule_ids)
+    known = {rule.id for rules in runnable_by_group.values() for rule in rules}
+    unknown_selected = sorted(selected - known)
+    if unknown_selected:
+        startup.add_failure(
+            Failure("selection", "unknown selected rule IDs: " + ", ".join(unknown_selected))
+        )
+    return {
+        group: tuple(rule for rule in rules if rule.id in selected)
+        for group, rules in runnable_by_group.items()
+    }
+
+
+def _with_import_error(result: GroupResult, entry: _CatalogEntry) -> GroupResult:
+    if entry.module is not None:
+        return result
+    import_error = next(
+        (f.message for f in entry.failures if f.stage == f"import:{result.group}"),
+        None,
+    )
+    return GroupResult(
+        group=result.group,
+        module_name=result.module_name,
+        import_error=import_error,
+        rules=result.rules,
+        duration_seconds=result.duration_seconds,
+    )
+
+
+def _run_partial(
+    root: Path,
+    *,
+    group_names: Collection[str] | None = None,
+    selected_rule_ids: Collection[str] | None = None,
+    source_overrides: Mapping[str, str | bytes] | None = None,
+) -> PartialRun:
+    """Execute `group_names` (default: all groups) and return a mergeable partial.
+
+    Inventory, catalog, registry and selection validation always run against
+    the full catalog, so every partial reports identical startup failures;
+    only rule execution is restricted to `group_names`.
+    """
+    begin_counting()
+    start = time.perf_counter()
+    groups = tuple(
+        name for name in GROUP_MODULE_NAMES if group_names is None or name in group_names
+    )
+    startup = DiagnosticCollector()
+    executed = DiagnosticCollector()
+    group_imports = _group_imports()
+    session: LinterSession = current_session()
+
+    try:
+        inventory = session.inventory(root)
+    except Exception as exc:  # startup failure must not crash the CLI.
+        startup.add_failure(Failure("inventory", str(exc)))
+        return PartialRun(
+            groups=groups,
+            rule_selection=selected_rule_ids is not None,
+            inventory_ok=False,
+            inventory_digest="",
+            startup_failures=startup.failures,
+            violations=(),
+            rule_failures=(),
+            io_failures=(),
+            group_results=(),
+            guard_hits=(),
+            registered_guard_ids=None,
+            metrics=empty_metrics(
+                0, len(EXCLUDED_ROOTS), time.perf_counter() - start, child_process_count()
+            ),
+        )
+
+    entries = [_collect_group(name, module, error) for name, module, error in group_imports]
+    for entry in entries:
+        for failure in entry.failures:
+            startup.add_failure(failure)
+
+    cross_failures, duplicate_ids = _cross_group_failures(entries)
+    for failure in cross_failures:
+        startup.add_failure(failure)
+
+    runnable_by_group: dict[str, tuple[Rule, ...]] = {}
+    all_collectors: list[Collector] = []
+    for entry in entries:
+        survivors = tuple(rule for rule in entry.rules if rule.id not in duplicate_ids)
+        runnable_by_group[entry.group] = survivors
+        all_collectors.extend(entry.collectors)
+
+    all_runnable_rules = [rule for rules in runnable_by_group.values() for rule in rules]
+    duplicate_guards = _duplicate_guard_ids(all_runnable_rules)
+    for guard_id in duplicate_guards:
+        startup.add_failure(Failure("rules", f"duplicate guard id across rules: {guard_id}"))
+
+    provider = FactsProvider(
+        root,
+        inventory.files,
+        registry=None,
+        collectors=tuple(all_collectors),
+        source_overrides=source_overrides,
+        session=session,
+    )
+    registry: OwnerRegistry | None = None
+    if not duplicate_guards:
+        guard_ids = frozenset(guard for rule in all_runnable_rules for guard in rule.guard_ids)
+        registry, registry_failure = _load_registry(provider, guard_ids, guard_ids)
+        if registry_failure is not None:
+            startup.add_failure(registry_failure)
+        provider.registry = registry
+    else:
+        startup.add_failure(
+            Failure(
+                "registry", "skipped: duplicate guard ids make owner-registry validation unsafe"
+            )
+        )
+
+    execution_by_group = _select_rules(runnable_by_group, selected_rule_ids, startup)
+
+    guard_hits: Counter[str] = Counter()
+    # A group's rules were already reduced to the trustworthy survivors in
+    # `_collect_group` / `runnable_by_group` (empty when the import failed or
+    # RULES itself was malformed, filtered when only some rules mismatched
+    # their declared group). Execution always runs against that survivor set
+    # -- there is no separate "broken group" branch to keep in sync with it.
+    group_results: list[GroupResult] = []
+    for group_name in groups:
+        entry = next(e for e in entries if e.group == group_name)
+        result = _execute_group(
+            group_name,
+            execution_by_group.get(group_name, ()),
+            provider,
+            executed,
+            guard_hits,
+        )
+        group_results.append(_with_import_error(result, entry))
+
+    registered_guard_ids: tuple[str, ...] | None = None
+    if registry is not None and not duplicate_guards:
+        registered_guard_ids = tuple(
+            sorted({guard for owner in registry.owners for guard in owner.guards})
+        )
+
+    io_failures = [
+        Failure(f"read:{path}", message) for path, message in provider.source_cache.errors
+    ]
+    io_failures.extend(
+        Failure(f"parse:{path}", message) for path, message in provider.parse_cache.errors
+    )
+
+    observed_child_processes = child_process_count()
+    total_seconds = time.perf_counter() - start
+    return PartialRun(
+        groups=groups,
+        rule_selection=selected_rule_ids is not None,
+        inventory_ok=True,
+        inventory_digest=_inventory_digest(inventory.files),
+        startup_failures=startup.failures,
+        violations=executed.violations,
+        rule_failures=executed.failures,
+        io_failures=tuple(io_failures),
+        group_results=tuple(group_results),
+        guard_hits=tuple(sorted(guard_hits.items())),
+        registered_guard_ids=registered_guard_ids,
+        metrics=_provider_metrics(
+            provider,
+            len(inventory.files),
+            len(inventory.excluded_roots),
+            group_results,
+            total_seconds,
+            observed_child_processes,
+        ),
+    )
+
+
+def _partials_disagree(partials: Sequence[PartialRun]) -> str | None:
+    first = partials[0]
+    for partial in partials[1:]:
+        if partial.inventory_ok != first.inventory_ok:
+            return "workers disagree on whether the inventory loaded"
+        if partial.inventory_digest != first.inventory_digest:
+            return "workers saw different repository inventories"
+        if partial.startup_failures != first.startup_failures:
+            return "workers disagree on startup diagnostics"
+        if partial.registered_guard_ids != first.registered_guard_ids:
+            return "workers disagree on the registered owner guards"
+    return None
+
+
+def _merged_metrics(
+    partials: Sequence[PartialRun],
+    group_results: Sequence[GroupResult],
+    total_seconds: float,
+) -> RunMetrics:
+    first = partials[0].metrics
+    every = [partial.metrics for partial in partials]
+    return RunMetrics(
+        inventory_file_count=first.inventory_file_count,
+        excluded_root_count=first.excluded_root_count,
+        read_attempts=sum(m.read_attempts for m in every),
+        read_successes=sum(m.read_successes for m in every),
+        read_errors=sum(m.read_errors for m in every),
+        max_reads_per_file=max(m.max_reads_per_file for m in every),
+        parse_attempts=sum(m.parse_attempts for m in every),
+        parse_successes=sum(m.parse_successes for m in every),
+        parse_errors=sum(m.parse_errors for m in every),
+        max_parses_per_file=max(m.max_parses_per_file for m in every),
+        ast_visits=sum(m.ast_visits for m in every),
+        tree_index_builds=sum(m.tree_index_builds for m in every),
+        tree_index_cache_hits=sum(m.tree_index_cache_hits for m in every),
+        max_tree_index_builds_per_file=max(m.max_tree_index_builds_per_file for m in every),
+        peak_tree_index_nodes=max(m.peak_tree_index_nodes for m in every),
+        per_group_seconds=tuple(
+            (result.group, result.duration_seconds) for result in group_results
+        ),
+        total_seconds=total_seconds,
+        child_process_count=sum(m.child_process_count for m in every),
+    )
+
+
+def merge_partial_runs(
+    partials: Sequence[PartialRun],
+    *,
+    total_seconds: float | None = None,
+) -> RunReport:
+    """Merge disjoint partials into the report one process would have produced.
+
+    A single partial merges to exactly the single-process report, so the CLI
+    renders both paths through this one function. Partials must cover
+    disjoint groups; a run is complete (exit 0/1 instead of 2) only when they
+    cover every group with no rule selection.
+    """
+    if not partials:
+        raise ValueError("merge_partial_runs needs at least one partial run")
+    first = partials[0]
+    seconds = first.metrics.total_seconds if total_seconds is None else total_seconds
+    covered = [group for partial in partials for group in partial.groups]
+    complete = (
+        not any(partial.rule_selection for partial in partials)
+        and len(covered) == len(set(covered))
+        and set(covered) == set(GROUP_MODULE_NAMES)
+    )
+    collector = DiagnosticCollector()
+    for failure in first.startup_failures:
+        collector.add_failure(failure)
+    disagreement = _partials_disagree(partials)
+    if disagreement is not None:
+        collector.add_failure(Failure("parallel", disagreement))
+
+    if not first.inventory_ok:
+        return RunReport(
+            violations=collector.violations,
+            failures=collector.failures,
+            group_results=(),
+            metrics=empty_metrics(
+                0,
+                first.metrics.excluded_root_count,
+                seconds,
+                sum(partial.metrics.child_process_count for partial in partials),
+            ),
+            exit_code=1 if complete else 2,
+        )
+
+    guard_hits: Counter[str] = Counter()
+    seen_io: set[Failure] = set()
+    for partial in partials:
+        for violation in partial.violations:
+            collector.add_violation(violation)
+        for failure in partial.rule_failures:
+            collector.add_failure(failure)
+        new_io = [failure for failure in partial.io_failures if failure not in seen_io]
+        for failure in new_io:
+            collector.add_failure(failure)
+        seen_io.update(new_io)
+        guard_hits.update(dict(partial.guard_hits))
+
+    if complete and first.registered_guard_ids is not None:
+        for guard_id in first.registered_guard_ids:
+            count = guard_hits.get(guard_id, 0)
+            if count != 1:
+                collector.add_failure(
+                    Failure(
+                        "guard",
+                        f"owner guard did not execute exactly once: {guard_id} (count={count})",
+                    )
+                )
+
+    group_order = {name: index for index, name in enumerate(GROUP_MODULE_NAMES)}
+    group_results = sorted(
+        (result for partial in partials for result in partial.group_results),
+        key=lambda result: group_order[result.group],
+    )
+    metrics = _merged_metrics(partials, group_results, seconds)
+    if metrics.child_process_count:
+        collector.add_failure(
+            Failure(
+                "process",
+                f"child-process events are forbidden (observed {metrics.child_process_count})",
+            )
+        )
+
+    exit_code = 1 if collector.has_findings else 0
+    return RunReport(
+        violations=collector.violations,
+        failures=collector.failures,
+        group_results=tuple(group_results),
+        metrics=metrics,
+        exit_code=exit_code if complete else 2,
+    )
+
+
 def _run(
     root: Path,
     *,
@@ -499,190 +882,25 @@ def _run(
     `source_overrides` is an in-memory, Python-only mutation-test seam.  It is
     routed through the same source cache and has no command-line equivalent.
     """
-    begin_counting()
-    start = time.perf_counter()
-    collector = DiagnosticCollector()
-    group_imports = _group_imports()
-    session: LinterSession = current_session()
-
-    try:
-        inventory = session.inventory(root)
-    except Exception as exc:  # startup failure must not crash the CLI.
-        collector.add_failure(Failure("inventory", str(exc)))
-        metrics = RunMetrics(
-            inventory_file_count=0,
-            excluded_root_count=len(EXCLUDED_ROOTS),
-            read_attempts=0,
-            read_successes=0,
-            read_errors=0,
-            max_reads_per_file=0,
-            parse_attempts=0,
-            parse_successes=0,
-            parse_errors=0,
-            max_parses_per_file=0,
-            ast_visits=0,
-            tree_index_builds=0,
-            tree_index_cache_hits=0,
-            max_tree_index_builds_per_file=0,
-            peak_tree_index_nodes=0,
-            per_group_seconds=tuple((name, 0.0) for name in GROUP_MODULE_NAMES),
-            total_seconds=time.perf_counter() - start,
-            child_process_count=child_process_count(),
-        )
-        return RunReport(
-            violations=collector.violations,
-            failures=collector.failures,
-            group_results=(),
-            metrics=metrics,
-            exit_code=2 if selected_rule_ids is not None else 1,
-        )
-
-    entries = [_collect_group(name, module, error) for name, module, error in group_imports]
-    for entry in entries:
-        for failure in entry.failures:
-            collector.add_failure(failure)
-
-    cross_failures, duplicate_ids = _cross_group_failures(entries)
-    for failure in cross_failures:
-        collector.add_failure(failure)
-
-    runnable_by_group: dict[str, tuple[Rule, ...]] = {}
-    all_collectors: list[Collector] = []
-    for entry in entries:
-        survivors = tuple(rule for rule in entry.rules if rule.id not in duplicate_ids)
-        runnable_by_group[entry.group] = survivors
-        all_collectors.extend(entry.collectors)
-
-    all_runnable_rules = [rule for rules in runnable_by_group.values() for rule in rules]
-    duplicate_guards = _duplicate_guard_ids(all_runnable_rules)
-    for guard_id in duplicate_guards:
-        collector.add_failure(Failure("rules", f"duplicate guard id across rules: {guard_id}"))
-
-    provider = FactsProvider(
+    partial = _run_partial(
         root,
-        inventory.files,
-        registry=None,
-        collectors=tuple(all_collectors),
+        selected_rule_ids=selected_rule_ids,
         source_overrides=source_overrides,
-        session=session,
     )
-    registry: OwnerRegistry | None = None
-    if not duplicate_guards:
-        guard_ids = frozenset(guard for rule in all_runnable_rules for guard in rule.guard_ids)
-        registry, registry_failure = _load_registry(provider, guard_ids, guard_ids)
-        if registry_failure is not None:
-            collector.add_failure(registry_failure)
-        provider.registry = registry
-    else:
-        collector.add_failure(
-            Failure(
-                "registry", "skipped: duplicate guard ids make owner-registry validation unsafe"
-            )
-        )
+    return merge_partial_runs([partial])
 
-    execution_by_group = runnable_by_group
-    if selected_rule_ids is not None:
-        selected = frozenset(selected_rule_ids)
-        unknown_selected = sorted(selected - {rule.id for rule in all_runnable_rules})
-        if unknown_selected:
-            collector.add_failure(
-                Failure(
-                    "selection",
-                    "unknown selected rule IDs: " + ", ".join(unknown_selected),
-                )
-            )
-        execution_by_group = {
-            group: tuple(rule for rule in rules if rule.id in selected)
-            for group, rules in runnable_by_group.items()
-        }
 
-    guard_hits: Counter[str] = Counter()
-    # A group's rules were already reduced to the trustworthy survivors in
-    # `_collect_group` / `runnable_by_group` (empty when the import failed or
-    # RULES itself was malformed, filtered when only some rules mismatched
-    # their declared group). Execution always runs against that survivor set
-    # -- there is no separate "broken group" branch to keep in sync with it.
-    group_results: list[GroupResult] = []
-    for group_name in GROUP_MODULE_NAMES:
-        entry = next(e for e in entries if e.group == group_name)
-        result = _execute_group(
-            group_name,
-            execution_by_group.get(group_name, ()),
-            provider,
-            collector,
-            guard_hits,
-        )
-        if entry.module is None:
-            import_error = next(
-                (f.message for f in entry.failures if f.stage == f"import:{group_name}"),
-                None,
-            )
-            result = GroupResult(
-                group=result.group,
-                module_name=result.module_name,
-                import_error=import_error,
-                rules=result.rules,
-                duration_seconds=result.duration_seconds,
-            )
-        group_results.append(result)
+def run_groups(root: Path, group_names: Collection[str]) -> PartialRun:
+    """Execute only `group_names` and return a partial for the parallel driver.
 
-    if selected_rule_ids is None and registry is not None and not duplicate_guards:
-        registered_guard_ids = {guard for owner in registry.owners for guard in owner.guards}
-        for guard_id in sorted(registered_guard_ids):
-            count = guard_hits.get(guard_id, 0)
-            if count != 1:
-                collector.add_failure(
-                    Failure(
-                        "guard",
-                        f"owner guard did not execute exactly once: {guard_id} (count={count})",
-                    )
-                )
-
-    for path, message in provider.source_cache.errors:
-        collector.add_failure(Failure(f"read:{path}", message))
-    for path, message in provider.parse_cache.errors:
-        collector.add_failure(Failure(f"parse:{path}", message))
-
-    observed_child_processes = child_process_count()
-    if observed_child_processes:
-        collector.add_failure(
-            Failure(
-                "process",
-                f"child-process events are forbidden (observed {observed_child_processes})",
-            )
-        )
-
-    total_seconds = time.perf_counter() - start
-    per_group_seconds = tuple((result.group, result.duration_seconds) for result in group_results)
-    metrics = RunMetrics(
-        inventory_file_count=len(inventory.files),
-        excluded_root_count=len(inventory.excluded_roots),
-        read_attempts=provider.source_cache.read_attempts,
-        read_successes=provider.source_cache.read_successes,
-        read_errors=provider.source_cache.read_errors,
-        max_reads_per_file=provider.source_cache.max_reads_per_file,
-        parse_attempts=provider.parse_cache.parse_attempts,
-        parse_successes=provider.parse_cache.parse_successes,
-        parse_errors=provider.parse_cache.parse_errors,
-        max_parses_per_file=provider.parse_cache.max_parses_per_file,
-        ast_visits=provider.ast_visits,
-        tree_index_builds=provider.tree_index_builds,
-        tree_index_cache_hits=provider.tree_index_cache_hits,
-        max_tree_index_builds_per_file=provider.max_tree_index_builds_per_file,
-        peak_tree_index_nodes=provider.peak_tree_index_nodes,
-        per_group_seconds=per_group_seconds,
-        total_seconds=total_seconds,
-        child_process_count=observed_child_processes,
-    )
-
-    exit_code = 2 if selected_rule_ids is not None else 1 if collector.has_findings else 0
-    return RunReport(
-        violations=collector.violations,
-        failures=collector.failures,
-        group_results=tuple(group_results),
-        metrics=metrics,
-        exit_code=exit_code,
-    )
+    Startup validation still covers the full catalog. The partial alone is
+    never a complete run: only :func:`merge_partial_runs` over partials that
+    cover every group exactly once yields exit code 0 or 1.
+    """
+    unknown = sorted(set(group_names) - set(GROUP_MODULE_NAMES))
+    if unknown:
+        raise ValueError("unknown rule groups: " + ", ".join(unknown))
+    return _run_partial(root, group_names=group_names)
 
 
 def run(root: Path) -> RunReport:
