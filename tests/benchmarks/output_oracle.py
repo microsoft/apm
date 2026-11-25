@@ -11,7 +11,7 @@ Excluded as implementation detail: ``apm_modules/`` (package store layout),
 ``.apm-local/`` (private state) and ``.git/``. The work root differs per side
 (``work/base`` vs ``work/new``), so it is replaced by a placeholder in every
 file before hashing. Every lockfile is parsed and digested without
-``generated_at`` and ``apm_version``.
+``generated_at``, ``apm_version`` and ``packed_at`` (also inside archives).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import yaml
 
 LOCKFILE = "apm.lock.yaml"
 _SKIP_DIRS = frozenset({"apm_modules", ".apm-local", ".git"})
-_VOLATILE_LOCK_KEYS = ("generated_at", "apm_version")
+_VOLATILE_LOCK_KEYS = frozenset({"generated_at", "apm_version", "packed_at"})
 _PLACEHOLDER = b"<WORK>"
 _MAX_DIFF_PATHS = 20
 _ARCHIVE_SUFFIXES = frozenset({".gz", ".tgz", ".tar", ".zip"})
@@ -46,15 +46,29 @@ def _digest(data: bytes, work: re.Pattern[bytes]) -> str:
     return hashlib.sha256(work.sub(_PLACEHOLDER, data)).hexdigest()
 
 
-def _lock_digest(path: Path, work: re.Pattern[bytes]) -> str | None:
-    if not path.is_file():
-        return None
-    data = yaml.safe_load(work.sub(_PLACEHOLDER, path.read_bytes()).decode("utf-8")) or {}
+def _stable(data: object) -> object:
+    """*data* without the run-specific keys (timestamps, CLI version) at any depth."""
     if isinstance(data, dict):
-        for key in _VOLATILE_LOCK_KEYS:
-            data.pop(key, None)
-    canonical = json.dumps(data, sort_keys=True, default=str).encode()
+        return {k: _stable(v) for k, v in data.items() if k not in _VOLATILE_LOCK_KEYS}
+    if isinstance(data, list):
+        return [_stable(v) for v in data]
+    return data
+
+
+def _lock_bytes_digest(raw: bytes, work: re.Pattern[bytes]) -> str:
+    data = yaml.safe_load(work.sub(_PLACEHOLDER, raw).decode("utf-8")) or {}
+    canonical = json.dumps(_stable(data), sort_keys=True, default=str).encode()
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _lock_digest(path: Path, work: re.Pattern[bytes]) -> str | None:
+    return _lock_bytes_digest(path.read_bytes(), work) if path.is_file() else None
+
+
+def _member_digest(name: str, data: bytes, work: re.Pattern[bytes]) -> str:
+    if name.rsplit("/", 1)[-1] == LOCKFILE:
+        return "lock:" + _lock_bytes_digest(data, work)
+    return _digest(data, work)
 
 
 def _archive_digest(path: Path, work: re.Pattern[bytes]) -> str | None:
@@ -64,12 +78,17 @@ def _archive_digest(path: Path, work: re.Pattern[bytes]) -> str | None:
         with tarfile.open(path) as archive:
             for member in archive.getmembers():
                 handle = archive.extractfile(member) if member.isfile() else None
-                content = _digest(handle.read(), work) if handle else member.type.decode()
+                content = (
+                    _member_digest(member.name, handle.read(), work)
+                    if handle
+                    else member.type.decode()
+                )
                 members.append(f"{member.name}\0{content}")
     elif zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
-                members.append(f"{info.filename}\0{_digest(archive.read(info), work)}")
+                digest = _member_digest(info.filename, archive.read(info), work)
+                members.append(f"{info.filename}\0{digest}")
     else:
         return None
     return "archive:" + hashlib.sha256("\n".join(sorted(members)).encode()).hexdigest()

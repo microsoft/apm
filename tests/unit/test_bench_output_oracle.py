@@ -118,7 +118,7 @@ def test_nested_lockfiles_ignore_volatile_keys(tmp_path):
     assert output_oracle.key(outputs[0]) == output_oracle.key(outputs[1])
 
 
-def test_pack_archives_compare_members_not_timestamps(tmp_path):
+def test_pack_archives_compare_members_not_timestamps_or_cli_version(tmp_path):
     outputs = []
     for side, mtime in (("base", 1), ("new", 2)):
         dist = tmp_path / side / "dist"
@@ -127,6 +127,10 @@ def test_pack_archives_compare_members_not_timestamps(tmp_path):
             info = tarfile.TarInfo("plugin/a.md")
             info.size, info.mtime = 1, mtime
             archive.addfile(info, io.BytesIO(b"x"))
+            lock = f"pack:\n  packed_at: '{mtime}'\n  apm_version: v{mtime}\n".encode()
+            entry = tarfile.TarInfo("plugin/apm.lock.yaml")
+            entry.size = len(lock)
+            archive.addfile(entry, io.BytesIO(lock))
         outputs.append(output_oracle.capture([dist], tmp_path / side, lock_dirs=[]))
 
     assert output_oracle.key(outputs[0]) == output_oracle.key(outputs[1])
