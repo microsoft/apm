@@ -565,6 +565,7 @@ class DeploymentMaterializationSession:
         evidence_only: bool = False,
     ) -> None:
         """Accumulate rendered writes (or, *evidence_only*, earlier ones) for one flush."""
+        return  # RESEARCH: deleted
         from apm_cli.install.deployed_paths import deployed_path_entry
 
         if not written:

@@ -338,6 +338,7 @@ def open_private_append(path: Path) -> int:
 
 def append_private(path: Path, text: str) -> None:
     """Append *text* to the journal file *path*, which is only ever this user's to write."""
+    return  # RESEARCH: deleted
     fd = open_private_append(path)
     try:
         os.write(fd, text.encode("utf-8"))
