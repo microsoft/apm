@@ -233,20 +233,99 @@ class TestUnmanagedFiles:
         assert result.passed
         assert len(result.details) > 0
 
-    @pytest.mark.parametrize("directories", [None, [".claude"]])
+    _LOCAL = ".claude/settings.local.json"
+    _NOTE = (
+        "Skipped .claude/settings.local.json: Claude Code's per-user local settings "
+        "(excluded by default; name it in unmanaged_files.directories to govern it)"
+    )
+
+    @staticmethod
+    def _write(root, *rels):
+        for rel in rels:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text("{}", encoding="utf-8")
+
+    @staticmethod
+    def _flagged(result):
+        return [d.split(" ", 1)[0] for d in result.details[:-1]]
+
+    @pytest.mark.parametrize("directories", [None, [".claude"], [".claude/../.claude"]])
     def test_deny_skips_harness_local_settings_only_at_their_exact_path(
         self, tmp_path, directories
     ):
-        """#5472: Claude Code's per-user local settings file is never governed, under the
-        default or a custom directory list; the same name elsewhere still is."""
-        for rel in (".claude/settings.local.json", ".claude/commands/settings.local.json"):
-            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-            (tmp_path / rel).write_text("{}", encoding="utf-8")
+        """#5472: Claude Code's per-user local settings file is skipped by default, under
+        the default, a custom or an equivalent directory spelling, with one note; the
+        same name elsewhere and a sibling .claude/settings.json are still governed."""
+        self._write(
+            tmp_path,
+            self._LOCAL,
+            ".claude/commands/settings.local.json",
+            ".claude/settings.json",
+        )
         policy = UnmanagedFilesPolicy(action="deny", directories=directories)
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert not result.passed
-        flagged = [d.split(" ", 1)[0] for d in result.details[:-1]]
-        assert flagged == [".claude/commands/settings.local.json"], result.details
+        assert sorted(self._flagged(result)) == [
+            ".claude/commands/settings.local.json",
+            ".claude/settings.json",
+        ], result.details
+        assert result.notes == (self._NOTE,)
+
+    @pytest.mark.parametrize(
+        "directories",
+        [
+            [".claude/settings.local.json"],
+            [".claude", ".claude/settings.local.json"],
+            ["./.claude/../.claude/settings.local.json", ".claude"],
+        ],
+    )
+    def test_deny_governs_harness_local_settings_the_policy_names(self, tmp_path, directories):
+        """#5472 R1: the skip is a default; naming the file governs it, reported once."""
+        self._write(tmp_path, self._LOCAL)
+        policy = UnmanagedFilesPolicy(action="deny", directories=directories)
+        result = _check_unmanaged_files(tmp_path, None, policy)
+        assert not result.passed
+        assert self._flagged(result) == [self._LOCAL], result.details
+        assert result.notes == ()
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            ".claude/Settings.Local.JSON",
+            ".claude/settings.loc\u00e1l.json",
+            ".claude/settings.loca\u0301l.json",
+        ],
+        ids=["case", "nfc", "nfd"],
+    )
+    def test_deny_governs_respelled_harness_local_names(self, tmp_path, rel):
+        """#5472: the skip is byte-exact; case and Unicode respellings stay governed.
+
+        The exempt name is ASCII, so NFC and NFD leave it unchanged and no
+        normalized spelling of it can differ from it.
+        """
+        import unicodedata
+
+        assert unicodedata.normalize("NFD", self._LOCAL) == self._LOCAL
+        assert unicodedata.normalize("NFC", self._LOCAL) == self._LOCAL
+        self._write(tmp_path, rel)
+        result = _check_unmanaged_files(tmp_path, None, UnmanagedFilesPolicy(action="deny"))
+        assert not result.passed
+        assert len(self._flagged(result)) == 1, result.details
+        assert self._flagged(result) != [self._LOCAL], result.details
+        assert result.notes == ()
+
+    def test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file(self, tmp_path):
+        """#5472: a symlinked local settings file skips its link path only; the governed
+        file it points to is still reported at its own path."""
+        self._write(tmp_path, ".claude/commands/mine.md")
+        try:
+            (tmp_path / self._LOCAL).symlink_to(Path("commands") / "mine.md")
+        except OSError:
+            pytest.skip("symlinks unavailable")
+        result = _check_unmanaged_files(tmp_path, None, UnmanagedFilesPolicy(action="deny"))
+        assert not result.passed
+        assert self._flagged(result) == [".claude/commands/mine.md"], result.details
+        assert result.notes == (self._NOTE,)
 
     def test_pass_empty_directory(self, tmp_path):
         policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
@@ -273,9 +352,9 @@ class TestUnmanagedFiles:
 
     def test_rglob_cap_skips_check(self, tmp_path, monkeypatch):
         """When file count exceeds the safety cap, check passes with a warning."""
-        from apm_cli.policy import policy_checks
+        from apm_cli.policy import unmanaged_scan
 
-        monkeypatch.setattr(policy_checks, "_MAX_UNMANAGED_SCAN_FILES", 3)
+        monkeypatch.setattr(unmanaged_scan, "MAX_UNMANAGED_SCAN_FILES", 3)
         gov = tmp_path / ".github" / "agents"
         gov.mkdir(parents=True)
         for i in range(5):

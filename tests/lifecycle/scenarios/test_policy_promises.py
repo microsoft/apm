@@ -733,19 +733,32 @@ def test_unmanaged_files_deny_blocks_an_install_that_would_leave_drift(lifecycle
     assert not (project / ".agents" / "skills" / "p-skill").exists(), _text(result)
 
 
+_LOCAL_SETTINGS = ".claude/settings.local.json"
+_LOCAL_SETTINGS_NOTE = (
+    "[i] Skipped .claude/settings.local.json: Claude Code's per-user local settings "
+    "(excluded by default; name it in unmanaged_files.directories to govern it)"
+)
+
+
 @pytest.mark.parametrize(
-    ("rel", "governed"),
-    [(".claude/settings.local.json", False), (".claude/commands/mine.md", True)],
-    ids=["harness-local", "user-authored"],
+    ("rel", "directories", "governed"),
+    [
+        (_LOCAL_SETTINGS, None, False),
+        (".claude/commands/mine.md", None, True),
+        (".claude/settings.json", None, True),
+        (_LOCAL_SETTINGS, [".claude", _LOCAL_SETTINGS], True),
+    ],
+    ids=["harness-local", "user-authored", "sibling-settings", "named-by-policy"],
 )
 def test_unmanaged_files_deny_skips_harness_owned_local_files(
-    lifecycle_world, rel, governed
+    lifecycle_world, rel, directories, governed
 ) -> None:
-    """unmanaged_files.action: deny -- a file the harness writes for itself (Claude Code's
-    per-user .claude/settings.local.json) is never governed, while a user-authored file
-    elsewhere under .claude/ is still refused with the fix to run next (#5472)."""
+    """unmanaged_files.action: deny -- Claude Code's per-user .claude/settings.local.json is
+    skipped by default with one info line, while a user-authored file elsewhere under
+    .claude/, or the local file a policy names, is refused with the fix to run next (#5472)."""
     project = lifecycle_world.project
-    _unmanaged_policy(lifecycle_world, f"harness-local-{governed}", action="deny")
+    fields = {"action": "deny", **({"directories": directories} if directories else {})}
+    _unmanaged_policy(lifecycle_world, f"harness-local-{len(rel)}-{governed}", **fields)
     path = project / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"permissions": {"allow": []}}\n', encoding="utf-8")
@@ -753,19 +766,22 @@ def test_unmanaged_files_deny_skips_harness_owned_local_files(
     result = driver.run(lifecycle_world, ["install", lifecycle_world.packages["p-skill:git"].spec])
     text = _text(result)
     assert path.read_bytes() == before, text
+    assert text.isascii(), text
     if governed:
         assert result.returncode == 1, text
         assert rel in text, text
         assert "unmanaged_files.exclude" in text, text
         assert "apm install <ref>" in text, text
+        assert "Skipped .claude/settings.local.json" not in text, text
         assert not (project / ".agents" / "skills" / "p-skill").exists(), text
-    else:
-        assert result.returncode == 0, text
-        assert "settings.local.json" not in text, text
-        assert (project / ".agents" / "skills" / "p-skill").is_dir(), text
-        audit = driver.run(lifecycle_world, ["audit", "--ci"])
-        assert audit.returncode == 0, _text(audit)
-        assert "settings.local.json" not in _text(audit), _text(audit)
+        return
+    assert result.returncode == 0, text
+    assert text.count(_LOCAL_SETTINGS_NOTE) == 1, text
+    assert "unmanaged file(s)" not in text, text
+    assert (project / ".agents" / "skills" / "p-skill").is_dir(), text
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    assert audit.returncode == 0, _text(audit)
+    assert _text(audit).count(_LOCAL_SETTINGS_NOTE) == 1, _text(audit)
 
 
 # -- G8: security.audit.fail_on_drift (policy-schema.md, security section) ----------

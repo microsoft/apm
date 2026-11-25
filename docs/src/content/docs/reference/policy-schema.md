@@ -210,7 +210,7 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 | Field         | Type           | Default  | Notes                                                                            |
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift: under `enforcement: block`, `apm install` refuses when a governed directory would hold a file no lockfile row claims. `--mcp` and a local bundle refuse before writing anything; an install that deploys packages or local `.apm/` content restores every file it deployed and its lockfile; `--dry-run` previews it; `apm audit --ci` fails the same state. Known limit: this verdict needs the deployed files, so an install killed between deploy and restore leaves them unrecorded. |
-| `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
+| `directories` | list of paths  | `[]`     | Subset of target directories (or single files) to check. Empty = all known target directories.     |
 | `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
 
 Each reported file is a divergence-visibility finding, not a security verdict
@@ -240,9 +240,18 @@ FIFO) in a governed directory is always reported.
 With no executables block, bundle hook files count as unmanaged; approve them to attest.
 
 Claude Code's per-user local settings file, `.claude/settings.local.json`, is
-never governed, whatever `directories` lists: Claude Code writes it and it is
-not committed. Only that exact path is skipped; a file with the same name
-elsewhere is still reported.
+skipped by default: Claude Code writes it and it is not committed. When it is
+present, install and text-format `apm audit` print one line:
+
+```text
+[i] Skipped .claude/settings.local.json: Claude Code's per-user local settings (excluded by default; name it in unmanaged_files.directories to govern it)
+```
+
+To govern it, list the file in `directories` (for example
+`[.claude, .claude/settings.local.json]`). The skip matches that exact,
+case-sensitive path only; a same-named file elsewhere, a respelling such as
+`.claude/Settings.Local.JSON`, or the file a symlink there points to is still
+reported.
 
 ## security
 
