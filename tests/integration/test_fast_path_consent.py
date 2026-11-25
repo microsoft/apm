@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 import apm_cli
+from apm_cli.install.fast_entry import DECIDE_EXIT
 from tests.fixtures.perf import TREE_RECIPES, build_tree, serve_offline
 
 pytestmark = [
@@ -77,7 +78,10 @@ def test_a_fast_path_decision_never_migrates_a_legacy_approvals_file(world) -> N
 
     decided = install("decide")
 
-    assert "install fast path:" in decided.stderr, decided.stderr
+    # The full fast decision was reached (it reads consent on the way); an early
+    # decline (no lockfile, an error) would leave the files alone for another reason.
+    assert decided.returncode == DECIDE_EXIT, decided.stdout + decided.stderr
+    assert "install fast path: no-op (desired state already deployed)" in decided.stderr
     _assert_consent(home, before)
 
 
