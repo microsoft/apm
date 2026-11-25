@@ -160,10 +160,13 @@ def _render_update_completion_summary(
         _rich_success(f"Updated {count} revision {noun} in apm.yml.")
     elif plan_state.pin_repairs:
         _report_pin_repairs(plan_state.pin_repairs, " No dependency changes were applied.")
+        return
     else:
         _rich_success("No dependency changes were applied.")
 
-    if applied and plan_state.pin_repairs:
+    # Every other outcome line still reports what the pin repairs did, so a
+    # failed pins write is never hidden behind a revision-pin summary.
+    if plan_state.pin_repairs:
         _report_pin_repairs(plan_state.pin_repairs, "")
 
 
