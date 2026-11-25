@@ -14,7 +14,7 @@ import pytest
 
 from apm_cli.install.helpers.gitignore import update_gitignore_for_apm_modules
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-portability.byte_deterministic")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-portability.byte_deterministic")]
 
 _ENTRY = "{nl}{nl}# APM dependencies{nl}apm_modules/{nl}"
 
