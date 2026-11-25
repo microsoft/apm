@@ -26,7 +26,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.realpath import resolve_path
 
 pytestmark = [
-    pytest.mark.unit,
+    pytest.mark.component,
     pytest.mark.promise("P-LAW-portability.byte_deterministic"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks; Windows keeps no proofs"),
 ]

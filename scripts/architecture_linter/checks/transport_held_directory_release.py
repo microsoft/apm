@@ -374,8 +374,9 @@ def _statement_chain(
 def _release_dominates(index: TreeIndex, function: ast.AST, call: ast.Call) -> bool:
     """Whether a ``release_held`` in *function*'s own scope runs on every path to *call*.
 
-    The release's statement must sit earlier in a block that also encloses the
-    call: a release in a sibling ``if``/``else``/``try`` branch never counts.
+    The release's own statement must sit earlier in a block that also encloses
+    the call: a release in a sibling ``if``/``else``/``try`` branch, or one
+    nested under a condition, never counts.
     """
     parents, slots = _statement_slots(function)
     call_chain = set(_statement_chain(call, function, parents, slots))
@@ -385,11 +386,9 @@ def _release_dominates(index: TreeIndex, function: ast.AST, call: ast.Call) -> b
         chain = _statement_chain(node, function, parents, slots)
         if not chain:
             continue
-        for outer_block, outer_position in chain:
-            if any(
-                block_id == outer_block and outer_position < later for block_id, later in call_chain
-            ):
-                return True
+        block, position = chain[0]
+        if any(block_id == block and position < later for block_id, later in call_chain):
+            return True
     return False
 
 
