@@ -39,12 +39,14 @@ def _ok(result, label: str) -> None:
     assert result.returncode == 0, f"{label}: {_text(result)}"
 
 
+def _body(name: str) -> str:
+    return f"---\nname: {name}\ndescription: Local skill {name}.\n---\n\nUse {name} v1.\n"
+
+
 def _vendor(world: World, *names: str) -> None:
     factory = LocalPackageFactory(world.project / "vendor")
     for name in names:
-        package = factory.create(name, version="1.0.0")
-        body = f"---\nname: {name}\ndescription: Local skill {name}.\n---\n\nUse {name} v1.\n"
-        factory.add_skill(package, name, body)
+        factory.add_skill(factory.create(name, version="1.0.0"), name, _body(name))
 
 
 def _skill_source(world: World, name: str):
@@ -164,5 +166,45 @@ def test_update_with_deleted_local_source_names_the_fix(lifecycle_world: World) 
 
     assert result.returncode == 1, _text(result)
     assert _NO_OP not in _text(result), _text(result)
-    assert "vendor/a" in _text(result), _text(result)
+    assert "./vendor/a" in _text(result), _text(result)
+    assert "Restore the source or correct the dependency path" in _text(result)
+    assert "'apm install'" in _text(result), _text(result)
     assert _snapshot(world) == before
+
+
+def test_update_keeps_an_unchanged_legacy_plugin_and_refreshes_a_transitive_local(
+    lifecycle_world: World,
+) -> None:
+    """A plugin without apm.yml is normalized after its copy; that is no change.
+
+    A local package's own local dependency is refreshed when it changes.
+    """
+    world = lifecycle_world
+    plugin = world.project / "vendor" / "plug"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": "plug", "version": "1.0.0"}', encoding="utf-8"
+    )
+    factory = LocalPackageFactory(world.project / "vendor")
+    factory.add_skill(factory.create("u", version="1.0.0"), "u", _body("u"))
+    parent = factory.create("t", version="1.0.0", dependencies=["../u"])
+    factory.add_skill(parent, "t", _body("t"))
+    plugin_skill = plugin / "skills" / "ps" / "SKILL.md"
+    plugin_skill.parent.mkdir(parents=True)
+    plugin_skill.write_text(_body("ps"), encoding="utf-8")
+    _ok(driver.run(world, ["install", "./vendor/plug", "./vendor/t"]), "install")
+    before = _snapshot(world)
+
+    unchanged = driver.run(world, ["update", "-y"])
+
+    _ok(unchanged, "unchanged update")
+    assert _NO_OP in _text(unchanged), _text(unchanged)
+    assert _snapshot(world) == before
+
+    _bump(world, "u")
+    changed = driver.run(world, ["update", "-y"])
+
+    _ok(changed, "update")
+    assert "Use u v1.1.0." in _deployed(world, "u"), _text(changed)
+    assert "Updated 1 APM dependency." in _text(changed), _text(changed)
+    _ok(driver.run(world, ["install", "--frozen"]), "install --frozen after update")

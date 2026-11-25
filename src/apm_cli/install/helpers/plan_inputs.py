@@ -80,19 +80,22 @@ def writes_lockfile(ctx: InstallContext, lockfile: LockFile, *, updating: bool) 
 def build_resolved_update_plan(ctx: InstallContext, lockfile: LockFile | None) -> UpdatePlan:
     """Supply validated, staged local package hashes to the pure plan owner.
 
-    Resolve re-copies every local dependency, so its staged image is the
-    content install would lock; an edited local package is a change (#5463).
+    An update hashes each local copy as resolve made it, before validation
+    normalizes it (the image install locks), so an edited local package is
+    a planned change and an unchanged one is not (#5463).
     """
     from apm_cli.install.plan import build_update_plan
     from apm_cli.install.source_helpers import package_digests, record_package_digests
 
     for dependency in ctx.deps_to_install:
-        if dependency.is_local:
-            record_package_digests(
-                ctx,
-                dependency.get_unique_key(),
-                package_digests(ctx, dependency.get_install_path(ctx.apm_modules_dir)),
-            )
+        if not dependency.is_local:
+            continue
+        key = dependency.get_unique_key()
+        digests = ctx.local_copy_digests.get(key)
+        if digests is None and dependency.replacement is not None:
+            digests = package_digests(ctx, dependency.get_install_path(ctx.apm_modules_dir))
+        if digests is not None:
+            record_package_digests(ctx, key, digests)
     return build_update_plan(
         lockfile,
         ctx.deps_to_install,
