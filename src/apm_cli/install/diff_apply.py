@@ -546,7 +546,7 @@ def _refuse_native_plugins(project_root: Path, lock: Any) -> None:
     """Native plugin registration and retirement run only in the full install's
     last phases (install/pipeline.py: codex_plugins, claude_plugins), which APPLY omits.
     """
-    from apm_cli.codex_plugins.registrar import ledger_path_for
+    from apm_cli.codex_plugins.ledger import ledger_path_for
     from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.models.validation import PackageType
     from apm_cli.native_plugins.record import lock_native_plugins
