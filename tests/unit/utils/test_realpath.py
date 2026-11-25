@@ -199,7 +199,7 @@ def test_a_link_planted_by_user_code_is_seen_after_the_memo_drops(tree: Path) ->
     target = tree / "dir" / "sub" / "deployed.md"
     with invocation_scope():
         assert resolve_path(target) == target.resolve()
-        assert realpath.proven_link_free(tree / "dir" / "sub")
+        assert realpath.proven_link_free(tree / "dir" / "sub") is realpath._K_PROOFS
         (tree / "dir" / "sub").rename(tree / "dir" / "sub-moved")
         (tree / "dir" / "sub").symlink_to(tree / "outside", target_is_directory=True)
         forget_invocation_memos()
@@ -231,7 +231,7 @@ def test_a_leaf_link_under_a_proven_directory_is_still_found(tree: Path) -> None
 
     with invocation_scope():
         assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
-        assert realpath.proven_link_free(tree / "dir")
+        assert realpath.proven_link_free(tree / "dir") is realpath._K_PROOFS
         assert (
             first_symlink_component(tree, tree / "dir" / "link_file") == tree / "dir" / "link_file"
         )
@@ -304,7 +304,7 @@ def test_apm_replacing_a_tree_drops_its_proofs(tree: Path) -> None:
     with invocation_scope():
         assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
         assert resolve_path(leaf) == leaf
-        assert realpath.proven_link_free(tree / "dir" / "sub")
+        assert realpath.proven_link_free(tree / "dir" / "sub") is realpath._K_PROOFS
         release_held(tree / "dir" / "sub")
         assert not realpath.proven_link_free(tree / "dir" / "sub")
         assert not realpath.proven_link_free(tree / "dir")  # every proof goes (aliases)
@@ -436,7 +436,7 @@ def test_a_dotdot_spelling_is_never_proven(tree: Path) -> None:
 
     with invocation_scope():
         assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
-        assert realpath.proven_link_free(tree / "dir")
+        assert realpath.proven_link_free(tree / "dir") is realpath._K_PROOFS
         assert not realpath.proven_link_free(tree / "link_dir" / ".." / "dir")
 
 
@@ -485,7 +485,7 @@ def test_a_proven_directory_apm_replaces_with_a_link_is_refused(tree: Path, repl
     sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
     with invocation_scope():
         assert resolve_path(leaf) == leaf
-        assert realpath.proven_link_free(sub)
+        assert realpath.proven_link_free(sub) is realpath._K_PROOFS
         replace(sub, tree / "outside")
         assert not realpath.proven_link_free(sub)
         _expect_link_refused(tree, leaf)

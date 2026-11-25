@@ -1,0 +1,53 @@
+name: Standby revert 5382 proofs (research)
+
+on:
+  push:
+    branches: [perf-research/revert-5382-proofs]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: false
+      - name: Lint chain (CI mirror)
+        run: |
+          set -euo pipefail
+          L="scripts/lint_architecture_boundaries.py scripts/architecture_linter/"
+          uv run --extra dev ruff check src/ tests/ $L
+          uv run --extra dev ruff format --check src/ tests/ $L
+          uv run --extra dev python -m pylint --disable=all --enable=R0801 --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/ $L
+          bash scripts/lint-auth-signals.sh
+          uv run --extra dev python scripts/check_complexity_ratchet.py --base-ref 8225ec64b01efece30f22c6785b292d5dd583a02
+          echo "LINT CHAIN OK"
+  unit:
+    name: unit ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: false
+      - name: Proof cells + realpath suite
+        run: uv run --extra dev python -m pytest -p no:xdist -rA -q tests/unit/utils/test_realpath_proof_lifetime.py tests/unit/utils/test_realpath.py
+      - name: Unit suite
+        run: uv run --extra dev python -m pytest -n auto --dist worksteal -q -p no:cacheprovider tests/unit tests/test_console.py tests/red_team tests/fixtures/policy
