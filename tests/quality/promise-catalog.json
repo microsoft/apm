@@ -191,6 +191,7 @@
     "P-OWN-user-invocable-resolution": "architecture owner (core-runtime.json): Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
     "P-OWN-user-root-scoped-instruction-eligibility": "architecture owner (hooks-integrations.json): User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
     "P-OWN-windows-stable-executable-path": "architecture owner (transport-auth-platform.json): Windows stable executable path",
+    "P-PERF-bench-same-output": "perf bench: a base-vs-new cell is a like-for-like measurement only when both sides deploy the same files and lockfile; otherwise the report marks it INVALID and fails",
     "P-PERF-count-budgets": "perf promise engine layer 1: each budgeted journey stays within its count budgets; a budget changes only in a PR row with a reason",
     "P-SEC-gitpython-advisory-floor": "installing apm-cli upgrades GitPython below 3.1.41 (published Windows advisories CVE-2023-40590, CVE-2024-22190)",
     "req-cf-001": "spec openapm-v0.1 12.5 (MUST, consumer)",
