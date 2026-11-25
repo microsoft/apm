@@ -922,6 +922,16 @@ FROZEN_UPDATE_CONFLICT = _entry(
     "refresh the locked refs",
     then="use 'apm install --frozen' in CI",
 )
+HOME_ROOT_USER_SCOPE = _entry(
+    "home-root-user-scope",
+    "apm install -g",
+    "install for the user instead of the project",
+)
+HOME_ROOT_PICK_DIR = _entry(
+    "home-root-pick-dir",
+    "apm install --root <dir>",
+    "install into a project folder instead of your home directory",
+)
 BUNDLE_REPACK_PLUGIN = _entry(
     "bundle-repack-plugin",
     "apm pack --claude-plugin --archive",

@@ -255,6 +255,6 @@ def test_the_scope_guard_refuses_the_home_directory_and_names_the_fix(
 
     home, work = _home_world(tmp_path, monkeypatch)
 
-    with pytest.raises(click.UsageError, match=r"apm install -g.*--root <dir>"):
+    with pytest.raises(click.UsageError, match=r"apm install -g.*apm install --root <dir>"):
         ensure_project_root_is_not_user_scope(home)
     ensure_project_root_is_not_user_scope(work)

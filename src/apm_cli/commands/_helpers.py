@@ -4,10 +4,11 @@ This module must NOT import from any command module.
 """
 
 import builtins
+import contextlib
 import functools
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import click
@@ -553,15 +554,27 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     discoverable from ``start`` upward.
 
     An ancestor ``apm.yml`` another user owns is never adopted (git's
-    ``safe.directory`` class): ``/tmp/work`` must not run another
+    ``safe.directory`` class, #4545): ``/tmp/work`` must not run another
     user's ``/tmp/apm.yml``. It is skipped with a warning naming it, and the
     walk continues. Windows ownership (SIDs) is not checked.
+
+    ``$HOME`` is a ceiling (#4545, #5448): a walk that starts in a strict
+    subdirectory of the resolved home directory never adopts an ``apm.yml`` in
+    ``$HOME`` itself or above it, so a stray ``~/apm.yml`` cannot capture a
+    project folder. A walk starting at ``$HOME`` or outside it is unchanged.
     """
     import stat
 
     cwd = (start or Path.cwd()).resolve()
     geteuid = getattr(os, "geteuid", None)
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        home = None
+    below_home = home is not None and cwd != home and home in cwd.parents
     for candidate in (cwd, *cwd.parents):
+        if below_home and candidate == home:
+            break
         manifest = manifest_file(candidate)
         try:
             info = manifest.lstat()
@@ -580,6 +593,125 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
             continue
         return manifest
     return None
+
+
+def ensure_project_root_is_not_user_scope(project_root: Path, *, user_scope: bool = False) -> None:
+    """Refuse a project-scope root whose deploy directories are the user-scope ones (#4545)."""
+    if user_scope:
+        return
+    from ..core.remediation import HOME_ROOT_PICK_DIR, HOME_ROOT_USER_SCOPE, either_sentence
+
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        return
+    if project_root.resolve() == home:
+        raise click.UsageError(
+            f"Project scope would deploy into the user-scope directories under {home} "
+            f"(~/.claude, ~/.agents, ...). {either_sentence(HOME_ROOT_USER_SCOPE, HOME_ROOT_PICK_DIR)}"
+        )
+
+
+def resolve_cli_packages_for_project_root(
+    packages: tuple[str, ...],
+    invoking_dir: Path,
+    project_root: Path,
+) -> tuple[str, ...]:
+    """Resolve relative CLI package paths from invoking_dir relative to project_root (#4545)."""
+    invoking, root = invoking_dir.resolve(), project_root.resolve()
+    if invoking == root:
+        return packages
+    resolved: list[str] = []
+    for pkg in packages:
+        # Only an explicit relative path names the invoking directory; a bare
+        # name (``foo``, ``name@market``) never depends on what the subdir holds.
+        if not pkg.startswith(("./", "../", ".\\", "..\\")):
+            resolved.append(pkg)
+            continue
+        resolved.append(_rebase_relative_package(pkg, invoking, root))
+    return tuple(resolved)
+
+
+def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:
+    """Rebase an explicit relative *pkg* from *invoking* onto *root* (#4545).
+
+    Only the parent is resolved, so an intermediate symlink followed by
+    ``..`` lands where the filesystem does; the final component is kept as
+    written, so install still refuses a selected symlink. ``.`` components
+    are dropped first, so ``./link/.`` cannot hide the link either. Across
+    Windows drives no relative path exists, so the absolute path is kept.
+    """
+    from ..models.dependency.identity import normalise_local_path_separators
+
+    parts = [
+        part for part in normalise_local_path_separators(pkg).split("/") if part not in ("", ".")
+    ]
+    if not parts or parts[-1] == "..":
+        target = os.path.realpath(os.path.join(invoking, *parts))
+    else:
+        target = os.path.join(os.path.realpath(os.path.join(invoking, *parts[:-1])), parts[-1])
+    try:
+        rel = os.path.relpath(target, root).replace("\\", "/")
+    except ValueError:
+        return Path(target).as_posix()
+    if rel == ".":
+        return "./"
+    if rel != ".." and not rel.startswith(("./", "../")):
+        return f"./{rel}"
+    return rel
+
+
+@contextlib.contextmanager
+def discover_project_root(
+    packages: tuple[str, ...] = (),
+    *,
+    enabled: bool = True,
+) -> Iterator[tuple[Path | None, tuple[str, ...]]]:
+    """Discover nearest ancestor apm.yml for project-scope install (#4545).
+
+    When *enabled*, walks parent directories from cwd looking for ``apm.yml``.
+    If cwd has no ``apm.yml`` and an ancestor does, prints the discovery notice,
+    resolves relative CLI package paths from the invoking directory against the
+    discovered project root, anchors sources and deploy paths by changing working
+    directory to that project root, and restores the original working directory on exit.
+    """
+    if not enabled:
+        yield None, packages
+        return
+
+    manifest_path = _find_apm_yml()
+    if manifest_path is None:
+        yield None, packages
+        return
+
+    project_root = manifest_path.parent
+    original = Path.cwd()
+    if project_root != original.resolve():
+        resolved_packages = resolve_cli_packages_for_project_root(packages, original, project_root)
+        _rich_info(
+            f"Using apm.yml at {manifest_path} (project root: {project_root})",
+            symbol="info",
+        )
+        os.chdir(project_root)
+        try:
+            yield project_root, resolved_packages
+        finally:
+            with contextlib.suppress(OSError):
+                os.chdir(original)
+    else:
+        yield project_root, packages
+
+
+def setup_project_root_discovery(
+    ctx: click.Context,
+    packages: tuple[str, ...],
+    *,
+    enabled: bool,
+) -> tuple[str, ...]:
+    """Register project root discovery with Click context if enabled (#4545)."""
+    if enabled:
+        _, packages = ctx.with_resource(discover_project_root(packages, enabled=True))
+    return packages
 
 
 # Shared by ``apm install`` and ``apm update`` so both commands expose the same

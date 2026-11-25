@@ -124,7 +124,7 @@ def test_a_project_install_in_the_home_directory_is_refused_and_names_the_fix(
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, _describe(result)
-    assert "apm install -g" in output and "--root <dir>" in output, _describe(result)
+    assert "apm install -g" in output and "apm install --root <dir>" in output, _describe(result)
     assert home_manifest.read_bytes() == before, _describe(result)
     assert not (isolated.home / ".claude").exists(), _describe(result)
     assert not (isolated.home / "apm.lock.yaml").exists(), _describe(result)
