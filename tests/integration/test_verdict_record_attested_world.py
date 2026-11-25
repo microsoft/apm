@@ -252,6 +252,63 @@ def test_a_frozen_install_answers_as_the_full_frozen_pipeline(world_install, sce
     assert (lock.read_bytes(), lock.stat().st_mtime_ns) == before, "--frozen rewrote the lock"
 
 
+def test_the_speculative_frozen_preflight_never_migrates_personal_consent(
+    world_install,
+) -> None:
+    """Copilot #5423: the fast path's frozen preflight (verdict_attest.refuse_frozen_drift)
+    reads a legacy approvals.yml and never migrates it; the full install owns that write."""
+    install, project, world = world_install
+    _assert_attested(install())
+    home = Path(world.apm_home)
+    legacy = home / "approvals.yml"
+    legacy.write_text("perf-org/pkg-000: {hooks: true}\n", encoding="utf-8")
+    config = home / "config.json"
+    before = (legacy.read_bytes(), config.read_bytes() if config.exists() else None)
+    code = "from pathlib import Path; from apm_cli.install import verdict_attest as v; "
+    code += "v.refuse_frozen_drift(Path.cwd())"
+
+    done = subprocess.run(
+        [sys.executable, "-c", code], cwd=project, env=world_env(world), capture_output=True
+    )
+
+    assert done.returncode == 0, done.stderr
+    _assert_consent_untouched(legacy, config, before)
+
+
+def world_env(world) -> dict:
+    env = {k: v for k, v in world.env.items() if k not in _NO_HIT}
+    env["PYTHONPATH"] = str(Path(apm_cli.__file__).resolve().parents[1])
+    return env
+
+
+def _assert_consent_untouched(legacy: Path, config: Path, before) -> None:
+    after = (
+        legacy.read_bytes() if legacy.exists() else None,
+        config.read_bytes() if config.exists() else None,
+    )
+    assert after == before, "a speculative frozen preflight migrated personal consent"
+
+
+def test_the_frozen_preflight_decides_before_any_fast_decision(world_install) -> None:
+    """Copilot #5423: an MCP server apm.yml declares but the lock does not record is a
+    frozen refusal the preflight owner makes before any fast decision (decide mode
+    stops before the render, so no later phase could catch it)."""
+    import yaml
+
+    install, project, _world = world_install
+    _assert_attested(install())
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    server = {"name": "root-mcp", "registry": False, "transport": "stdio", "command": "true"}
+    manifest["dependencies"]["mcp"] = [server]
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    before = (project / "apm.lock.yaml").read_bytes()
+
+    code, _stdout, stderr = install("--frozen", fast="decide")
+
+    assert "install fast path: full run (frozen preflight)" in stderr, stderr
+    assert code != 0 and (project / "apm.lock.yaml").read_bytes() == before
+
+
 def _add_local_dependency(project: Path) -> None:
     package = project / "local-pkg"
     (package / ".apm" / "instructions").mkdir(parents=True)

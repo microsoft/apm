@@ -175,7 +175,9 @@ def _frozen_preflight(project_root: Path, manifest: Any, logger: Any) -> None:
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
 
-    request = InstallRequest.frozen_preflight(manifest, scope=InstallScope.PROJECT, logger=logger)
+    request = InstallRequest.frozen_preflight(
+        manifest, scope=InstallScope.PROJECT, logger=logger, speculative=True
+    )
     InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
 
 
