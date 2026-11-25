@@ -928,7 +928,7 @@ class LockfileBuilder:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail("apm.lock.yaml unchanged -- skipping write")
         else:
-            persisted = lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
+            persisted = False  # RESEARCH: lockfile write deleted (build kept)
             if persisted and self.ctx.logger:
                 self.ctx.logger.record_lockfile_write()
                 self.ctx.logger.verbose_detail(
