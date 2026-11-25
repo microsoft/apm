@@ -170,3 +170,25 @@ def test_a_symlinked_ancestor_apm_yml_is_named_with_its_target(tmp_path: Path, c
     assert _find_apm_yml(work) == project / "apm.yml"
     out = " ".join(capsys.readouterr().out.split())
     assert f"a symlink to {target.resolve()}" in out, out
+
+
+@pytest.mark.parametrize(
+    ("invoking", "package", "names"),
+    [("sub", "../../", "parent"), ("sub/deeper", "../../", "root")],
+    ids=["above-the-root", "the-root-itself"],
+)
+def test_a_package_naming_the_root_or_above_keeps_an_absolute_path(
+    tmp_path: Path, invoking: str, package: str, names: str
+) -> None:
+    """A rebase to bare ``..`` or ``.`` is refused by the parser, so it stays absolute (#4545)."""
+    from apm_cli.commands._helpers import resolve_cli_packages_for_project_root
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    root = tmp_path / "project"
+    (root / invoking).mkdir(parents=True)
+    expected = (root.parent if names == "parent" else root).resolve().as_posix()
+
+    (rebased,) = resolve_cli_packages_for_project_root((package,), root / invoking, root)
+
+    assert rebased == expected
+    assert DependencyReference.parse(rebased).local_path == expected

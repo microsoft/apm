@@ -614,7 +614,8 @@ def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:
     ``..`` lands where the filesystem does; the final component is kept as
     written, so install still refuses a selected symlink. ``.`` components
     are dropped first, so ``./link/.`` cannot hide the link either. Across
-    Windows drives no relative path exists, so the absolute path is kept.
+    Windows drives no relative path exists, and a bare ``.`` or ``..`` names
+    no directory, so the absolute path is kept for both.
     """
     from ..models.dependency.identity import normalise_local_path_separators
 
@@ -629,9 +630,11 @@ def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:
         rel = os.path.relpath(target, root).replace("\\", "/")
     except ValueError:
         return Path(target).as_posix()
-    if rel == ".":
-        return "./"
-    if rel != ".." and not rel.startswith(("./", "../")):
+    if all(part in (".", "..") for part in rel.split("/")):
+        # The project root or an ancestor of it: a local reference must end in
+        # a named directory, so keep the absolute path, as across drives.
+        return Path(target).as_posix()
+    if not rel.startswith(("./", "../")):
         return f"./{rel}"
     return rel
 
