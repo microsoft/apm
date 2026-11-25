@@ -104,6 +104,9 @@ def atomic_land(staged: Path, final: Path, lock: FileLock) -> bool:
         filelock.Timeout: If the lock cannot be acquired within its
             configured timeout.
     """
+    from apm_cli.utils.realpath_win import release_held
+
+    release_held(final)  # a held directory would block this replace on Windows
     try:
         with lock:
             if final.exists():
