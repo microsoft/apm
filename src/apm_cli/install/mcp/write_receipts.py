@@ -738,35 +738,55 @@ def _supersede_other_installation(project_root: Path, *, user_scope: bool) -> Pa
 
     The ledger owner decides provability (DeploymentMaterializationSession.
     another_installation). Anything unreadable, foreign or ambiguous is left in
-    place and keeps refusing.
+    place and keeps refusing. The sibling materialization receipt that the same
+    other installation wrote is set aside too: fresh MCP evidence creates this
+    installation's identity, which that receipt could never bind again. Its
+    records are never adopted.
     """
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.core.scope import InstallScope
-    from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
     try:
         session = DeploymentMaterializationSession(Path(project_root), scope, None)
         path = session.mcp_state_path
-        if path.is_symlink() or not path.is_file():
+        data = _regular_json(path)
+        if data is None:
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
         _parse_writes(data)  # malformed write records stay in place and keep refusing
         if not session.another_installation(data):
             return None  # this installation's own evidence, or not provably another's
-        base = path.parent.parent.parent.parent  # the evidence owner's anchor (_note_unusable)
-        for n in range(100):
-            aside = path.with_name(f"{path.name}.superseded" + (f".{n}" if n else ""))
-            if not os.path.lexists(aside):
-                break
-        else:
-            return None
-        ensure_path_within(aside, base)
-        if has_symlink_component(base, aside, raise_on_error=True):
-            return None
-        os.rename(path, aside)  # never deleted: audit and the user can still read it
+        aside = _set_aside(path)
+        sibling = _regular_json(session.state_path)
+        if aside is not None and sibling is not None and session.another_installation(sibling):
+            _set_aside(session.state_path)
     except (OSError, ValueError, KeyError, TypeError, UnicodeError):
         return None
+    return aside
+
+
+def _regular_json(path: Path) -> Any:
+    if path.is_symlink() or not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _set_aside(path: Path) -> Path | None:
+    """Rename *path* to a free ``.superseded`` name, journaled; never deleted."""
+    from apm_cli.integration.write_seam import rename
+    from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
+
+    base = path.parent.parent.parent.parent  # the evidence owner's anchor (_note_unusable)
+    for n in range(100):
+        aside = path.with_name(f"{path.name}.superseded" + (f".{n}" if n else ""))
+        if not os.path.lexists(aside):
+            break
+    else:
+        return None
+    ensure_path_within(aside, base)
+    if has_symlink_component(base, aside, raise_on_error=True):
+        return None
+    rename(path, aside)  # journaled: a failed install restores it (audit can still read it)
     return aside
 
 

@@ -310,6 +310,32 @@ def test_evidence_bound_to_another_installation_is_set_aside_once(project: Path)
     assert kept_mcp_writes(project, user_scope=False, managed=()) == []
 
 
+def test_a_reclone_sets_aside_the_sibling_receipt_its_new_identity_cannot_bind(
+    project: Path,
+) -> None:
+    """Copilot #5403: fresh MCP evidence creates this checkout's identity; the old
+    checkout's materialization receipt beside it must not then fail every ledger load."""
+    import shutil
+
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    _install_write(project, _Logger())
+    session = DeploymentMaterializationSession(project, InstallScope.PROJECT, None)
+    sibling = session.state_path
+    sibling.write_text(
+        json.dumps({**session.binding(), "records": [], "destinations": {}, "bindings": {}}),
+        encoding="utf-8",
+    )
+    shutil.rmtree(project / ".apm-local")  # a re-clone: the identity is not committed
+
+    _install_write(project, _Logger())
+
+    DeploymentMaterializationSession(project, InstallScope.PROJECT, None)  # loads, no raise
+    assert sibling.with_name(sibling.name + ".superseded").is_file(), "kept, never deleted"
+    assert not sibling.exists()
+
+
 def _null_root_identity(data: dict) -> None:
     data["root_identity"] = None
 
