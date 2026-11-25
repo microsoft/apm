@@ -2,7 +2,7 @@ name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace5]
+    branches: [perf-research/arch-trace6]
 
 permissions:
   contents: read
@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
-        product: [7a7e77cf204dfaae6d7c0a307ec5aa2bd657c45b]
+        os: [ubuntu-24.04]
+        product: [f598993cbf6c82bc71b229a50210b911afbf4cba]
     defaults:
       run:
         shell: bash
@@ -49,8 +49,8 @@ jobs:
           APM_BENCH_NO_IMPORTTIME: "1"
         run: |
           set -euo pipefail
-          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold,install-warm --rtt 30 --runs 3 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
-          for f in "$GITHUB_WORKSPACE"/out/stderr/*.txt; do echo "== $f"; grep -h "phasecpu\|install fast path" "$f"; done
+          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-cold --rtt 30 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
+          for f in "$GITHUB_WORKSPACE"/out/stderr/*.txt; do echo "== $f"; grep -h "owalk\|install fast path" "$f"; done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
