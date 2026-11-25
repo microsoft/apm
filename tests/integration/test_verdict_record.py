@@ -1699,3 +1699,89 @@ def test_the_replay_and_the_engine_share_one_carrier_owner(project: Path, capsys
     _record()
     capsys.readouterr()
     _assert_replays(True)
+
+
+def _link_dir(path: Path, target: Path) -> None:
+    """A symlink to *target* (a junction on Windows, which needs no privilege)."""
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(path))
+    else:
+        path.symlink_to(target, target_is_directory=True)
+
+
+def _swap_for_link(project: Path, rel: str) -> None:
+    """Replace the governed directory *rel* with a link to an identical copy outside."""
+    outside = project.parent / "outside" / rel
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(project / rel, outside, symlinks=True)
+    shutil.rmtree(project / rel)
+    _link_dir(project / rel, outside)
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("rel", [".github", ".github/prompts"], ids=["root", "subdir"])
+def test_a_governed_directory_swapped_for_a_link_misses_the_replay(
+    project: Path, capsys, rel: str
+) -> None:
+    """The engine never deploys through a link (diff_apply._within), so a hit must not (#5438)."""
+    _record()
+    _swap_for_link(project, rel)
+    capsys.readouterr()
+
+    hit = verdict_record.replay(["install"])
+
+    assert (hit, capsys.readouterr().out) == (False, "")
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("rel", [".github", ".github/prompts"], ids=["root", "subdir"])
+def test_a_governed_directory_swapped_for_a_link_misses_the_attested_hit(
+    project: Path, rel: str
+) -> None:
+    _attest(project)
+    assert _attested_hit() is True, "positive control: run 2 matches the attestation"
+
+    _swap_for_link(project, rel)
+
+    _assert_proves_itself()
+
+
+@pytest.mark.windows_compat
+def test_the_engine_fast_path_refuses_a_linked_target_root(project: Path) -> None:
+    """Control: the owner the record must agree with declines the same state."""
+    from apm_cli.install.diff_apply import Decline, _within
+
+    _swap_for_link(project, ".github")
+
+    with pytest.raises(Decline, match="symlink in a deployed path"):
+        _within(project, _REL)
+
+
+@pytest.mark.windows_compat
+def test_a_linked_target_root_is_never_recorded(project: Path) -> None:
+    _swap_for_link(project, ".github")
+
+    _record()
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("dangling", [False, True], ids=["to-a-directory", "dangling"])
+def test_a_nested_directory_link_present_before_recording_is_never_recorded(
+    project: Path, dangling: bool
+) -> None:
+    """A link listed among a governed directory's files, with no deployed file
+    beneath it, still names content the record cannot key (#5438)."""
+    outside = project.parent / "shared"
+    outside.mkdir()
+    (outside / "notes.md").write_text("shared\n")
+    _link_dir(project / ".github" / "shared", outside)
+    if dangling:
+        shutil.rmtree(outside)
+
+    _record()
+
+    assert not (_home(project) / "verdicts").exists()
