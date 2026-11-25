@@ -461,3 +461,36 @@ def test_an_unreadable_home_level_is_still_a_ceiling(tmp_path: Path, monkeypatch
 
     assert _find_apm_yml(work) is None
     assert ee.is_home_or_above(tmp_path, home)
+
+
+def test_the_home_identity_stats_do_not_grow_with_walk_depth(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+    from apm_cli.utils import executable_exclusion as ee
+
+    home, shallow = _home_world(tmp_path, monkeypatch)
+    deep = home / "work" / "d1" / "d2" / "d3" / "d4" / "d5"
+    deep.mkdir(parents=True)
+    (home / "work" / "apm.yml").write_text("name: top\nversion: 1.0.0\n", encoding="utf-8")
+    home_chain = {home, *home.resolve().parents, home.resolve()}
+    real_stat = os.stat
+
+    def chain_stats(start: Path) -> list[Path]:
+        ee._HOME_CHAIN.clear()
+        ee._RESOLVED_HOME.clear()
+        ee._LEVEL_VERDICTS.clear()
+        seen: list[Path] = []
+
+        def counting(path, *args, **kwargs):
+            seen.append(Path(path))
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(ee.os, "stat", counting)
+        try:
+            assert _find_apm_yml(start) == (home / "work" / "apm.yml").resolve()
+        finally:
+            monkeypatch.setattr(ee.os, "stat", real_stat)
+        return [path for path in seen if path in home_chain]
+
+    one_level, five_levels = chain_stats(shallow), chain_stats(deep)
+
+    assert len(one_level) == len(five_levels)

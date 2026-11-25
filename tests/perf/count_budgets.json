@@ -245,7 +245,7 @@
       "fs.stat_calls": {
         "budget": 176,
         "measured": 176,
-        "reason": "#4545 HOME ceiling: one-time (dev, ino) identity stats for the HOME chain + project dir, ~7 per process, constant (not per walk level); cost: ~7 stat syscalls once per process; PERF VP co-sign; observed 176 at d02676a8 (was 174)",
+        "reason": "#4545 HOME ceiling: one-time (dev, ino) identity stats for the HOME chain + project dir, ~7 per process, constant (not per walk level); cost: ~7 stat syscalls once per process; co-signed: PERF VP; observed 176 at d02676a8 (was 174)",
         "pr": "#5497"
       },
       "git.config": {
