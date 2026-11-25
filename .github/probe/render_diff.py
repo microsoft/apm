@@ -1,5 +1,5 @@
 """Acceptance differential: deployed bytes and lockfile of base vs candidate CLI, per fixture."""
-import hashlib, os, sys, tempfile
+import hashlib, os, stat, sys, tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.getcwd())
@@ -25,7 +25,10 @@ def snapshot(project: Path) -> dict[str, str]:
             data = path.read_bytes() if not path.is_symlink() else b"LINK:" + os.readlink(path).encode()
             if name.endswith(".lock.yaml") or name == "apm.lock.yaml":
                 data = b"\n".join(l for l in data.splitlines() if not any(v.encode() in l for v in VOLATILE))
-            out[rel] = hashlib.sha256(data).hexdigest()
+            mode = stat.S_IMODE(os.lstat(path).st_mode)
+            # Path + mode + bytes; on Windows only the read-only bit is meaningful.
+            tag = (b"ro" if not mode & stat.S_IWRITE else b"rw") if os.name == "nt" else oct(mode).encode()
+            out[rel] = hashlib.sha256(tag + b"\0" + data).hexdigest()
             if len(data) < 400_000:
                 TEXT[(str(project), rel)] = data.decode("utf-8", "replace")
     return out
