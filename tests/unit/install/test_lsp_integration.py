@@ -722,18 +722,20 @@ class TestPackageMoveWithPluginRoot:
         package = MagicMock()
         package.get_lsp_dependencies.return_value = [dep]
         diagnostics = MagicMock()
-        run_lsp_integration(
-            apm_package=package,
-            apm_modules_path=tmp_path / "apm_modules",
-            lock_path=tmp_path / "apm.lock.yaml",
-            existing_lock=lock,
-            project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
-            logger=_mock_logger(),
-            diagnostics=diagnostics,
-            explicit_target=[runtime],
-        )
+        # Copilot resolves only with its binary on PATH: pin the target.
+        with patch(f"{_PATCH_TARGET}.resolve_target_runtimes", return_value=[runtime]):
+            run_lsp_integration(
+                apm_package=package,
+                apm_modules_path=tmp_path / "apm_modules",
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=lock,
+                project_root=tmp_path,
+                user_scope=False,
+                should_install=True,
+                logger=_mock_logger(),
+                diagnostics=diagnostics,
+                explicit_target=[runtime],
+            )
         return diagnostics
 
     @pytest.mark.parametrize("runtime", ["copilot", "claude"])
