@@ -852,13 +852,21 @@ class TestRetryOnSharingViolation:
 
     @staticmethod
     def _sharing_violation() -> OSError:
-        return OSError(13, "in use", "f", 32)
+        exc = OSError(13, "in use", "f")
+        exc.winerror = 32
+        return exc
+
+    @staticmethod
+    def _access_denied() -> OSError:
+        exc = OSError(13, "denied", "f")
+        exc.winerror = 5
+        return exc
 
     def test_retries_on_windows_until_released(self):
         remove, calls = self._remover(self._sharing_violation(), failures=2)
         with (
-            patch("apm_cli.utils.file_ops.sys.platform", "win32"),
-            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch("sys.platform", "win32"),
+            patch("time.sleep"),
         ):
             assert retry_on_sharing_violation(remove, "unlink") == "removed"
         assert calls["n"] == 3
@@ -866,18 +874,18 @@ class TestRetryOnSharingViolation:
     def test_still_held_after_the_budget_raises_the_original_error(self):
         remove, calls = self._remover(self._sharing_violation(), failures=99)
         with (
-            patch("apm_cli.utils.file_ops.sys.platform", "win32"),
-            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch("sys.platform", "win32"),
+            patch("time.sleep"),
             pytest.raises(OSError, match="in use"),
         ):
             retry_on_sharing_violation(remove, "unlink")
         assert calls["n"] == 1 + 5
 
     def test_other_errors_raise_immediately(self):
-        remove, calls = self._remover(OSError(13, "denied", "f", 5), failures=1)
+        remove, calls = self._remover(self._access_denied(), failures=1)
         with (
-            patch("apm_cli.utils.file_ops.sys.platform", "win32"),
-            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch("sys.platform", "win32"),
+            patch("time.sleep"),
             pytest.raises(OSError, match="denied"),
         ):
             retry_on_sharing_violation(remove, "unlink")
@@ -886,8 +894,8 @@ class TestRetryOnSharingViolation:
     def test_non_windows_does_not_retry(self):
         remove, calls = self._remover(self._sharing_violation(), failures=1)
         with (
-            patch("apm_cli.utils.file_ops.sys.platform", "linux"),
-            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch("sys.platform", "linux"),
+            patch("time.sleep"),
             pytest.raises(OSError, match="in use"),
         ):
             retry_on_sharing_violation(remove, "unlink")

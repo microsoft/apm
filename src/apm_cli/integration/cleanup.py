@@ -48,6 +48,7 @@ import posixpath
 import shlex
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,6 +62,7 @@ from apm_cli.core.remediation import (
 )
 from apm_cli.integration import write_seam
 from apm_cli.security.gate import is_python_bytecode_cache_path
+from apm_cli.utils.file_ops import retry_on_sharing_violation
 from apm_cli.utils.paths import SpellingAliasIndex
 
 from .base_integrator import BaseIntegrator
@@ -1319,7 +1321,7 @@ def _remove_proven_members(
             complete = False
             continue
         try:
-            write_seam.unlink(member)
+            retry_on_sharing_violation(partial(write_seam.unlink, member), "unlink")
             result.deleted.append(member_rel)
             result.deleted_targets.append(member)
         except OSError as exc:
@@ -1709,7 +1711,7 @@ def remove_stale_deployed_files(
 
         # All gates passed -- safe to delete.
         try:
-            write_seam.unlink(stale_target)
+            retry_on_sharing_violation(partial(write_seam.unlink, stale_target), "unlink")
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
         except Exception as exc:

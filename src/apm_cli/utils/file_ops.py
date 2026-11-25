@@ -81,6 +81,20 @@ def _is_transient_lock_error(exc: OSError) -> bool:
     return getattr(exc, "errno", None) == errno.EBUSY
 
 
+def _is_sharing_violation(exc: OSError) -> bool:
+    """True for a Windows ERROR_SHARING_VIOLATION (winerror 32) only."""
+    return sys.platform == "win32" and getattr(exc, "winerror", None) == 32
+
+
+def retry_on_sharing_violation(operation: Callable[[], T], description: str) -> T:
+    """Run a file removal, retrying only a Windows sharing violation.
+
+    Uses the same bounded backoff as ``robust_rmtree``; any other error, and
+    any platform other than Windows, raises on the first failure.
+    """
+    return _retry_on_lock(operation, description, is_retryable=_is_sharing_violation)
+
+
 # EEXIST matches only when a non-directory ancestor is found below the root.
 # ENOENT covers Windows, where a file standing in for a parent directory
 # surfaces as ERROR_PATH_NOT_FOUND instead of ENOTDIR.
@@ -148,6 +162,7 @@ def _retry_on_lock(
     max_delay: float = _DEFAULT_MAX_DELAY,
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
     before_retry: Callable[[], None] | None = None,
+    is_retryable: Callable[[OSError], bool] | None = None,
 ) -> T:
     """Execute *operation*, retrying on transient file-lock errors.
 
@@ -169,6 +184,8 @@ def _retry_on_lock(
     before_retry:
         Optional cleanup to run before each retry (e.g. remove a partial
         copytree destination).  Exceptions here are suppressed.
+    is_retryable:
+        Error classifier; defaults to ``_is_transient_lock_error``.
 
     Returns
     -------
@@ -181,13 +198,14 @@ def _retry_on_lock(
     """
     delay = initial_delay
     last_exc: OSError | None = None
+    classify = is_retryable or _is_transient_lock_error
 
     for attempt in range(1 + max_retries):
         try:
             return operation()
         except OSError as exc:
             last_exc = exc
-            if not _is_transient_lock_error(exc) or attempt == max_retries:
+            if not classify(exc) or attempt == max_retries:
                 raise
             _debug_file_op(
                 f"Transient file lock (attempt {attempt + 1}/{max_retries}); "
