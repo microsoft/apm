@@ -7,7 +7,8 @@ the whole walk in one ``open(O_PATH)`` and report the result through
 ``Path.resolve()`` returns, and falls back to it whenever the fast form
 cannot prove that (another OS, no ``/proc``, a dangling link, a loop, an
 access error). Nothing is cached: every call observes the filesystem as
-it is now, the same as ``Path.resolve()``.
+it is now, the same as ``Path.resolve()``. On Windows the exact forms live
+in :mod:`apm_cli.utils.realpath_win`.
 """
 
 from __future__ import annotations
@@ -214,3 +215,17 @@ def resolve_path(path: Path) -> Path:
             if resolved is not None:
                 return type(path)(resolved)
     return path.resolve()
+
+
+if sys.platform == "win32":
+    # Bound once at import: other platforms keep the function above unchanged.
+    from apm_cli.utils.realpath_win import resolve_windows as _resolve_windows
+
+    def resolve_path(path: Path) -> Path:
+        """Return ``path.resolve()``, through the exact Windows fast forms when they apply.
+
+        See :mod:`apm_cli.utils.realpath_win`; a subclass or anything the fast
+        forms cannot prove leaves the answer (or the error) to ``Path.resolve``.
+        """
+        fast = _resolve_windows(path)
+        return fast if fast is not None else path.resolve()
