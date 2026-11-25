@@ -4483,6 +4483,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The MCP registry client builds an ad hoc session outside the credential-origin owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-link-copy-release",
+        rule_id="transport-platform-link-copy-release",
+        path="src/apm_cli/utils/file_ops.py",
+        old="        robust_copytree(src, dst, symlinks=True)\n",
+        new="        shutil.copytree(src, dst, symlinks=True)\n",
+        intent="A directory entry is copied with its links without dropping proofs at the destination.",
+    ),
+    MutationCase(
         guard_id="transport-platform-ls-remote-tag-commits",
         rule_id="transport-platform-ls-remote-tag-commits",
         path="src/apm_cli/marketplace/ref_resolver.py",

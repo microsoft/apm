@@ -871,6 +871,7 @@ transport-platform-held-root-registration
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-http-session-construction
+transport-platform-link-copy-release
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-catalog-credentials
 transport-platform-marketplace-package-remote

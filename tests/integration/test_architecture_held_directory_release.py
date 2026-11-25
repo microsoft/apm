@@ -124,3 +124,64 @@ def test_held_directory_release_ignores_non_directory_replace(extra: str) -> Non
 def test_held_directory_guards_accept_current_sources() -> None:
     """Both rules are silent for production routing before mutation."""
     _expect_clean(run_selected_rules(ROOT, (RELEASE, REGISTRATION)))
+
+
+LINK_COPY = "transport-platform-link-copy-release"
+_PRUNE = "src/apm_cli/commands/prune.py"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param(
+            "\n\ndef _copy(a, b):\n    import shutil\n\n    shutil.copytree(a, b, symlinks=True)\n",
+            id="unreleased",
+        ),
+        pytest.param(
+            "\n\ndef _copy(a, b, cond):\n    import shutil\n\n"
+            "    if cond:\n        release_held(b)\n    shutil.copytree(a, b, symlinks=True)\n",
+            id="conditional-release",
+        ),
+        pytest.param(
+            "\n\ndef _copy(a, b, cond):\n    import shutil\n\n"
+            "    if cond:\n        release_held(b)\n    else:\n"
+            "        shutil.copytree(a, b, symlinks=True)\n",
+            id="sibling-branch-release",
+        ),
+        pytest.param(
+            "\n\ndef _copy(a, b):\n    from shutil import copytree as ct\n\n    ct(a, b, True)\n",
+            id="aliased-positional-true",
+        ),
+    ],
+)
+def test_link_copy_rule_rejects_an_undominated_release(extra: str) -> None:
+    """A tree copy with links needs a release on every path to it."""
+    _expect_violation(_report(LINK_COPY, _PRUNE, None, extra), LINK_COPY)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param(
+            "\n\ndef _copy(a, b):\n    import shutil\n\n"
+            "    release_held(b)\n    shutil.copytree(a, b, symlinks=True)\n",
+            id="dominating-release",
+        ),
+        pytest.param(
+            "\n\ndef _copy(a, b):\n    import shutil\n\n    shutil.copytree(a, b, False)\n",
+            id="positional-false",
+        ),
+        pytest.param(
+            "\n\ndef _copy(a, b):\n    import shutil\n\n    shutil.copytree(a, b)\n",
+            id="follows-links",
+        ),
+    ],
+)
+def test_link_copy_rule_accepts_a_dominating_release_or_no_links(extra: str) -> None:
+    """A release that runs first, or a copy that creates no links, passes."""
+    _expect_clean(_report(LINK_COPY, _PRUNE, None, extra))
+
+
+def test_link_copy_rule_accepts_current_sources() -> None:
+    """The link-copy rule is silent for production routing."""
+    _expect_clean(run_selected_rules(ROOT, (LINK_COPY,)))
