@@ -696,6 +696,24 @@ def read_frontmatter_block(path: Path, *, prefix_bytes: int = 4096) -> str:
 
 
 def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
+    """Research: parse each exact text once per command; hand out fresh copies."""
+    import copy
+
+    import frontmatter
+
+    from apm_cli.core.invocation_memo import invocation_memo
+
+    memo = invocation_memo("research-parse-once")
+    if memo is None:
+        return _loads_frontmatter_impl(text, preserve_body=preserve_body)
+    key = (text, preserve_body)
+    post = memo.get(key)
+    if post is None:
+        post = memo[key] = _loads_frontmatter_impl(text, preserve_body=preserve_body)
+    return frontmatter.Post(post.content, handler=post.handler, **copy.deepcopy(post.metadata))
+
+
+def _loads_frontmatter_impl(text: str, *, preserve_body: bool = False) -> Any:
     """Parse Markdown text through the bounded handler.
 
     ``preserve_body`` retains body whitespace after consuming the delimiter's
