@@ -269,13 +269,16 @@ _GENERATOR_CASES = {
     "nul": "apm_version: 0.38.0\x00\n",
     "directive": "%YAML 1.1\n---\napm_version: 0.38.0\n",
     "two-documents": "apm_version: 1\n---\napm_version: 2\n",
+    "question-in-flow": "apm_version: 0.38.0\nx: [a?b]\n",
     **BOMBS,
 }
 
 
-def _pure_top_level(text: str) -> list[str | None] | None:
+def _pure_top_level(
+    text: str, loader: type = yaml_io._BoundedSafeLoader
+) -> list[str | None] | None:
     try:
-        node = yaml.compose(text, Loader=yaml_io._BoundedSafeLoader)
+        node = yaml.compose(text, Loader=loader)
     except (yaml.YAMLError, ValueError, RecursionError):
         return None
     if not isinstance(node, yaml.MappingNode):
@@ -296,11 +299,22 @@ def _pure_top_level(text: str) -> list[str | None] | None:
     [*_GENERATOR_CASES.values(), *(p.read_text(encoding="utf-8") for p in _LOCKFILES)],
     ids=[*_GENERATOR_CASES, *(str(p.relative_to(ROOT)) for p in _LOCKFILES)],
 )
-def test_the_generator_check_reads_the_same_declarations_as_the_pure_parser(text: str) -> None:
-    """The libyaml-scanned compose never changes the generator verdict (#4939)."""
-    assert yaml_io._top_level_scalar_values(text, "apm_version") == _pure_top_level(text)
+def test_the_generator_check_reads_what_the_pure_parser_or_the_reader_reads(text: str) -> None:
+    """Both scanners accept: identical. Only libyaml accepts: the reader's scan (#4939).
+
+    Tab text is judged by the pure scanner only, as before.
+    """
+    got = yaml_io._top_level_scalar_values(text, "apm_version")
+    pure = _pure_top_level(text)
+    if pure is not None or "\t" in text:
+        assert got == pure
+    else:
+        assert got == _pure_top_level(text, yaml_io._BoundedCSafeLoader)
 
 
+@pytest.mark.skipif(
+    yaml_io._BoundedCSafeLoader is yaml_io._BoundedSafeLoader, reason="PyYAML without libyaml"
+)
 def test_an_admitted_lockfile_is_composed_without_the_pure_scanner() -> None:
     from tests.unit.deps.test_lockfile_read_cost import _count_calls
 
