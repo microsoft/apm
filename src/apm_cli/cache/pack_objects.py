@@ -35,6 +35,12 @@ from .inprocess_fetch import (
 _IDX_MAGIC = b"\xfftOc"
 _LOOSE_KINDS = frozenset(_TYPES.values())
 _LOOSE_HEADER_MAX = 32
+_LOOSE_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
 _BASE_CACHE_BYTES = 32 * 1024 * 1024
 
 
@@ -280,7 +286,13 @@ def _loose(path: str, budget: list[int]) -> tuple[str, bytes] | None:
         return None
     if not stat.S_ISREG(info.st_mode):
         raise _Refuse("loose object is not a regular file")
-    with open(path, "rb") as handle:
+    # Never through a link, a pipe or a device swapped in after the lstat.
+    fd = os.open(path, _LOOSE_READ_FLAGS)
+    with os.fdopen(fd, "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        swapped = os.name != "nt" and (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+        if not stat.S_ISREG(opened.st_mode) or swapped:
+            raise _Refuse("loose object is not a regular file")
         packed = handle.read(_MAX_OBJECT + 1)
     inflater = zlib.decompressobj()
     head = inflater.decompress(packed, _LOOSE_HEADER_MAX)

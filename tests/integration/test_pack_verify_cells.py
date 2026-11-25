@@ -190,6 +190,21 @@ def test_a_loose_commit_on_top_of_the_pack_verifies_in_process(world: Path, monk
     _assert_verdicts(pack, git, expected=True, pack_spawns=0)
 
 
+def test_a_corrupt_loose_commit_on_top_of_the_pack_goes_to_git(world: Path, monkeypatch) -> None:
+    """Mixed case: tree objects in the pack, a loose commit that does not inflate exactly."""
+    _bare, checkout, _sha = _checkout(world)
+    (checkout / "a.txt").write_bytes(b"alpha two\n")
+    _git(checkout, "commit", "-q", "-am", "c2")
+    loose = _git(checkout, "rev-parse", "HEAD").strip()
+    path = checkout / ".git" / "objects" / loose[:2] / loose[2:]
+    original = path.read_bytes()
+    os.chmod(path, 0o644)
+    path.write_bytes(original + b"x")
+    pack = _verdict(checkout, loose, monkeypatch, git_only=False)
+    git = _verdict(checkout, loose, monkeypatch, git_only=True)
+    _assert_verdicts(pack, git, expected=git[0], pack_spawns=1)
+
+
 def _loose_only_checkout(root: Path) -> tuple[Path, str]:
     """A checkout whose objects are all loose, as the in-process fetch writes them."""
     _bare, checkout, sha = _checkout(root)
