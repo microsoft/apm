@@ -587,6 +587,32 @@ def test_a_cleanup_that_leaves_an_unrecorded_file_bare_records_nothing(tmp_path,
     assert config.read_text(encoding="utf-8") == _SKELETON
 
 
+@pytest.mark.parametrize(
+    ("after", "skeleton", "recorded"),
+    [
+        ('{\n  "model": "sonnet"\n}\n', {}, True),
+        ('{\n  "version": 1\n}\n', {"version": 1}, False),
+        ('{\n  "version": 2\n}\n', {"version": 1}, True),
+        ('{\n  "version": 1,\n  "hooks": {}\n}\n', {"version": 1}, False),
+    ],
+    ids=["user-scalar", "injected-default", "changed-default", "default-and-empty-container"],
+)
+def test_a_cleanup_keeps_a_record_unless_only_the_targets_skeleton_remains(
+    tmp_path, apm_home, after, skeleton, recorded
+) -> None:
+    """The target's injected defaults and empty containers are a skeleton; a scalar
+    user setting is not, so the cleanup's rewrite is recorded and recoverable (#5067)."""
+    config = tmp_path / "project" / ".claude" / "settings.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"hooks": {"Stop": [{"hooks": [{"command": "x"}]}]}}', encoding="utf-8")
+    before = config.read_bytes()
+    with recorded_config_write(config, skeleton=skeleton):  # cleanup removes the last hook
+        config.write_text(after, encoding="utf-8")
+
+    assert (config_file_origin(config) is Origin.LEGACY) is recorded
+    assert vouches_for_current_bytes(config, before) is recorded
+
+
 # -- a Windows UNC key survives a reload (#5016 review) ---------------------------------
 
 _UNC_KEY = "//server/share/project/.mcp.json"

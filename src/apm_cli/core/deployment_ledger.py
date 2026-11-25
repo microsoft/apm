@@ -345,6 +345,24 @@ class DeploymentMaterializationSession:
             or (data["root_identity"] != self._root_identity() and not moved(data))
         )
 
+    def another_installation(self, data: Mapping[str, Any]) -> bool:
+        """Whether well-formed receipt *data* for this root path and scope provably belongs to
+        another installation: another (or no) UUID here, or another root inode (a device-only
+        change is ambiguous); :meth:`binds` stays the single binding decision."""
+        recorded, identity = data["installation"], data["root_identity"]
+        return (
+            [data["version"], data["root"], data["scope"]]
+            == [1, self.root.as_posix(), self.scope.value]
+            and isinstance(recorded, str)
+            and uuid.UUID(hex=recorded).hex == recorded
+            and isinstance(identity, list)
+            and len(identity) == 2
+            and all(type(value) is int for value in identity)
+            and type(data.get("root_birth_time", 0.0)) in (int, float)
+            and (self._installation != recorded or identity[1] != self._root_stat().st_ino)
+            and not self.binds(data)
+        )
+
     def _encode(
         self, candidate: Path, target: TargetProfile, root: Path | None = None
     ) -> DeploymentLocator:

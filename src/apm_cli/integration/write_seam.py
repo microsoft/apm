@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from apm_cli.utils import atomic_io
+from apm_cli.utils.realpath_win import release_held
 
 # (path, contents, expected): contents=False records only an absent path
 # (mkdir); expected is the content hash the write will leave there, or
@@ -232,6 +233,8 @@ def rename(source: Path, destination: Path) -> None:
     """``os.rename`` through the seam: both paths change."""
     record_before_write(source, expected=_ABSENT)
     record_before_write(destination, expected=_file_hash(source))
+    release_held(source)
+    release_held(destination)
     os.rename(source, destination)
     record_after_write(source)
     record_after_write(destination)
@@ -254,6 +257,7 @@ def unlink(path: Path, *, missing_ok: bool = False) -> None:
 def rmdir(path: Path) -> None:
     """``Path.rmdir`` through the seam."""
     record_before_write(path, expected=_ABSENT)
+    release_held(path)
     path.rmdir()
     record_after_write(path)
 
@@ -261,6 +265,7 @@ def rmdir(path: Path) -> None:
 def rmtree(path: Path, **kwargs: Any) -> None:
     """``shutil.rmtree`` through the seam."""
     record_before_write(path, expected=_ABSENT)
+    release_held(path)
     shutil.rmtree(path, **kwargs)
     record_after_write(path)
 

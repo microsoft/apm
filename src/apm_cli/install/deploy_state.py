@@ -8,7 +8,9 @@ byte-exact state (content, modes, entries) a seal records.
 from __future__ import annotations
 
 import os
+import posixpath
 import stat
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -101,3 +103,43 @@ def ensure_listable(path: Path) -> None:
 
     for _ in os.walk(path, onerror=fail):
         pass
+
+
+def entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
+    """Whether an entry below a journaled directory holds a pending write's expected bytes."""
+    if expected is None:
+        return True
+    if expected == "dir":
+        return fingerprint.startswith("dir:")
+    return fingerprint.rsplit(":", 1)[0] == expected
+
+
+def interrupted_staging(
+    events: Mapping[str, Any], entries: Mapping[str, str], known: Collection[str]
+) -> set[str]:
+    """Staging files an atomic write left when killed before its rename (#5395).
+
+    A regular file with the exact name an atomic write stages under is APM's in-flight state
+    only when nothing recorded it (*known*: the prior state, the unit's seal
+    and every write event) and a content write APM began in the same
+    directory, below the unit, never sealed. A directory creation or removal
+    is no such write. Anything else is judged as before, so a recorded file
+    a user edited is still kept.
+    """
+    from apm_cli.utils.atomic_io import STAGING_NAME
+
+    pending = {
+        posixpath.dirname(rel)
+        for rel, event in events.items()
+        if rel and isinstance(event, tuple) and str(event[1]).startswith("sha256:")
+    }
+    return {
+        rel
+        for rel, fingerprint in entries.items()
+        if rel not in known
+        and STAGING_NAME.fullmatch(posixpath.basename(rel))
+        and posixpath.dirname(rel) in pending
+        # A regular file: "<hash>:<mode>", never a directory, link or other entry.
+        and ":" in fingerprint
+        and not fingerprint.startswith(("dir:", "link:"))
+    }

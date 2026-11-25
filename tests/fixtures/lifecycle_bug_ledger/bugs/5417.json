@@ -1,0 +1,15 @@
+{
+  "issue": 5417,
+  "fixed_in": "Unreleased",
+  "summary": "apm approve now checks the embedded package identities for key-only bundle approvals and checks the effective replacement source for aliased dependencies without a lockfile.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/commands/test_approve_deny.py::test_key_only_bundle_approve_refuses_a_denylisted_bundle_source",
+    "tests/unit/commands/test_approve_deny.py::test_approve_checks_aliased_replacement_source_without_lockfile"
+  ]
+}

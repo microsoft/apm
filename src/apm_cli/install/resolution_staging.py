@@ -15,6 +15,7 @@ from filelock import FileLock, Timeout
 from apm_cli.core.remediation import CASING_MIGRATION_SOURCE_MISSING
 from apm_cli.utils.file_ops import robust_replace
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
+from apm_cli.utils.realpath_win import release_held
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 
 # Matches both the current 12-hex-char staging root name and the 32-hex-char
@@ -98,6 +99,7 @@ class ResolutionStagingSession:
                 # occupies the parent's backup path.
                 backup = self._isolated_staging_path("backups", resolved)
                 backup.parent.mkdir(parents=True, exist_ok=True)
+                release_held(resolved)
                 resolved.replace(backup)
             self._backups[resolved] = backup
 
@@ -156,6 +158,7 @@ class ResolutionStagingSession:
                 # The rename keeps the directory's identity: take it from the staged
                 # copy, so a destination substituted after the rename is never ours.
                 info = os.lstat(staged)
+                release_held(resolved)
                 _publish_no_clobber(staged, resolved)
                 self._published[resolved] = (info.st_dev, info.st_ino)
                 self._backups[resolved] = None  # rollback removes what this created
@@ -209,6 +212,8 @@ class ResolutionStagingSession:
         with self._lock:
             if source.parts == destination.parts:
                 return
+            release_held(source)
+            release_held(destination)
             if source.is_symlink():
                 raise ValueError(
                     f"Refusing to migrate symlinked package directory: {source}. "
@@ -297,6 +302,7 @@ class ResolutionStagingSession:
             )
             return True
 
+        release_held(self._modules_dir)  # rollback renames and deletes anywhere below
         with self._lock:
             for path, backup in reversed(self._backups.items()):
                 if defer_overlapping_recovery(backup or path, path):
@@ -370,6 +376,7 @@ class ResolutionStagingSession:
                 and not self._modules_dir.is_symlink()
                 and not any(self._modules_dir.iterdir())
             ):
+                release_held(self._modules_dir)
                 self._modules_dir.rmdir()
         except OSError as exc:
             return [(self._modules_dir, f"could not remove empty directory: {exc}")]
@@ -379,6 +386,7 @@ class ResolutionStagingSession:
         """Remove empty migration-created parents below ``apm_modules``."""
         ensure_path_within(path, self._modules_dir)
         while path != self._modules_dir and path.exists() and not any(path.iterdir()):
+            release_held(path)
             path.rmdir()
             path = path.parent
 
@@ -395,6 +403,7 @@ class ResolutionStagingSession:
     @staticmethod
     def _replace_case_only(source: Path, destination: Path) -> None:
         """Rename an entry through a sibling so case-insensitive filesystems update spelling."""
+        release_held(source)
         try:
             source.replace(destination)
             if any(child.name == destination.name for child in destination.parent.iterdir()):

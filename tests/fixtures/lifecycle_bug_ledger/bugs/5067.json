@@ -1,0 +1,15 @@
+{
+  "issue": 5067,
+  "fixed_in": "Unreleased",
+  "summary": "A hook cleanup that left an unrecorded config holding only scalar user settings (for example \"model\": \"sonnet\") was taken for a bare skeleton and not recorded, so an install killed after that rewrite kept its journal for manual recovery; the guard now compares against the target's injected defaults, and the next install restores the file.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored",
+    "tests/unit/integration/test_config_file_provenance.py::test_a_cleanup_keeps_a_record_unless_only_the_targets_skeleton_remains"
+  ]
+}

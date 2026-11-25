@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import os
 
+# The notice's first line; the verified-state record never records a run that printed it.
+NEW_VERSION_NOTICE = "A new version of APM is available: "
+
 
 def _gate() -> bool | None:
     """Every gate but the daily schedule: True when the notice has nothing to do,

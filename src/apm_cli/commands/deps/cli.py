@@ -1114,6 +1114,9 @@ def clean(dry_run: bool, yes: bool):
             return
 
     try:
+        from ...utils.realpath_win import release_held
+
+        release_held(apm_modules_path)
         shutil.rmtree(apm_modules_path)
         logger.success("Successfully removed apm_modules/ directory")
     except Exception as e:

@@ -424,17 +424,266 @@ def test_s16a_targets_inactive_shows_reasons(tmp_path):
     assert "no signal" in out_lower or "inactive" in out_lower
 
 
-@pytest.mark.xfail(
-    reason="#4545 install from a subdirectory does not discover the project root (after #888)",
-    strict=True,
-)
+def _snapshot_dir(directory: Path) -> dict[str, bytes]:
+    """Capture relative paths and bytes of all files in directory."""
+    return {
+        p.relative_to(directory).as_posix(): p.read_bytes()
+        for p in directory.glob("**/*")
+        if p.is_file()
+    }
+
+
 def test_s16b_provenance_uses_project_root(tmp_path):
-    """S16b: Closes #888 (partial) - provenance reflects project root, not cwd."""
+    """S16b: Closes #888, #4545 - provenance reflects project root, not cwd."""
     project = _setup(tmp_path, "s16b_provenance_cwd")
     subdir = project / "subdir"
+    before = _snapshot_dir(subdir)
     result = _invoke(["install"], subdir)
     assert result.exit_code == 0, result.output
     assert_provenance(result.output, targets=["claude"], source="CLAUDE.md")
+    assert _snapshot_dir(subdir) == before
+
+
+def test_s16c_installed_cli_subdirectory_install(tmp_path, apm_binary_path: Path):
+    """S16c: Closes #4545 - installed CLI install from subdirectory matches root install."""
+    root_project = _setup(tmp_path / "root_run", "s16b_provenance_cwd")
+    sub_project = _setup(tmp_path / "sub_run", "s16b_provenance_cwd")
+    subdir = sub_project / "subdir"
+    before = _snapshot_dir(subdir)
+    env = os.environ.copy()
+
+    res_root = subprocess.run(
+        [str(apm_binary_path), "install"],
+        cwd=root_project,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res_root.returncode == 0, res_root.stderr
+
+    res_sub = subprocess.run(
+        [str(apm_binary_path), "install"],
+        cwd=subdir,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res_sub.returncode == 0, res_sub.stderr
+
+    combined = res_sub.stdout + res_sub.stderr
+    assert "Using apm.yml at" in combined
+    assert f"project root: {sub_project.resolve()}" in combined
+    assert_provenance(combined, targets=["claude"], source="CLAUDE.md")
+
+    # Nothing written under subdir/
+    assert _snapshot_dir(subdir) == before
+
+    # Lockfile and deployed files match root install
+    assert (sub_project / "apm.lock.yaml").read_text(encoding="utf-8") == (
+        root_project / "apm.lock.yaml"
+    ).read_text(encoding="utf-8")
+    # The same deployed files with the same bytes (#4545 scope).
+    sub_claude = _snapshot_dir(sub_project / ".claude")
+    assert sub_claude, "the subdirectory install deployed nothing"
+    assert sub_claude == _snapshot_dir(root_project / ".claude")
+
+
+def test_s16d_installed_cli_subdirectory_add_package(tmp_path, apm_binary_path: Path):
+    """Installed CLI: apm install <package> from subdirectory updates parent apm.yml and lockfile."""
+    project = _setup(tmp_path / "project", "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    ext_pkg = tmp_path / "ext_pkg"
+    ext_pkg.mkdir()
+    (ext_pkg / "apm.yml").write_text("name: ext-pkg\nversion: 0.1.0\n", encoding="utf-8")
+    before = _snapshot_dir(subdir)
+    res = subprocess.run(
+        [str(apm_binary_path), "install", str(ext_pkg)],
+        cwd=subdir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    combined = res.stdout + res.stderr
+    assert "Using apm.yml at" in combined
+    assert f"project root: {project.resolve()}" in combined
+    assert (project / "apm.lock.yaml").exists()
+    root_yml = (project / "apm.yml").read_text(encoding="utf-8")
+    assert "ext_pkg" in root_yml
+    assert _snapshot_dir(subdir) == before
+
+
+def test_s16e_installed_cli_subdirectory_add_relative_package(tmp_path, apm_binary_path: Path):
+    """Installed CLI: apm install ./pkg with pkg under subdir/ records ./subdir/pkg in root apm.yml."""
+    project = _setup(tmp_path / "project", "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    pkg_dir = subdir / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "apm.yml").write_text("name: local-sub-pkg\nversion: 0.1.0\n", encoding="utf-8")
+    before = _snapshot_dir(subdir)
+    res = subprocess.run(
+        [str(apm_binary_path), "install", "./pkg"],
+        cwd=subdir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    combined = res.stdout + res.stderr
+    assert "Using apm.yml at" in combined
+    assert f"project root: {project.resolve()}" in combined
+    root_yml = (project / "apm.yml").read_text(encoding="utf-8")
+    assert "./subdir/pkg" in root_yml
+    assert (project / "apm.lock.yaml").exists()
+    assert _snapshot_dir(subdir) == before
+
+
+def test_s16f_installed_cli_nested_project_is_not_swallowed_by_its_parent(
+    tmp_path, apm_binary_path: Path
+):
+    """A nested project with its own apm.yml installs as itself from below it (#4545).
+
+    The nearest apm.yml wins: the parent's manifest, lockfile and deployed
+    files are untouched, and nothing is written under the invoking directory.
+    """
+    parent = _setup(tmp_path / "project", "s16b_provenance_cwd")
+    nested = parent / "subdir" / "nested"
+    shutil.copytree(FIXTURES / "s16b_provenance_cwd", nested)
+    (nested / "apm.yml").write_text("name: nested-project\nversion: 0.1.0\n", encoding="utf-8")
+    invoking = nested / "subdir"
+    parent_before = {
+        path: data for path, data in _snapshot_dir(parent).items() if not path.startswith("subdir/")
+    }
+    invoking_before = _snapshot_dir(invoking)
+
+    res = subprocess.run(
+        [str(apm_binary_path), "install"],
+        cwd=invoking,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    combined = res.stdout + res.stderr
+    assert f"project root: {nested.resolve()}" in combined, combined
+    assert (nested / "apm.lock.yaml").is_file()
+    assert not (parent / "apm.lock.yaml").exists()
+    assert {
+        path: data for path, data in _snapshot_dir(parent).items() if not path.startswith("subdir/")
+    } == parent_before
+    assert _snapshot_dir(invoking) == invoking_before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_s16g_installed_cli_subdirectory_symlinked_file_is_still_refused(
+    tmp_path, apm_binary_path: Path
+):
+    """Rebasing ./link from a subdirectory keeps the link, so install refuses it (#4545)."""
+    project = _setup(tmp_path / "project", "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    (project / "actual.prompt.md").write_text("# actual\n", encoding="utf-8")
+    (subdir / "sel.prompt.md").symlink_to("../actual.prompt.md")
+    manifest_before = (project / "apm.yml").read_bytes()
+
+    res = subprocess.run(
+        [str(apm_binary_path), "install", "./sel.prompt.md"],
+        cwd=subdir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    combined = " ".join((res.stdout + res.stderr).split())
+    assert res.returncode != 0, combined
+    assert "symlink" in combined, combined
+    assert (project / "apm.yml").read_bytes() == manifest_before
+
+
+def test_s16_control_root_flag_from_subdirectory(tmp_path):
+    """Control: --root DIR from a subdirectory keeps today's sources and writes."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    before = _snapshot_dir(subdir)
+    deploy_dir = tmp_path / "deploy_target"
+    result = _invoke(["install", "--root", str(deploy_dir)], subdir)
+    # Today's behavior: sources stay in cwd (subdir), which has no apm.yml, so it errors.
+    assert result.exit_code == 1, result.output
+    assert "No apm.yml found" in result.output
+    assert "Using apm.yml at" not in result.output
+    assert _snapshot_dir(subdir) == before
+
+
+def test_s16_control_root_flag_bootstrap_in_subdirectory(tmp_path):
+    """Control: apm install --root . <package> from subdirectory still bootstraps in the subdirectory."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    ext_pkg = tmp_path / "ext_pkg"
+    ext_pkg.mkdir()
+    (ext_pkg / "apm.yml").write_text("name: ext_pkg\nversion: 0.1.0\n", encoding="utf-8")
+    result = _invoke(["install", "--root", ".", "--target", "claude", str(ext_pkg)], subdir)
+    assert result.exit_code == 0, result.output
+    assert (subdir / "apm.yml").exists()
+    assert "ext_pkg" in (subdir / "apm.yml").read_text(encoding="utf-8")
+
+
+def test_s16_control_nested_manifest_uses_nearest(tmp_path):
+    """Control: cwd with its own apm.yml inside a parent project uses the nearest one."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    (subdir / "apm.yml").write_text("name: child-project\nversion: 1.0.0\n", encoding="utf-8")
+    result = _invoke(["install"], subdir)
+    assert result.exit_code == 0, result.output
+    # Operates on the nearest manifest in subdir, not the parent manifest.
+    assert "Using apm.yml at" not in result.output
+    assert not (subdir / ".claude").exists()
+
+
+def test_s16_control_no_ancestor_manifest_errors(tmp_path):
+    """Control: no ancestor apm.yml keeps the current error, and positional package still bootstraps."""
+    empty_dir = tmp_path / "isolated"
+    empty_dir.mkdir()
+    res_bare = _invoke(["install"], empty_dir)
+    assert res_bare.exit_code == 1, res_bare.output
+    assert "No apm.yml found" in res_bare.output
+
+    ext_pkg = tmp_path / "ext_pkg"
+    ext_pkg.mkdir()
+    (ext_pkg / "apm.yml").write_text("name: ext_pkg\nversion: 0.1.0\n", encoding="utf-8")
+    res_add = _invoke(["install", "--target", "claude", str(ext_pkg)], empty_dir)
+    assert res_add.exit_code == 0, res_add.output
+    assert (empty_dir / "apm.yml").exists()
+    assert "ext_pkg" in (empty_dir / "apm.yml").read_text(encoding="utf-8")
+
+
+def test_s16_control_dry_run_from_subdirectory_previews_root(tmp_path):
+    """Control: apm install --dry-run from subdirectory previews root project."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    before = _snapshot_dir(subdir)
+    result = _invoke(["install", "--dry-run"], subdir)
+    assert result.exit_code == 0, result.output
+    assert "Using apm.yml at" in result.output
+    assert "Dry run mode" in result.output
+    assert not (project / "apm.lock.yaml").exists()
+    assert not (subdir / "apm.lock.yaml").exists()
+    assert _snapshot_dir(subdir) == before
+
+
+def test_s16_control_global_ignores_walk(tmp_path, monkeypatch):
+    """Control: apm install -g ignores ancestor walk."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    before = _snapshot_dir(subdir)
+    fakehome = tmp_path / "fakehome"
+    fakehome.mkdir()
+    monkeypatch.setenv("HOME", str(fakehome))
+    monkeypatch.setenv("USERPROFILE", str(fakehome))
+    monkeypatch.delenv("APM_HOME", raising=False)
+    result = _invoke(["install", "-g"], subdir)
+    assert result.exit_code == 1, result.output
+    assert "Using apm.yml at" not in result.output
+    assert _snapshot_dir(subdir) == before
 
 
 def test_s17_cursorrules_file_detects_cursor(tmp_path):

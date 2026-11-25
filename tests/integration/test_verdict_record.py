@@ -19,13 +19,15 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.install import verdict_record
+from apm_cli.install import verdict_attest, verdict_record
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I2")]
 
 _REL = ".github/prompts/a.prompt.md"
 _BODY = b"# prompt\n"
 _COMMIT = "a" * 40
+# The lock's only package is declared: a lock row apm.yml dropped is an orphan.
+_MANIFEST = "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - o/p\n"
 _OUTPUT = "[>] Installing dependencies from apm.yml...\n[i] No changes -- install state already up to date in 0.9s.\n"
 
 
@@ -45,7 +47,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / _REL).write_bytes(_BODY)
     (root / "apm_modules" / "o" / "p").mkdir(parents=True)
     (root / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: p\n", encoding="utf-8")
-    (root / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    (root / "apm.yml").write_text(_MANIFEST, encoding="utf-8")
     from apm_cli.utils.content_hash import compute_package_hash
 
     digest = "sha256:" + hashlib.sha256(_BODY).hexdigest()
@@ -174,6 +176,70 @@ def test_any_verdict_input_change_misses(
     argv = ["install", "--frozen"] if change == "argv" else ["install"]
     assert verdict_record.replay(argv) is False
     assert capsys.readouterr().out == ""
+
+
+# Executable gates: install re-judges the lock's recorded exec_status, which none of
+# these moves, so the record's key is their only control (#4770, W3d R1).
+_GATE_CHANGES = (
+    "user exec deny",
+    "project exec deny",
+    "revoked approval",
+    "user deny after approval",
+    "org exec deny-all",
+)
+_APPROVED_FIRST = frozenset({"revoked approval", "user deny after approval"})
+
+
+def _user_executables(project: Path, **store: list[str]) -> None:
+    import json
+
+    config = {"executables": {"allow": [], "deny": [], **store}}
+    _home(project).mkdir(exist_ok=True)
+    (_home(project) / "config.json").write_text(json.dumps(config) + "\n", encoding="utf-8")
+
+
+def _gate_change(project: Path, change: str) -> None:
+    if change in ("user exec deny", "user deny after approval"):
+        _user_executables(project, deny=["o/p"])
+    elif change == "project exec deny":
+        (project / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\nexecutables:\n  deny:\n    - o/p\n", encoding="utf-8"
+        )
+    elif change == "revoked approval":
+        _user_executables(project)
+    elif change == "org exec deny-all":
+        policy = project.parent / "cache" / "policy_v1" / "k"
+        policy.mkdir(parents=True)
+        (policy / "p.yml").write_text("executables:\n  deny_all: true\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("change", _GATE_CHANGES)
+def test_an_executables_gate_change_misses_the_replay(project: Path, capsys, change: str) -> None:
+    """apm.yml, the lock and every deployed byte are unchanged; the gate input is not."""
+    if change in _APPROVED_FIRST:
+        _user_executables(project, allow=["o/p"])
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is True, "positive control: run 2 hits"
+    capsys.readouterr()
+
+    _gate_change(project, change)
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("change", _GATE_CHANGES)
+def test_an_executables_gate_change_misses_the_attested_hit(project: Path, change: str) -> None:
+    """The attested hit re-judges the lock's exec_status; the gate input must miss the key."""
+    if change in _APPROVED_FIRST:
+        _user_executables(project, allow=["o/p"])
+    _attest(project)
+    assert _attested_hit() is True, "positive control: run 2 matches the attestation"
+
+    _gate_change(project, change)
+
+    _assert_proves_itself()
 
 
 def test_an_unrelated_environment_variable_still_hits(
@@ -877,15 +943,60 @@ def test_a_record_expires_when_the_daily_update_check_falls_due(
     assert ("up to date in " in capsys.readouterr().out) is hits
 
 
-def test_a_run_that_checked_for_updates_is_never_recorded(project: Path) -> None:
-    """That run may print a notice the next ordinary run would not."""
+def _record_after_update_check(output: str) -> None:
     from apm_cli.utils.version_checker import save_version_check_timestamp
 
     with verdict_record.recording(["install"]):
+        sys.stdout.write(output)
+        save_version_check_timestamp()
+        verdict_record.note_verified_noop()
+
+
+def test_a_run_whose_update_check_printed_nothing_records(project: Path, capsys) -> None:
+    """The first no-op of a day runs the update check; with nothing new it prints
+    nothing, and so does the next run while the check is fresh: it records and replays."""
+    _record_after_update_check(_OUTPUT)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is True
+    _assert_no_notice(capsys.readouterr().out)
+
+
+def test_a_run_that_printed_the_update_notice_is_never_recorded(project: Path) -> None:
+    """The next ordinary run would not print the notice, so its output is not recorded."""
+    from apm_cli.update_notice import NEW_VERSION_NOTICE
+
+    _record_after_update_check(f"[!] {NEW_VERSION_NOTICE}9.9.9 (current: 0.1.0)\n{_OUTPUT}")
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_wrapped_update_notice_is_never_recorded(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Copilot #5383: a narrow terminal wraps the notice; it printed all the same."""
+    from apm_cli.update_notice import NEW_VERSION_NOTICE
+    from apm_cli.utils import console
+    from apm_cli.utils.version_checker import save_version_check_timestamp
+
+    for name, value in (("FORCE_COLOR", "1"), ("NO_COLOR", "1"), ("COLUMNS", "24")):
+        monkeypatch.setenv(name, value)  # a narrow terminal, as Rich reads it
+    console._reset_console()
+    with verdict_record.recording(["install"]):
+        console._rich_warning(f"{NEW_VERSION_NOTICE}9.9.9 (current: 0.1.0)", symbol="warning")
         sys.stdout.write(_OUTPUT)
         save_version_check_timestamp()
         verdict_record.note_verified_noop()
+
+    console._reset_console()
+    assert NEW_VERSION_NOTICE not in capsys.readouterr().out, "the notice must wrap here"
     assert not (_home(project) / "verdicts").exists()
+
+
+def _assert_no_notice(out: str) -> None:
+    from apm_cli.update_notice import NEW_VERSION_NOTICE
+
+    assert "up to date in " in out and NEW_VERSION_NOTICE not in out
 
 
 def test_the_common_dir_config_git_reads_is_keyed(
@@ -1142,3 +1253,290 @@ def test_an_unreadable_policy_cache_at_entry_records_nothing_and_runs_on(
 
     assert capsys.readouterr().out == _OUTPUT
     assert not (_home(project) / "verdicts").exists()
+
+
+def _target_line(project: Path) -> str:
+    """The target line the full install announces for *project* (its owner's resolution)."""
+    from apm_cli.core.target_detection import format_provenance, resolve_targets
+    from apm_cli.models.apm_package import APMPackage, package_target_declaration
+
+    manifest = APMPackage.from_apm_yml(project / "apm.yml")
+    restriction = package_target_declaration(manifest).restriction()
+    return format_provenance(resolve_targets(project, yaml_targets=restriction))
+
+
+def _attest(project: Path, line: str | None = None, during=None, printed: str = "") -> None:
+    """A converged full install: it announced its targets and attested the state."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(printed + "[+] Installed 1 APM dependency.\n")
+        verdict_attest.note_run_targets(line if line is not None else _target_line(project))
+        verdict_attest.note_attested_install()
+        if during is not None:
+            during()
+
+
+def _attested_hit(argv: list[str] | None = None) -> bool:
+    """What the next install's engine sees, inside its own recorded run."""
+    with verdict_record.recording(argv or ["install"]):
+        return verdict_attest.attested_state(argv or ["install"], Path.cwd())
+
+
+def _stored(project: Path) -> dict:
+    import json
+
+    (path,) = (_home(project) / "verdicts").rglob("*.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_an_attested_install_lets_the_next_unchanged_install_skip_the_proof(
+    project: Path, capsys
+) -> None:
+    """W3d attested-record ruling: a converged full install attests what it committed;
+    the next unchanged install matches it, and nothing replays its output (A5)."""
+    _attest(project)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+    assert _attested_hit() is True
+    assert (_stored(project)["kind"], _stored(project)["provenance"]) == ("attested", "attested")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "manifest",
+        "lock",
+        "deployed bytes",
+        "package copy",
+        "unmanaged file",
+        "planted link",
+        "approvals",
+        "policy cache",
+        "allowlisted env",
+        "lifecycle script",
+    ],
+)
+def test_a_tree_changed_after_the_attested_install_never_skips_the_proof(
+    project: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    """A8: anything changed after run 1 makes run 2 prove its verdict itself."""
+    _attest(project)
+    prompts = project / ".github" / "prompts"
+    if change == "manifest":
+        (project / "apm.yml").write_text("name: demo\nversion: 1.0.0\n# edited\n", encoding="utf-8")
+    elif change == "lock":
+        with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+            handle.write("# edited\n")
+    elif change == "deployed bytes":
+        (project / _REL).write_bytes(b"# tampered\n")
+    elif change == "package copy":
+        (project / "apm_modules" / "o" / "p" / "apm.yml").write_text("name: q\n", encoding="utf-8")
+    elif change == "unmanaged file":
+        (prompts / "extra.prompt.md").write_text("x\n", encoding="utf-8")
+    elif change == "planted link":
+        if os.name == "nt":
+            pytest.skip("symlink creation needs privileges on Windows")
+        (prompts / "link.prompt.md").symlink_to(project / "apm.yml")
+    elif change == "approvals":
+        (_home(project) / "approvals.yml").write_text("approved: [o/p]\n", encoding="utf-8")
+    elif change == "policy cache":
+        policy = project.parent / "cache" / "policy_v1" / "k"
+        policy.mkdir(parents=True)
+        (policy / "p.yml").write_text("enforcement: block\n", encoding="utf-8")
+    elif change == "allowlisted env":
+        monkeypatch.setenv("APM_VERBOSE", "1")
+    elif change == "lifecycle script":
+        (project / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\nlifecycle:\n  post-install:\n    - run: echo done\n",
+            encoding="utf-8",
+        )
+
+    _assert_proves_itself()
+
+
+def test_a_target_set_widened_by_the_install_is_never_attested(project: Path) -> None:
+    """A1: run 1 announced one target set, and discovery at its end finds another."""
+    _attest(project, line="Targets: none  (source: test)")
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_run_with_lifecycle_scripts_is_never_attested(project: Path) -> None:
+    """A4: scripts fire on every install; skipping the proof would skip them."""
+    (project / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\nlifecycle:\n  post-install:\n    - run: echo done\n",
+        encoding="utf-8",
+    )
+    _attest(project)
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_lock_changed_after_the_install_committed_is_never_attested(project: Path) -> None:
+    """A6: the record keys only the lock bytes the install committed under its lock."""
+
+    def edit() -> None:
+        with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+            handle.write("# edited after commit\n")
+
+    _attest(project, during=edit)
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_output_recorded_after_an_attested_hit_stays_attested(project: Path, capsys) -> None:
+    """A5: provenance never upgrades; the replayable record a matched run writes
+    says it rests on an attestation, not on a proof."""
+    _attest(project)
+    assert _attested_hit() is True
+    _record_attested_noop()
+    capsys.readouterr()
+
+    assert (_stored(project)["kind"], _stored(project)["provenance"]) == ("output", "attested")
+    assert verdict_record.replay(["install"]) is True
+    assert "up to date in " in capsys.readouterr().out
+
+
+def _record_attested_noop() -> None:
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop(verdict_record.ATTESTED)
+
+
+def test_a_deferral_warning_the_install_printed_is_never_attested(project: Path) -> None:
+    """A2 allowlist: a kept stale copy means the next run has work; it must prove itself."""
+    _attest(project, printed="[!] Kept .claude/skills/x: it changed after the install.\n")
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_parked_mcp_notice_is_re_judged_live_and_still_attests(project: Path) -> None:
+    """A2 allowlist: the services phase re-runs on every attested hit, so its notice may pass."""
+    _attest(
+        project,
+        printed="  [!] Parked MCP server 'm' from transitive package o/p (self-defined, not approved)\n",
+    )
+
+    _assert_attested_record(project)
+
+
+def test_an_unprefixed_warning_the_install_printed_is_never_attested(project: Path) -> None:
+    """Copilot #5383: a warning printed without a symbol (a hook file that contributes no
+    entries) still refuses the attestation, so the next install prints it again."""
+    from apm_cli.utils.console import _rich_warning
+
+    _attest(project, during=lambda: _rich_warning("Hook file h.json contributes no entries"))
+
+    _assert_proves_itself()
+
+
+def _assert_proves_itself() -> None:
+    """Run 2 does not match the attestation: the engine proves its verdict itself."""
+    assert _attested_hit() is False
+
+
+def _assert_attested_record(project: Path) -> None:
+    """The durable attested record exists and run 2 matches it."""
+    assert _stored(project)["kind"] == "attested"
+    assert _attested_hit() is True
+
+
+def _fake_package(root: Path, body: str) -> Path:
+    package = root / "apm_cli"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_text(body, encoding="utf-8")
+    return package
+
+
+@pytest.mark.parametrize("layout", ["source", "installed"])
+def test_changed_apm_code_at_the_same_version_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    """Copilot #5383 (W3d A3): a pip or editable install runs under Python, so the
+    record keys the APM code itself: a source tree's files or the installed RECORD."""
+    import apm_cli
+
+    site = project.parent / "site"
+    package = _fake_package(site, "VERSION = 1\n")
+    if layout == "installed":
+        dist = site / "apm_cli-0.0.0.dist-info"
+        dist.mkdir()
+        (dist / "RECORD").write_text("apm_cli/__init__.py,sha256=old,12\n", encoding="utf-8")
+    monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
+    _record()
+    _assert_replays(True)  # the same code still hits: the key is stable
+    if layout == "installed":
+        (dist / "RECORD").write_text("apm_cli/__init__.py,sha256=new,12\n", encoding="utf-8")
+    else:
+        (package / "__init__.py").write_text("VERSION = 1  # patched\n", encoding="utf-8")
+
+    _assert_replays(False)
+
+
+def test_an_editable_install_keys_its_source_files(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An editable install's RECORD does not cover its source, so the source content is
+    keyed: an edit that keeps the size and the timestamps still misses."""
+    import apm_cli
+
+    site = project.parent / "site"
+    package = _fake_package(site / "src", "VERSION = 1\n")
+    dist = site / "apm_cli-0.0.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "RECORD").write_text("apm_cli/__init__.py,sha256=x,12\n", encoding="utf-8")
+    (dist / "direct_url.json").write_text('{"dir_info": {"editable": true}}', encoding="utf-8")
+    monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
+    _record()
+    _assert_replays(True)
+    # The same size, and the old timestamps restored: only the content changed.
+    source = package / "__init__.py"
+    before = os.stat(source)
+    source.write_text("VERSION = 2\n", encoding="utf-8")
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    _assert_replays(False)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_an_unreadable_apm_source_tree_never_records(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W3d A3: with no readable implementation fingerprint, nothing is recorded (never
+    a version-only key)."""
+    import apm_cli
+
+    package = _fake_package(project.parent / "site", "VERSION = 1\n")
+    (package / "hidden.py").write_text("x = 1\n", encoding="utf-8")
+    os.chmod(package / "hidden.py", 0)
+    monkeypatch.setattr(apm_cli, "__file__", str(package / "__init__.py"))
+    try:
+        _record()
+    finally:
+        os.chmod(package / "hidden.py", 0o644)
+
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.parametrize(
+    ("printed", "attests"),
+    [
+        ("\x1b[33m[!] Kept .claude/skills/x: it changed after the install.\x1b[0m\n", False),
+        ("\x1b]8;;https://example.invalid\x07[!] Kept x\x1b]8;;\x07\n", False),
+        ("\x1b[33m  [!] Parked MCP server 'm' from transitive package o/p\x1b[0m\n", True),
+    ],
+    ids=["colored-kept", "unknown-escape", "colored-parked"],
+)
+def test_terminal_styling_never_hides_a_deferral_warning(
+    project: Path, printed: str, attests: bool
+) -> None:
+    """Copilot #5383 (A2): styling is stripped before a line is judged; an escape
+    the record does not understand blocks the attestation."""
+    _attest(project, printed=printed)
+
+    assert (_home(project) / "verdicts").exists() is attests
+
+
+def _assert_replays(expected: bool) -> None:
+    assert verdict_record.replay(["install"]) is expected

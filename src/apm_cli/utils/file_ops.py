@@ -30,6 +30,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
+from apm_cli.utils.realpath_win import release_held
+
 T = TypeVar("T")
 
 # ---------------------------------------------------------------------------
@@ -191,6 +193,7 @@ def _retry_on_lock(
                 f"Transient file lock (attempt {attempt + 1}/{max_retries}); "
                 f"retrying in {delay:.2f}s"
             )
+            release_held()  # a racing hold must never outlast the retries
             if before_retry is not None:
                 try:  # noqa: SIM105
                     before_retry()
@@ -305,6 +308,7 @@ def robust_rmtree(
     max_retries:
         Maximum retry attempts for transient lock errors.
     """
+    release_held(path)  # a held directory would block this delete on Windows
     path_s = _without_trailing_separators(str(path))
 
     def _do_rmtree() -> None:
@@ -426,6 +430,7 @@ def robust_copytree(
 def robust_copy_entry(src: Path, dst: Path) -> None:
     """Copy one directory entry without following links; a link is copied as a link."""
     if src.is_symlink():
+        release_held(dst)
         os.symlink(os.readlink(src), dst, target_is_directory=src.is_dir())
     elif src.is_dir():
         robust_copytree(src, dst, symlinks=True)
@@ -488,6 +493,8 @@ def robust_replace(
     Path to the destination.
     """
     src_p, dst_p = Path(src), Path(dst)
+    release_held(src_p)  # a held directory would block this rename on Windows
+    release_held(dst_p)
     return _retry_on_lock(
         lambda: src_p.replace(dst_p),
         f"replace {src_p} -> {dst_p}",

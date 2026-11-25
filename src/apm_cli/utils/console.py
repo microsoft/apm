@@ -315,8 +315,14 @@ def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="green", symbol=symbol, bold=True)
 
 
+# Every warning and error message this process printed, unwrapped (one per call):
+# the verified-state record judges these, never terminal-wrapped lines (W3d A2).
+EMITTED: list[str] = []
+
+
 def _rich_error(message: str, symbol: str = None, *, err: bool = True):  # noqa: RUF013
     """Display an error message in red on stderr."""
+    EMITTED.append(message)
     _rich_echo(message, color="red", symbol=symbol, err=err)
 
 
@@ -326,6 +332,7 @@ def _rich_warning(message: str, symbol: str = None, *, err: bool = False):  # no
     Continuation lines carry remediation commands; they are never hard-wrapped,
     so a command and its argument stay on one copy-pasteable line.
     """
+    EMITTED.append(message)
     head, sep, rest = message.partition("\n")
     _rich_echo(head, color="yellow", symbol=symbol, err=err)
     if sep:
