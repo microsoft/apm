@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import TypeVar
 
 from ..models.dependency.reference import DependencyReference
-from ..utils.paths import portable_relpath
+from ..utils.paths import portable_relpath, relative_posix, stored_spelling
+from ..utils.realpath import resolve_path
 
 _T = TypeVar("_T")
 
@@ -45,6 +46,34 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     return portable_relpath(anchored, base)
 
 
+def stored_directory(anchored: Path, root: Path | None) -> Path:
+    """*anchored* spelled as the volume stores it: one directory, one spelling (#5424).
+
+    A case-folding or normalizing volume (macOS, Windows) opens ``F-Pkg`` as
+    ``f-pkg`` and an NFD name as its NFC form, but ``Path.resolve`` keeps the
+    spelling it was given. Each component below the project *root* takes the
+    stored entry (:func:`apm_cli.utils.paths.stored_spelling`): an exact entry
+    always wins, so a path spelled as stored keeps its identity, and a folded
+    one must be confirmed by ``samefile``, so distinct directories on a
+    case-sensitive volume never merge. *anchored* is already resolved (no
+    links); a directory outside *root*, or a missing or ambiguous entry,
+    keeps *anchored*: nothing outside the project is listed. Cost: one
+    directory listing per component below *root*, plus one ``samefile`` per
+    folded component.
+    """
+    if root is None:
+        return anchored
+    try:
+        base = resolve_path(root)
+    except (OSError, RuntimeError):
+        return anchored
+    rest = relative_posix(anchored, base)
+    if not rest or rest == ".":
+        return anchored
+    stored = stored_spelling(base, rest)
+    return base / stored if stored is not None and stored != rest else anchored
+
+
 def root_local_dirs(
     root_refs: Iterable[DependencyReference], consumer_root: Path
 ) -> dict[Path, DependencyReference]:
@@ -54,7 +83,7 @@ def root_local_dirs(
         if ref.is_local and ref.local_path and ref.replacement is None:
             raw = Path(ref.local_path).expanduser()
             anchored = raw.resolve() if raw.is_absolute() else (consumer_root / raw).resolve()
-            dirs.setdefault(anchored, ref)
+            dirs.setdefault(stored_directory(anchored, consumer_root), ref)
     return dirs
 
 
@@ -71,8 +100,10 @@ def transitive_local_identity(
     When the root manifest also declares the anchored directory, the edge
     takes the root declaration's identity and spelling, however the declaring
     package spells its relative path (``../lib`` vs ``./packages/lib``).
-    Otherwise the edge is keyed by its anchored directory.
+    Otherwise the edge is keyed by its anchored directory, spelled as the
+    volume stores it (:func:`stored_directory`, #5424).
     """
+    anchored = stored_directory(anchored, root)
     root_ref = root_local_dirs.get(anchored)
     if root_ref is not None:
         return replace(sub_dep, repo_url=root_ref.repo_url, local_path=root_ref.local_path)
