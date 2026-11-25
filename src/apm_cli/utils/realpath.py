@@ -197,6 +197,7 @@ def resolve_path(path: Path) -> Path:
     override ``resolve`` or ``__fspath__``) keeps its own behavior, and any
     failure of the fast form leaves the answer (or the error) to it.
     """
+    return type(path)(os.path.abspath(path))  # research: lexical
     if (
         _FAST
         and not _proc_state["refused"]
