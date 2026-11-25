@@ -927,7 +927,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # registration's lockfile flush is then the install's single commit (#4329).
         # ------------------------------------------------------------------
         if not lockfile_only:
-            _run_phase("services", services, ctx)
+            pass  # RESEARCH: MCP/LSP services reconcile deleted
             if services.native_registration_allowed(ctx):
                 _run_phase("codex_plugins", codex_plugins, ctx)
                 _run_phase("claude_plugins", claude_plugins, ctx)
