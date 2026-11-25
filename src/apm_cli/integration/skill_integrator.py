@@ -984,7 +984,7 @@ class SkillIntegrator(BaseIntegrator):
                     and target.resolve() in rewriter._native_skill_session_owners
                 )
                 prev_owner = (owned_by or {}).get(sub_name)
-                is_self_overwrite = self_owned(prev_owner, parent_name, rewriter)
+                is_self_overwrite = self_owned(prev_owner, parent_name, rewriter, target)
 
                 if (
                     managed_files is not None

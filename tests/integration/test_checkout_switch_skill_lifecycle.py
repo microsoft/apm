@@ -781,11 +781,16 @@ def _restored_lock_project(world: _World, *, apm_wrote_helper: bool) -> None:
     source.write_text(_DEMO + "\nEdited.\n", encoding="ascii")
 
 
+@pytest.mark.parametrize("sibling", [False, True])
 def test_restored_older_lock_records_the_skills_own_file_in_one_install(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, sibling: bool
 ) -> None:
+    """A hand-made sibling in the skill directory never blocks reclaiming APM's own file."""
     world = _new_world(tmp_path, apm_binary_path)
     _restored_lock_project(world, apm_wrote_helper=True)
+    notes = world.project / _DEMO_DIR / "personal-notes.txt"
+    if sibling:
+        notes.write_text("my notes\n", encoding="ascii")
     before = _tree(world.project, ".claude")
 
     installed = world.apm("install")
@@ -808,6 +813,9 @@ def test_restored_older_lock_records_the_skills_own_file_in_one_install(
     assert again.returncode == 0, _output(again)
     assert (world.project / "apm.lock.yaml").read_bytes() == lock
     assert _tree(world.project, ".claude") == converged
+    if sibling:
+        assert notes.read_text(encoding="ascii") == "my notes\n"
+        assert f"{_DEMO_DIR}/personal-notes.txt" not in _locked_files(world.project)
 
 
 def test_restored_older_lock_keeps_a_hand_made_file_unmanaged(
