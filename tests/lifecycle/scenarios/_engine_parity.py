@@ -89,6 +89,8 @@ _PARALLEL = re.compile(r"^\s*\[>\] Resolving ")
 
 # CommandLogger.policy_resolved prints the age in s, m or h (command_logger.py).
 _POLICY_AGE = re.compile(r" \(cached, fetched \d+[smh] ago\)")
+# A receipt file is named by a hash of its world's project root.
+_RECEIPT_NAME = re.compile(r"(deployment-receipts[/\\])[0-9a-f]{64}\.json")
 
 
 BOTH = ("p-skill:git", "p-exec:git")
@@ -186,6 +188,7 @@ def _normalized(world: World, text: str) -> list[str]:
     """
     text = rooted(_POLICY_AGE.sub("", _DECISION.sub("", text)), str(world.root))
     text = _ELAPSED.sub("<T>", text)
+    text = _RECEIPT_NAME.sub(r"\1<receipt>.json", text)
     lines: list[str] = []
     block: list[str] = []
     for line in [line for line in text.splitlines() if line.strip()] + [""]:

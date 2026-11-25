@@ -92,10 +92,14 @@ def test_warm_locked_install_applies_the_diff(twin: Twin) -> None:
 @pytest.mark.parametrize("clone", sorted(CLONE_DOUBTS))
 @NEEDS_ANY
 def test_a_clone_without_bound_receipts_takes_the_full_pipeline(twin: Twin, clone: str) -> None:
-    """No bound receipts: the whole project is the diff, and the full pipeline is cheaper."""
+    """No bound receipts: the whole project is the diff, and the full pipeline is cheaper.
+
+    A copied identity keeps the full run's own refusal of unbound receipts, in both worlds.
+    """
     _converge(twin, *BOTH)
     twin.each(CLONE_DOUBTS[clone])
-    _assert_decision(twin.ok("install"), FULL)
+    _assert_decision(twin.run("install"), FULL)
+    assert twin.codes[-1] == (0 if clone == "clone-with-lock" else 1), twin.evidence
 
 
 @NEEDS_DIFF
