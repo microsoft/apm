@@ -16,6 +16,7 @@ from colorama import Fore, Style
 from ..core.remediation import LLM_TLS_BOOTSTRAP_MISSING
 from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
+from ..utils import executable_exclusion as _exclusion
 from ..utils import git_env
 from ..utils.subprocess_env import external_process_env
 from .registry import get_runtime_descriptor, runtime_descriptors
@@ -29,7 +30,9 @@ def _required_helper(*names: str) -> str:
         path = git_env.trusted_executable(name)
         if path is not None:
             return path
-    raise FileNotFoundError(f"{names[0]} executable not found on PATH")
+    raise FileNotFoundError(
+        _exclusion.not_found_message(names[0], f"{names[0]} executable not found on PATH")
+    )
 
 
 class RuntimeManager:

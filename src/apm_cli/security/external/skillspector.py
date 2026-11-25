@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.utils import executable_exclusion as _exclusion
 from apm_cli.utils import git_env
 
 from ..content_scanner import ScanFinding
@@ -44,6 +45,10 @@ _TIMEOUT_SECONDS = 300
 #: Environment variables SkillSpector reads for LLM-powered analysis. Only
 #: forwarded to the subprocess when LLM mode is active; never logged.
 _LLM_KEY_ENV_VARS = ("OPENAI_API_KEY", "NVIDIA_INFERENCE_KEY")
+
+
+def _not_found_prefix() -> str:
+    return _exclusion.not_found_message(_BINARY, "SkillSpector CLI not found on PATH.")
 
 
 class SkillSpectorAdapter:
@@ -84,7 +89,7 @@ class SkillSpectorAdapter:
         if git_env.trusted_executable(_BINARY) is None:
             return (
                 False,
-                "SkillSpector CLI not found on PATH.\n\n"
+                _not_found_prefix() + "\n\n"
                 "To install it (requires Python >= 3.12):\n"
                 '  uv tool install "skillspector @ '
                 'git+https://github.com/NVIDIA/SkillSpector.git"\n'
@@ -117,7 +122,7 @@ class SkillSpectorAdapter:
         binary = git_env.trusted_executable(_BINARY)
         if binary is None:
             raise ExternalScanError(
-                "SkillSpector CLI not found on PATH.\n\n"
+                _not_found_prefix() + "\n\n"
                 "To install it (requires Python >= 3.12):\n"
                 '  uv tool install "skillspector @ '
                 'git+https://github.com/NVIDIA/SkillSpector.git"\n'

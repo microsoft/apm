@@ -442,12 +442,12 @@ def trusted_executable(name: str) -> str | None:
     (git, az, npm, codex, PowerShell, ...). It searches only PATH directories
     outside the current project, never the working directory, so a program
     shipped inside a checkout cannot stand in for the real tool. Launch the
-    returned path; never pass a bare helper name to ``subprocess``.
+    returned path, never a bare name; see ``executable_exclusion.not_found_message``.
     """
     try:
         return _resolve_trusted_executable(name)
-    except FileNotFoundError:
-        return None
+    except FileNotFoundError as error:
+        return _exclusion.note_shadow(name, error)
 
 
 def get_git_executable() -> str:

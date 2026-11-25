@@ -160,8 +160,10 @@ class AzureCliBearerProvider:
             # az availability check (also under lock so we don't race with
             # a hypothetical clear_cache + chdir/PATH change in another thread).
             if not self.is_available():
+                from apm_cli.utils.executable_exclusion import not_found_message
+
                 raise AzureCliBearerError(
-                    "az CLI is not installed or not on PATH",
+                    not_found_message("az", "az CLI is not installed or not on PATH"),
                     kind="az_not_found",
                 )
 
