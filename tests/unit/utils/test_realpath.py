@@ -330,6 +330,106 @@ def test_a_mutation_spelled_through_an_alias_drops_the_proof(tree: Path) -> None
 
 @_LINKS
 @pytest.mark.usefixtures("k_applies")
+def test_a_release_racing_a_resolve_is_never_undone_by_its_late_publish(tree: Path) -> None:
+    """The resolve observed ``dir/sub`` as a real directory; before it publishes, APM
+    releases and replaces it with a link. The stale proof must not be recorded."""
+    import shutil
+
+    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.utils.realpath_win import release_held
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    fired: list[bool] = []
+
+    def swap() -> None:
+        if fired:
+            return
+        fired.append(True)
+        release_held(sub)
+        shutil.rmtree(sub)
+        sub.symlink_to(tree / "outside", target_is_directory=True)
+
+    with invocation_scope():
+        realpath._before_publish.append(swap)
+        try:
+            resolve_path(leaf)
+        finally:
+            realpath._before_publish.remove(swap)
+        assert fired and not realpath.proven_link_free(sub)
+        _expect_link_refused(tree, leaf)
+
+
+def _swap_once(sub: Path, target: Path, fired: list) -> None:
+    import shutil
+
+    from apm_cli.utils.realpath_win import release_held
+
+    if fired:
+        return
+    fired.append(True)
+    release_held(sub)
+    shutil.rmtree(sub)
+    sub.symlink_to(target, target_is_directory=True)
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_subdirectory_proof_racing_a_release_is_dropped(tree: Path) -> None:
+    """_proven_answer's own publish site: a directory under a proven one."""
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    sub = tree / "dir" / "sub"
+    fired: list[bool] = []
+
+    def swap() -> None:
+        _swap_once(sub, tree / "outside", fired)
+
+    with invocation_scope():
+        assert resolve_path(tree / "dir" / "file.md") == tree / "dir" / "file.md"
+        realpath._before_publish.append(swap)
+        try:
+            resolve_path(sub)
+        finally:
+            realpath._before_publish.remove(swap)
+        assert fired and not realpath.proven_link_free(sub)
+        _expect_link_refused(tree, sub / "x.md")
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
+def test_a_worker_resolve_parked_at_publish_loses_to_a_release_on_another_thread(
+    tree: Path,
+) -> None:
+    """Cross-thread: APM's workers share the proof memo (W3d T1/T2), no sleeps."""
+    import threading
+
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    sub, leaf = tree / "dir" / "sub", tree / "dir" / "sub" / "x.md"
+    observed, released = threading.Event(), threading.Event()
+
+    def park() -> None:
+        if not observed.is_set():
+            observed.set()
+            assert released.wait(10)
+
+    with invocation_scope():
+        realpath._before_publish.append(park)
+        try:
+            worker = threading.Thread(target=resolve_path, args=(leaf,))
+            worker.start()
+            assert observed.wait(10)
+            _swap_once(sub, tree / "outside", [])
+            released.set()
+            worker.join(10)
+        finally:
+            realpath._before_publish.remove(park)
+        assert not worker.is_alive() and not realpath.proven_link_free(sub)
+        _expect_link_refused(tree, leaf)
+
+
+@_LINKS
+@pytest.mark.usefixtures("k_applies")
 def test_a_dotdot_spelling_is_never_proven(tree: Path) -> None:
     """``link_dir/..`` is lexically ``root`` but resolves to ``root``'s parent's view."""
     from apm_cli.core.invocation_memo import invocation_scope
