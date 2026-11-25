@@ -66,7 +66,7 @@ from ..utils.console import (
     _rich_info,
     _rich_success,
 )
-from ._helpers import _find_apm_yml
+from ._helpers import _find_apm_yml, ensure_project_root_is_not_user_scope
 
 
 def _handle_lock_error(e: Exception, verbose: bool) -> None:
@@ -206,6 +206,7 @@ def _run_lock(
         project_root = manifest_path.parent
     else:
         scope = InstallScope.PROJECT
+        ensure_project_root_is_not_user_scope(Path.cwd(), command="lock")
         manifest_path = _find_apm_yml()
         if manifest_path is None:
             _rich_error(

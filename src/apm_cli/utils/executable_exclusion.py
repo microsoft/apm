@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -16,6 +17,40 @@ class ProjectShadowedExecutableError(FileNotFoundError):
         )
 
 
+def _same_directory(first: Path, second: Path) -> bool:
+    """Compare by identity, so a case-variant spelling on a case-insensitive FS matches."""
+    if first == second:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def resolved_home() -> Path | None:
+    """Return the resolved home directory, or None when it cannot be determined."""
+    try:
+        return Path.home().resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
+def is_home(directory: Path) -> bool:
+    """Whether *directory* is the home directory (by identity, not spelling)."""
+    home = resolved_home()
+    return home is not None and _same_directory(directory, home)
+
+
+def is_home_or_above(directory: Path) -> bool:
+    """Whether *directory* is HOME or one of its ancestors (``/``, ``/home``, ...).
+
+    The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
+    manifest) is not a project.
+    """
+    home = resolved_home()
+    return home is not None and any(_same_directory(directory, d) for d in (home, *home.parents))
+
+
 def executable_exclusion_root() -> Path | None:
     """Return the project root containing the cwd, or None to exclude nothing.
 
@@ -27,10 +62,9 @@ def executable_exclusion_root() -> Path | None:
     from apm_cli.core.scope import manifest_file
 
     cwd = Path.cwd().resolve()
-    home = Path.home().resolve()
     ancestors = (cwd, *cwd.parents)
     for has_marker in (lambda d: (d / ".git").exists(), lambda d: manifest_file(d).is_file()):
         for directory in ancestors:
-            if directory != home and directory not in home.parents and has_marker(directory):
+            if not is_home_or_above(directory) and has_marker(directory):
                 return directory
-    return None if cwd == home or cwd in home.parents else cwd
+    return None if is_home_or_above(cwd) else cwd

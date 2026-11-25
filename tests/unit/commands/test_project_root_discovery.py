@@ -243,10 +243,67 @@ def test_a_walk_below_userprofile_never_adopts_the_home_manifest(
     assert _find_apm_yml(work) is None
 
 
-# -- project scope never deploys into the user-scope directories (#4545) --
+# -- the ceiling is #5470's HOME-or-above predicate, by identity (#4545) --
 
 
-def test_the_scope_guard_refuses_the_home_directory_and_names_the_fix(
+def test_a_walk_never_adopts_a_manifest_above_home_even_outside_home(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home = tmp_path / "base" / "home"
+    home.mkdir(parents=True)
+    work = tmp_path / "base" / "other" / "sub"
+    work.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (tmp_path / "base" / "apm.yml").write_text("name: above\nversion: 1.0.0\n", encoding="utf-8")
+    project = tmp_path / "base" / "other" / "apm.yml"
+
+    assert _find_apm_yml(work) is None
+    project.write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    assert _find_apm_yml(work) == project.resolve()
+
+
+def test_a_walk_from_home_never_adopts_a_manifest_above_home(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home = tmp_path / "base" / "home"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (tmp_path / "base" / "apm.yml").write_text("name: above\nversion: 1.0.0\n", encoding="utf-8")
+
+    assert _find_apm_yml(home) is None
+
+
+def _case_variant(path: Path) -> Path | None:
+    """The same directory spelled in another case, or None on a case-sensitive FS."""
+    variant = path.with_name(path.name.swapcase())
+    return variant if variant != path and variant.exists() else None
+
+
+def test_a_case_variant_home_is_still_the_ceiling(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml, ensure_project_root_is_not_user_scope
+
+    home = tmp_path / "Home"
+    work = home / "work" / "newproj"
+    work.mkdir(parents=True)
+    variant = _case_variant(home)
+    if variant is None:
+        pytest.skip("case-sensitive filesystem")
+    monkeypatch.setenv("HOME", str(variant))
+    monkeypatch.setenv("USERPROFILE", str(variant))
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+
+    assert _find_apm_yml(work) is None
+    ensure_project_root_is_not_user_scope(home, command="install")  # existing project: warns
+
+
+# -- a new project at HOME is refused; an existing one warns (#4545) --
+
+
+def test_the_scope_guard_refuses_a_new_project_at_home_and_names_the_fix(
     tmp_path: Path, monkeypatch
 ) -> None:
     import click
@@ -255,6 +312,23 @@ def test_the_scope_guard_refuses_the_home_directory_and_names_the_fix(
 
     home, work = _home_world(tmp_path, monkeypatch)
 
+    with pytest.raises(click.UsageError, match=r"your project directory.*apm update -g"):
+        ensure_project_root_is_not_user_scope(home, command="update")
     with pytest.raises(click.UsageError, match=r"apm install -g.*apm install --root <dir>"):
         ensure_project_root_is_not_user_scope(home)
     ensure_project_root_is_not_user_scope(work)
+    ensure_project_root_is_not_user_scope(home, user_scope=True)
+
+
+def test_the_scope_guard_warns_once_for_an_existing_home_project(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from apm_cli.commands._helpers import ensure_project_root_is_not_user_scope
+
+    home, _ = _home_world(tmp_path, monkeypatch)
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+
+    ensure_project_root_is_not_user_scope(home, command="lock")
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert out.count("[!]") == 1 and "apm lock -g" in out, out

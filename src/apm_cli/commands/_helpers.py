@@ -558,22 +558,20 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     user's ``/tmp/apm.yml``. It is skipped with a warning naming it, and the
     walk continues. Windows ownership (SIDs) is not checked.
 
-    ``$HOME`` is a ceiling (#4545, #5448): a walk that starts in a strict
-    subdirectory of the resolved home directory never adopts an ``apm.yml`` in
-    ``$HOME`` itself or above it, so a stray ``~/apm.yml`` cannot capture a
-    project folder. A walk starting at ``$HOME`` or outside it is unchanged.
+    ``$HOME`` is a ceiling (#4545, #5448): the walk never adopts an ``apm.yml``
+    in a parent directory that is ``$HOME`` or above it (the same predicate as
+    helper-executable lookup, ``utils.executable_exclusion``), so a stray
+    ``~/apm.yml`` or ``/apm.yml`` cannot capture a project folder. The start
+    directory's own manifest is always considered.
     """
     import stat
 
     cwd = (start or Path.cwd()).resolve()
     geteuid = getattr(os, "geteuid", None)
-    try:
-        home = Path.home().resolve()
-    except (OSError, RuntimeError):
-        home = None
-    below_home = home is not None and cwd != home and home in cwd.parents
+    from ..utils.executable_exclusion import is_home_or_above
+
     for candidate in (cwd, *cwd.parents):
-        if below_home and candidate == home:
+        if candidate != cwd and is_home_or_above(candidate):
             break
         manifest = manifest_file(candidate)
         try:
@@ -595,21 +593,38 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     return None
 
 
-def ensure_project_root_is_not_user_scope(project_root: Path, *, user_scope: bool = False) -> None:
-    """Refuse a project-scope root whose deploy directories are the user-scope ones (#4545)."""
-    if user_scope:
-        return
-    from ..core.remediation import HOME_ROOT_PICK_DIR, HOME_ROOT_USER_SCOPE, either_sentence
+def ensure_project_root_is_not_user_scope(
+    project_root: Path, *, user_scope: bool = False, command: str = "install"
+) -> None:
+    """Guard a project-scope root that is ``$HOME`` (its deploy dirs are the user-scope ones, #4545).
 
-    try:
-        home = Path.home().resolve()
-    except (OSError, RuntimeError):
+    The one owner of the HOME scope guard: ``apm install``, ``update``, ``lock``
+    and ``uninstall`` each call it. A new project at ``$HOME`` (no ``apm.yml`` and
+    no lockfile there yet) is refused; an existing one keeps working with a warning.
+    """
+    from ..core.remediation import HOME_ROOT_PICK_DIR, HOME_ROOT_USER_SCOPE
+    from ..core.scope import manifest_file
+    from ..deps.lockfile import LOCKFILE_NAME
+    from ..utils.executable_exclusion import is_home
+
+    if user_scope or not is_home(project_root):
         return
-    if project_root.resolve() == home:
-        raise click.UsageError(
-            f"Project scope would deploy into the user-scope directories under {home} "
-            f"(~/.claude, ~/.agents, ...). {either_sentence(HOME_ROOT_USER_SCOPE, HOME_ROOT_PICK_DIR)}"
+    home = project_root.resolve()
+    user_scope_advice = HOME_ROOT_USER_SCOPE.bind(command=command)
+    if manifest_file(home).exists() or (home / LOCKFILE_NAME).exists():
+        _rich_warning(
+            f"Project scope at {home} deploys into your user-scope directories "
+            f"(~/.claude, ~/.agents, ...). {user_scope_advice.sentence()}",
+            symbol="warning",
         )
+        return
+    advice = f"Run it from your project directory, or {user_scope_advice.clause()}"
+    if command == "install":
+        advice += f", or '{HOME_ROOT_PICK_DIR.command}' to {HOME_ROOT_PICK_DIR.fixes_promise}"
+    raise click.UsageError(
+        f"Refusing to create a project in your home directory {home}: project scope would "
+        f"deploy into the user-scope directories (~/.claude, ~/.agents, ...). {advice}."
+    )
 
 
 def resolve_cli_packages_for_project_root(
@@ -626,10 +641,23 @@ def resolve_cli_packages_for_project_root(
         # Only an explicit relative path names the invoking directory; a bare
         # name (``foo``, ``name@market``) never depends on what the subdir holds.
         if not pkg.startswith(("./", "../", ".\\", "..\\")):
-            resolved.append(pkg)
+            resolved.append(str(invoking / pkg) if _is_local_bundle_source(invoking / pkg) else pkg)
             continue
         resolved.append(_rebase_relative_package(pkg, invoking, root))
     return tuple(resolved)
+
+
+def _is_local_bundle_source(path: Path) -> bool:
+    """Whether a bare CLI source names a local bundle (archive or plugin dir) at *path* (#4545).
+
+    install probes a bare source against the working directory, which discovery
+    has moved to the project root; a bundle beside the invoking directory is
+    pinned to that directory first. The archive suffixes and ``plugin.json``
+    marker match ``bundle.local_bundle.detect_local_bundle``, without extracting.
+    """
+    if path.is_dir():
+        return (path / "plugin.json").is_file()
+    return path.is_file() and path.name.lower().endswith((".zip", ".tgz", ".tar.gz"))
 
 
 def _rebase_relative_package(pkg: str, invoking: Path, root: Path) -> str:

@@ -488,6 +488,42 @@ def test_s16c_installed_cli_subdirectory_install(tmp_path, apm_binary_path: Path
     assert sub_claude == _snapshot_dir(root_project / ".claude")
 
 
+def _write_skill_bundle(archive: Path, skill: str) -> None:
+    import json
+    import zipfile
+
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("plugin.json", json.dumps({"name": skill, "version": "1.0.0"}))
+        zf.writestr(
+            f"skills/{skill}/SKILL.md",
+            f"---\nname: {skill}\ndescription: {skill}\n---\n# {skill}\n",
+        )
+
+
+def test_s16h_installed_cli_subdirectory_bundle_is_the_one_beside_the_invoker(
+    tmp_path, apm_binary_path: Path
+):
+    """A bare bundle name from a subdirectory installs <subdir>/bundle.zip, not <root>/bundle.zip."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    _write_skill_bundle(subdir / "bundle.zip", "sub-skill")
+    _write_skill_bundle(project / "bundle.zip", "root-skill")
+
+    result = subprocess.run(
+        [str(apm_binary_path), "install", "bundle.zip"],
+        cwd=subdir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (project / ".agents" / "skills" / "sub-skill" / "SKILL.md").is_file(), (
+        result.stdout + result.stderr
+    )
+    assert not (project / ".agents" / "skills" / "root-skill").exists()
+
+
 def test_s16d_installed_cli_subdirectory_add_package(tmp_path, apm_binary_path: Path):
     """Installed CLI: apm install <package> from subdirectory updates parent apm.yml and lockfile."""
     project = _setup(tmp_path / "project", "s16b_provenance_cwd")

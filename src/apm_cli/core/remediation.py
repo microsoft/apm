@@ -924,8 +924,8 @@ FROZEN_UPDATE_CONFLICT = _entry(
 )
 HOME_ROOT_USER_SCOPE = _entry(
     "home-root-user-scope",
-    "apm install -g",
-    "install for the user instead of the project",
+    "apm {command} -g",
+    "use user scope",
 )
 HOME_ROOT_PICK_DIR = _entry(
     "home-root-pick-dir",

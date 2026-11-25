@@ -13,8 +13,8 @@
     "tests/integration/test_home_discovery_ceiling_lifecycle.py::test_a_bare_install_in_an_empty_folder_under_home_reports_no_manifest",
     "tests/integration/test_home_discovery_ceiling_lifecycle.py::test_a_project_install_after_a_global_install_leaves_home_alone",
     "tests/unit/commands/test_project_root_discovery.py::test_a_walk_below_home_never_adopts_the_home_manifest",
-    "tests/integration/test_home_discovery_ceiling_lifecycle.py::test_a_project_install_in_the_home_directory_is_refused_and_names_the_fix",
     "tests/unit/commands/test_project_root_discovery.py::test_a_symlinked_home_is_a_ceiling_too",
-    "tests/unit/commands/test_project_root_discovery.py::test_the_scope_guard_refuses_the_home_directory_and_names_the_fix"
+    "tests/integration/test_home_discovery_ceiling_lifecycle.py::test_a_new_project_in_the_home_directory_is_refused_and_names_the_fix",
+    "tests/unit/commands/test_project_root_discovery.py::test_the_scope_guard_refuses_a_new_project_at_home_and_names_the_fix"
   ]
 }

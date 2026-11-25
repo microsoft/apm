@@ -75,7 +75,7 @@ When run from a subdirectory of a project without an `apm.yml`, project-scope
 `apm install` (including `--dry-run` and positional packages) discovers the
 nearest ancestor `apm.yml`. Sources, deploy paths, `apm_modules/`,
 `apm.lock.yaml`, and target provenance anchor to that project root, restoring the
-working directory on exit. The home directory is a ceiling: from a folder below `$HOME`, discovery never adopts an `apm.yml` in `$HOME` itself or above it, and project scope refuses a root equal to `$HOME` (use `-g` for user scope or `--root <dir>`). Passing `--root DIR` keeps sources resolving from the
+working directory on exit. The home directory is a ceiling: from a folder below `$HOME`, discovery never adopts an `apm.yml` in `$HOME` itself or above it, and project-scope `install`, `update`, `lock` and `uninstall` refuse to create a new project in `$HOME` (run from your project directory or use `-g`); an existing `$HOME` project keeps working with a warning. Passing `--root DIR` keeps sources resolving from the
 working directory without discovery.
 
 `apm install --root DIR --frozen` checks `DIR/apm.lock.yaml` against the
