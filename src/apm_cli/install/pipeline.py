@@ -927,7 +927,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # registration's lockfile flush is then the install's single commit (#4329).
         # ------------------------------------------------------------------
         if not lockfile_only:
-            pass  # RESEARCH: MCP/LSP services reconcile deleted
+            _research_count()  # RESEARCH: MCP/LSP services reconcile deleted
             if services.native_registration_allowed(ctx):
                 _run_phase("codex_plugins", codex_plugins, ctx)
                 _run_phase("claude_plugins", claude_plugins, ctx)
@@ -973,3 +973,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
         close_pipeline_attempt(ctx)
+
+
+_RESEARCH_SKIPS = [0]
+
+
+def _research_count() -> None:
+    import atexit
+    import sys as _s
+
+    if _RESEARCH_SKIPS[0] == 0:
+        atexit.register(lambda: _s.stderr.write(f"[oracle-dmap] {__name__} skipped {_RESEARCH_SKIPS[0]}\n"))
+    _RESEARCH_SKIPS[0] += 1
