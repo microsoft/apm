@@ -1001,6 +1001,27 @@ class TestRepositoryRelativeAnchorIdentity:
             lib.resolve().as_posix() if volume_folds else "../lib"
         )
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="a backslash separates on Windows")
+    def test_a_posix_backslash_name_keeps_its_own_sibling_identity(self, tmp_path: Path) -> None:
+        """Copilot #5485: ``a\\b`` is one POSIX name, never the path ``a/b``."""
+        app, _ = self._monorepo(tmp_path / "repo")
+        packages = tmp_path / "repo" / "packages"
+        (packages / "a\\b").mkdir()
+        (packages / "a" / "b").mkdir(parents=True)
+        assert portable_anchor_identity(packages / "a\\b", app) == "../../packages/a\\b"
+        assert portable_anchor_identity(packages / "a" / "b", app) == "../../packages/a/b"
+
+    def test_no_repository_project_and_a_package_in_another_repository_stay_absolute(
+        self, tmp_path: Path
+    ) -> None:
+        """Copilot #5485: the no-repo fallback never crosses into another repository."""
+        app, _ = self._monorepo(tmp_path / "plain", git="none")
+        other = tmp_path / "plain" / "other-checkout"
+        (other / ".git").mkdir(parents=True)
+        package = other / "pkg"
+        package.mkdir()
+        assert portable_anchor_identity(package, app) == package.resolve().as_posix()
+
     def test_no_repository_filesystem_root_common_ancestor_stays_absolute(
         self, tmp_path: Path
     ) -> None:

@@ -13,6 +13,8 @@
     "tests/integration/test_portable_lock_identity_lifecycle.py::test_absolute_lock_is_rekeyed_in_place_once",
     "tests/integration/test_portable_lock_identity_lifecycle.py::test_rekey_leaves_mismatched_mcp_omission_unbound",
     "tests/unit/deps/test_apm_resolver_helpers.py::TestLegacyAbsoluteLocalIdentity::test_read_path_never_opens_a_dotdot_identity",
-    "tests/integration/test_portable_lock_identity_lifecycle.py::test_failed_install_after_rekey_restores_the_moved_slot"
+    "tests/integration/test_portable_lock_identity_lifecycle.py::test_failed_install_after_rekey_restores_the_moved_slot",
+    "tests/integration/test_portable_lock_identity_lifecycle.py::test_a_failed_lockfile_write_after_the_rekey_restores_the_moved_slot",
+    "tests/integration/test_portable_lock_identity_lifecycle.py::test_a_single_file_dependency_is_rekeyed_like_a_directory"
   ]
 }

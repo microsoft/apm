@@ -391,3 +391,73 @@ def test_partial_install_on_a_replacement_lock_saves_a_valid_graph(
     assert str(repo.resolve().as_posix()) not in text
     world.apm("install", "--frozen", cwd=app)
     world.audit_clean(cwd=app)
+
+
+def test_a_failed_lockfile_write_after_the_rekey_restores_the_moved_slot(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Copilot #5485: the update's own lock write fails; apm_modules and the lock stay."""
+    world, app = _legacy_lock(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    _skill_package(repo / "packages" / "lib-x", "lib-x")
+    manifest = app / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "    - ../../packages/lib-x\n", encoding="utf-8"
+    )
+    lock, modules = (app / "apm.lock.yaml").read_bytes(), _modules_state(app)
+
+    failed = world.runner.run(
+        ("update", "--yes"), cwd=app, env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1")
+    )
+
+    assert failed.returncode != 0, failed.stdout + failed.stderr
+    assert "apm.lock.yaml" in failed.stdout + failed.stderr
+    assert (app / "apm.lock.yaml").read_bytes() == lock
+    # Every slot the lock names is back; the copy the update fetched for the
+    # newly declared lib-x is not re-key state.
+    after = {key: value for key, value in _modules_state(app).items() if "lib-x" not in key}
+    assert after == modules
+
+
+def _file_dependency_world(tmp_path: Path, apm_binary_path: Path) -> tuple[ReplayWorld, Path]:
+    """lib-a declares the single file ../files/rev.agent.md; locked in the pre-#5418 form."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    repo = world.sources / "R"
+    _skill_package(repo / "packages" / "lib-x", "lib-x")
+    _skill_package(repo / "packages" / "lib-a", "lib-a", ("../files/rev.agent.md",))
+    write(repo / "packages" / "files" / "rev.agent.md", "---\ndescription: rev\n---\nReview.\n")
+    app = repo / _APP
+    write(
+        app / "apm.yml",
+        "name: app\nversion: 1.0.0\ntargets: [copilot]\n"
+        "dependencies:\n  apm:\n    - ../../packages/lib-a\n    - ../../packages/lib-x\n",
+    )
+    (app / ".github").mkdir(parents=True)
+    _install_before_5418(world, repo, app)
+    world.git(repo, "init", "-q", "--initial-branch=main")
+    return world, app
+
+
+@pytest.mark.parametrize(
+    "args", [(), ("../../packages/lib-x",)], ids=["install", "partial-install"]
+)
+def test_a_single_file_dependency_is_rekeyed_like_a_directory(
+    tmp_path: Path, apm_binary_path: Path, args: tuple[str, ...]
+) -> None:
+    """Copilot #5485: .agent.md sources move key, owners and slot like packages."""
+    world, app = _file_dependency_world(tmp_path, apm_binary_path)
+    legacy_text = (app / "apm.lock.yaml").read_text(encoding="utf-8")
+    absolute = (world.sources / "R" / "packages" / "files" / "rev.agent.md").resolve().as_posix()
+    assert f"local:{absolute}" in legacy_text
+    legacy_slots = _slots(app)
+
+    world.apm("install", *args, cwd=app)
+
+    text = (app / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert absolute not in text
+    assert "anchored_local_path: ../../packages/files/rev.agent.md" in text
+    assert "active_owner: local:../../packages/files/rev.agent.md" in text
+    assert len(_slots(app)) == len(legacy_slots)
+    assert not (legacy_slots - {"lib-a", "lib-x"}) & _slots(app)
+    world.apm("install", "--frozen", cwd=app)
+    world.audit_clean(cwd=app)

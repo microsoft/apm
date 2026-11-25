@@ -703,8 +703,9 @@ class InstallTransaction:
         """
         self._materialization_moves = (*self._materialization_moves, *moved)
 
-    def _restore_materialization_moves(self) -> None:
-        moved, self._materialization_moves = self._materialization_moves, ()
+    def _restore_materialization_moves(self, moved: tuple = ()) -> None:
+        moved = moved or self._materialization_moves
+        self._materialization_moves = ()
         if not moved:
             return
         from apm_cli.core.deployment_reanchor import restore_materializations
@@ -716,13 +717,27 @@ class InstallTransaction:
             self._logger.warning(f"Could not move {path} back. {LOCAL_SLOT_RESTORE.sentence()}")
 
     def _settle_materialization_moves(self) -> None:
-        moved, self._materialization_moves = self._materialization_moves, ()
-        if moved:
-            from apm_cli.integration.base_integrator import BaseIntegrator
+        """Keep the moves until the staged lockfile reaches disk.
 
-            BaseIntegrator.cleanup_empty_parents(
+        An outer writer (``apm update``) commits after this transaction: a
+        failed or abandoned write moves the copies back, so the unchanged
+        lock still names them; a successful one removes the emptied parents.
+        """
+        moved, self._materialization_moves = self._materialization_moves, ()
+        if not moved:
+            return
+        from apm_cli.deps.lockfile_write_authority import (
+            after_lockfile_commit,
+            unless_lockfile_commits,
+        )
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        unless_lockfile_commits(lambda: self._restore_materialization_moves(moved))
+        after_lockfile_commit(
+            lambda: BaseIntegrator.cleanup_empty_parents(
                 [current for current, _target, _created in moved], stop_at=self.apm_modules_dir
             )
+        )
 
     def track_created_target_roots(self, roots: list[Path]) -> None:
         """Follow the target roots this attempt creates; rollback removes empty ones."""

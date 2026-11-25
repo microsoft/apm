@@ -51,9 +51,9 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     deterministic across machines and CI. A package outside ``base`` is
     recorded relative to ``base`` with ``../``, as direct rows are (#5418;
     both sides resolved), when it is in the same repository (one
-    :func:`apm_cli.utils.paths.repository_root`), or, when ``base`` is in no
-    repository, when their nearest common ancestor is below every shared
-    root, the home directory and its ancestors
+    :func:`apm_cli.utils.paths.repository_root`), or, when neither ``base``
+    nor the package is in a repository, when their nearest common ancestor
+    is below every shared root, the home directory and its ancestors
     (:func:`apm_cli.utils.paths.bounded_common_ancestor`). Anything else
     (another repository, outside the repository, a common ancestor at
     ``/``, a drive root, HOME or above, another drive, ``base`` unknown, a
@@ -70,15 +70,28 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     if inside is not None:
         return inside
     repository = repository_root(resolved_base)
+    package_repository = repository_root(resolved)
     if (
-        repository_root(resolved) == repository
+        package_repository == repository
         if repository is not None
-        else bounded_common_ancestor(resolved, resolved_base)
+        else package_repository is None and bounded_common_ancestor(resolved, resolved_base)
     ):
-        sibling = portable_link_relpath(resolved, resolved_base)
+        sibling = _sibling_relpath(resolved, resolved_base)
         if sibling is not None:
             return sibling
     return resolved.as_posix()
+
+
+def _sibling_relpath(path: Path, base: Path) -> str | None:
+    """``../`` spelling of *path* from *base*; ``None`` across Windows drives.
+
+    POSIX keeps a literal backslash: it is part of a name, never a separator,
+    so ``a\\b`` and ``a/b`` stay two identities. Windows separators become
+    ``/``.
+    """
+    if os.sep == "/":
+        return os.path.relpath(path, base)
+    return portable_link_relpath(path, base)
 
 
 def stored_directory(anchored: Path, root: Path | None) -> Path:
@@ -176,8 +189,10 @@ def legacy_local_renames(locked: Mapping[str, Any], root: Path) -> dict[str, str
     A row recorded before #5418 keys a monorepo sibling by its absolute
     path. Its current identity is :func:`portable_anchor_identity` of that
     directory, so the write path re-keys the row in place, never as a new
-    owner. Rows whose directory is gone or whose identity is unchanged (a
-    package outside the repository) are not renamed.
+    owner. A single-file source (``.agent.md``, ``.instructions.md``,
+    ``.prompt.md``) is re-keyed like a directory. Rows whose source is gone
+    or whose identity is unchanged (a package outside the repository) are not
+    renamed.
     """
     renames: dict[str, str] = {}
     for key, row in locked.items():
@@ -188,7 +203,7 @@ def legacy_local_renames(locked: Mapping[str, Any], root: Path) -> dict[str, str
             anchored = resolve_path(Path(legacy))
         except (OSError, RuntimeError):
             continue
-        if not anchored.is_dir():
+        if not anchored.exists():
             continue
         current = portable_anchor_identity(stored_directory(anchored, root), root)
         if current != legacy:
