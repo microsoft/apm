@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm init --discover` and `apm compile` explain that a root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` stays in place and is not APM content. -- by @AndresDvst (closes #3228, #3737)
 - `apm install` and `apm compile` refuse to write through a symlinked, dangling or looping directory link or onto a special file, naming the link and next step. (#5174, #5186, #5295, #5306)
 - `apm install` after an interrupted install restores every file the killed run changed, including hook settings, sidecars, MCP configs and local bundle deploys or retirements. (closes #5009, #5038, #5039, #5051; #4982, #5016, #5042, #5053, #5098, #5110, #5153)
-- Crash recovery keeps an MCP config directory whose mode you changed, restores cleaned configs and killed skill writes, and ignores other workspaces' journals. (#5115, #5131, #5401, #5409)
+- Crash recovery keeps an MCP config directory whose mode you changed and a staging file you edited, restores cleaned configs and killed skill writes, and ignores other workspaces' journals. (#5115, #5131, #5401, #5409, #5440)
 - An interrupted `apm compile` or install stops its lifecycle command script even when Ctrl+C or SIGTERM lands while the script is starting. (#5412)
 - `apm install`, `apm approve` and other trust readers report a rejected org policy inheritance chain as a named error, not a traceback. (#4947)
 - `apm approve` refuses, before writing, a package an org deny, other-store deny or dependency policy blocks, including key-only bundles and aliased `replace:` dependencies. (#4928, #5407, #5419)
@@ -101,6 +101,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` passes after `apm install -g` when a user-root Claude hook runs only an inline command. (closes #4837, #4883)
 - `apm audit --ci` allow-list advice names a runnable next step and a selector that works under `default_host`, and follows uninstall's hook-link rule. (closes #4570, #5007, #5008, #5035; #4596, #5015, #5101, #5214)
 - `apm audit` prints each drifted file on one line with escaped names, names edited local bundle hooks, and replays nested and mixed-layout skills. (#5171, #5191, #5294)
+- `apm uninstall` reports a failed survivor rebuild as an error and exits non-zero instead of printing `Uninstall complete`. (closes #4954, #5422)
+- `apm uninstall` and `apm prune` treat case or Unicode variants of one local directory as one package; `apm install` merges older duplicate lock rows. (#5426)
+- `apm prune` keeps and names a dropped local package while a remote dependency it brought in is still recorded under it. (closes #5238, #5449)
+- A narrowed install that skips a runtime no longer blocks a later MCP removal from retiring the new entry after a refused edit. (#5436)
+- `apm install` updates an LSP server entry whose `${CLAUDE_PLUGIN_ROOT}` package moved, instead of keeping it as a user edit. (closes #4872, #5437)
+- APM keeps an emptied hook settings file it has no creation record for, and warns, instead of deleting it. (#5445)
+- Two apm processes sharing `APM_HOME` no longer drop each other's config file records, so your files keep their deletion protection. (closes #5270, #5444)
+- `apm install` no longer reports "up to date" after a change to an `AGENTS.md` or `CLAUDE.md` that decides Claude rules. (#5447)
+- After restoring an older `apm.lock.yaml`, one `apm install` records a local skill's own deployed file instead of skipping it as unmanaged. (#5452)
+- `apm install` migrates a legacy `approvals.yml` only during a full install, not while checking whether the fast path applies. (#5429)
+- On Windows, `apm install` keeps a CRLF `.gitignore` CRLF when it adds `apm_modules/`. (#5460)
+- `apm plugin init <name>` rejects an invalid plugin name before creating the project directory, leaving nothing on disk. (closes #5404, #5464)
+- `apm marketplace init --name X` with an existing `apm.yml` writes `name: X` in the `marketplace:` block instead of ignoring the flag. (closes #5405, #5465)
 
 ### Security
 
@@ -109,8 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Harden bundle and archive extraction so entry names resolve the same way on every OS and size limits are enforced. (#4976, #4978, #4979, #5017)
 - Align Codex and Hermes MCP config writes with the safeguards the other MCP clients already apply. (#4986)
 - Harden deploy path prefix checks; `apm install -g` deploys skills when `CLAUDE_CONFIG_DIR` is `$HOME` itself. (#5146)
-- Harden link handling in hook record writes, tree removal, rollback, deploy and replay; Windows directory junctions count as links. (#5042, #5066, #5209, #5308)
-- Harden crash-recovery replay and `APM_HOME` permission checks; replayed files honor your umask, and on Windows a path with an explicit ACL is kept and reported. (#5194, #5364, #5385, #5388)
+- Harden link handling in hook record writes, tree copies and removal, rollback, deploy, replay and no-op installs; Windows directory junctions count as links. (#5042, #5066, #5209, #5308, #5442, #5450)
+- Harden crash-recovery replay and `APM_HOME` permission checks; replayed files honor your umask, and on Windows and macOS a path with an ACL is kept and reported. (#5194, #5364, #5385, #5388, #5439)
 - `pip install apm-cli` now requires GitPython 3.1.41 or later, which carries the upstream Windows fixes for CVE-2023-40590 and CVE-2024-22190. (#5010)
 
 ## [0.38.1] - 2026-11-23
