@@ -7,8 +7,6 @@ CELL: OP=install SRC=local-path PRIM=skill,mcp SCOPE=project FROZEN SELECT=apm
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import yaml
 
@@ -67,13 +65,38 @@ def test_frozen_only_apm_replays_local_omission(
     assert installed.returncode == 0, (installed.stdout, installed.stderr)
     before = LifecycleStateSnapshot.capture(world.project, targets=(target,))
     assert before.lockfile_bytes != before_install.lockfile_bytes
+    assert before.lockfile_bytes is not None
     lock = yaml.safe_load(before.lockfile_bytes)
     assert lock["mcp_omissions"]["sample"]["reason"] == "only-apm"
     assert not lock.get("mcp_configs")
     assert not lock.get("mcp_servers")
     assert any("demo" in state.relative_path for state in before.files)
+    assert not (world.project / ".mcp.json").exists()
+    assert not (world.project / "opencode.json").exists()
 
     frozen = driver.run(world, ("install", "--target", target, "--only", "apm", "--frozen"))
     after = LifecycleStateSnapshot.capture(world.project, targets=(target,))
     assert frozen.returncode == 0, (frozen.stdout, frozen.stderr)
     assert after == before
+
+    lock_path = world.project / "apm.lock.yaml"
+    lock["mcp_omissions"].pop("sample")
+    lock_path.write_text(yaml.safe_dump(lock, sort_keys=False), encoding="utf-8")
+    before_missing = LifecycleStateSnapshot.capture(world.project, targets=(target,))
+    missing = driver.run(world, ("install", "--target", target, "--only", "apm", "--frozen"))
+    assert missing.returncode == 1, (missing.stdout, missing.stderr)
+    assert "omission evidence is missing, damaged or stale" in missing.stdout + missing.stderr
+    assert LifecycleStateSnapshot.capture(world.project, targets=(target,)) == before_missing
+
+    lock_path.write_bytes(before.lockfile_bytes)
+    source_manifest = source / "apm.yml"
+    changed = yaml.safe_load(source_manifest.read_text(encoding="utf-8"))
+    changed["dependencies"]["mcp"][0]["command"] = "different-inert-command"
+    source_manifest.write_text(yaml.safe_dump(changed), encoding="ascii")
+    before_stale = LifecycleStateSnapshot.capture(world.project, targets=(target,))
+    stale = driver.run(world, ("install", "--target", target, "--only", "apm", "--frozen"))
+    assert stale.returncode == 1, (stale.stdout, stale.stderr)
+    assert "omission evidence is missing, damaged or stale" in stale.stdout + stale.stderr
+    assert LifecycleStateSnapshot.capture(world.project, targets=(target,)) == before_stale
+    assert not (world.project / ".mcp.json").exists()
+    assert not (world.project / "opencode.json").exists()

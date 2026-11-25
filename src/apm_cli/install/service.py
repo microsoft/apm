@@ -627,6 +627,7 @@ class InstallService:
                 # The hydrated check and the MCP phase report parked servers.
                 logger=without_parked_notices(request.logger),
                 allow_pending=allow_pending_mcp,
+                include_dependency_mcp=request.install_mcp,
             )
         )
 
@@ -763,6 +764,7 @@ class InstallService:
         logger: InstallLogger | None,
         allow_pending: bool,
         active_package_keys: frozenset[str] | None = None,
+        include_dependency_mcp: bool = True,
     ) -> list[str]:
         """Compare actual declarations, deferring only unavailable source evidence.
 
@@ -775,7 +777,10 @@ class InstallService:
         from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
         if allow_pending and not (
-            package.get_all_mcp_dependencies() or lockfile.mcp_configs or lockfile.mcp_servers
+            package.get_all_mcp_dependencies()
+            or lockfile.mcp_configs
+            or lockfile.mcp_servers
+            or lockfile.mcp_omissions
         ):
             return []
         current = CurrentMcpConfigView.select(
@@ -787,6 +792,7 @@ class InstallService:
             logger=logger,
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
+            include_dependency_mcp=include_dependency_mcp,
         )
         pending = current.pending_servers(lockfile) if allow_pending else frozenset()
         diff = current.diff(lockfile.mcp_configs)
@@ -819,6 +825,7 @@ class InstallService:
         admission: McpAdmission,
         logger: InstallLogger | None,
         active_package_keys: frozenset[str] | None = None,
+        include_dependency_mcp: bool = True,
     ) -> None:
         """Reject restored MCP drift before a package can activate native configuration."""
         from apm_cli.install.errors import FrozenInstallError
@@ -832,6 +839,7 @@ class InstallService:
             logger=without_parked_notices(logger),
             allow_pending=False,
             active_package_keys=active_package_keys,
+            include_dependency_mcp=include_dependency_mcp,
         )
         if reasons:
             raise FrozenInstallError(
