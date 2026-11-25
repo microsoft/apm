@@ -29,34 +29,6 @@ jobs:
         with:
           enable-cache: false
       - run: uv sync --frozen --extra dev --quiet
-      - name: v0.38.1 CLI
+      - name: RT3 cells
         shell: bash
-        run: |
-          git fetch --quiet --no-tags https://github.com/microsoft/apm.git a243ac325589566788e4b9a39ffec9188ca93551
-          git worktree add --quiet --detach ../v0381 FETCH_HEAD
-          (cd ../v0381 && uv sync --frozen --no-editable --quiet)
-      - name: Output delta, v0.38.1 vs RC (content)
-        shell: bash
-        run: |
-          set +e +o pipefail
-          rel=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/apm.exe || echo .venv/bin/apm)
-          for side in v0381 rc; do
-            apm=$([ $side = v0381 ] && echo "$GITHUB_WORKSPACE/../v0381/$rel" || echo "$GITHUB_WORKSPACE/$rel")
-            for journey in install-cold uninstall; do
-              work="$RUNNER_TEMP/w-$side-$journey"
-              uv run --frozen python -m tests.benchmarks.journeys run --apm "$apm" --fixtures tree-50 \
-                --journeys $journey --rtt 0 --runs 1 --max-load 1000000 --load-wait-min 0 \
-                --work "$work" --out "$RUNNER_TEMP/o-$side-$journey" > /dev/null 2>&1 || echo "[x] $side $journey failed"
-              proj="$work/runs/tree-50/project"
-              echo "===== $side $journey ====="
-              echo "--- .gitignore (od -c head)"; od -c "$proj/.gitignore" | head -8
-              echo "--- .mcp.json"; cat "$proj/.mcp.json" 2>/dev/null || echo "(absent)"
-              echo "--- lock mcp"; grep -n -A12 -iE '^mcp' "$proj/apm.lock.yaml" | head -40
-              echo "--- .gitignore text"; cat "$proj/.gitignore"
-              echo "--- lock top-level keys"; grep -nE '^[a-z_]+:' "$proj/apm.lock.yaml" | head -40
-              cp "$proj/apm.lock.yaml" "$RUNNER_TEMP/lock-$side-$journey.yaml"
-            done
-          done
-          echo "===== lock diff (uninstall) v0381 -> rc ====="
-          diff <(grep -vE '^(generated_at|apm_version):' "$RUNNER_TEMP/lock-v0381-uninstall.yaml") \
-               <(grep -vE '^(generated_at|apm_version):' "$RUNNER_TEMP/lock-rc-uninstall.yaml") | head -60
+        run: uv run --frozen python -m pytest -p no:cacheprovider -p no:randomly -rA -v tests/unit/utils/test_rt3_windows_redteam.py -k gitignore

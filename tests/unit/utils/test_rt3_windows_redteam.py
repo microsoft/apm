@@ -400,3 +400,19 @@ def test_rt3_concurrent_cold_landings_agree(tmp_path: Path) -> None:
         if code != 0 or body != _BODY
     ]
     assert bad == []
+
+
+def test_rt3_gitignore_update_keeps_the_files_line_endings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CRLF .gitignore (the Windows default) must not get LF-only lines appended."""
+    from apm_cli.install.helpers.gitignore import update_gitignore_for_apm_modules
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".gitignore").write_bytes(b"node_modules/\r\n.env\r\n")
+
+    update_gitignore_for_apm_modules()
+
+    data = (tmp_path / ".gitignore").read_bytes()
+    assert b"apm_modules/" in data
+    assert data.count(b"\n") == data.count(b"\r\n"), f"mixed line endings: {data!r}"
