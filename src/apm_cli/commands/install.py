@@ -196,6 +196,7 @@ from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
     explicit_policy_option,
+    setup_project_root_discovery,
     trust_transitive_mcp_option,
 )
 
@@ -1207,9 +1208,8 @@ def install(  # noqa: PLR0913
     # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
-    logger = dry_run_manifest_tmp = None
-    command_result: InstallResult | None = None
-    transaction: InstallTransaction | None = None
+    logger = dry_run_manifest_tmp = command_result = transaction = None
+    packages = setup_project_root_discovery(ctx, packages, enabled=not global_ and not root)
     from ..install.service import InstallService, resolve_frozen
 
     frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
