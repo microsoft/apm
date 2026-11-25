@@ -599,10 +599,16 @@ def resolve_cli_packages_for_project_root(
         if not pkg.startswith(("./", "../", ".\\", "..\\")):
             resolved.append(pkg)
             continue
-        # Rebase lexically: resolving would follow a selected symlink and hide
-        # it from install's symlink refusal, so the final component is kept.
-        joined = os.path.normpath(os.path.join(invoking, normalise_local_path_separators(pkg)))
-        rel = os.path.relpath(joined, root).replace("\\", "/")
+        # Resolve only the parent, so an intermediate symlink followed by ``..``
+        # lands where the filesystem does; the final component is kept as
+        # written, so install still refuses a selected symlink.
+        joined = os.path.join(invoking, normalise_local_path_separators(pkg).rstrip("/"))
+        parent, name = os.path.split(joined)
+        if name in ("", ".", ".."):
+            target = os.path.realpath(joined)
+        else:
+            target = os.path.join(os.path.realpath(parent), name)
+        rel = os.path.relpath(target, root).replace("\\", "/")
         if rel == ".":
             rel = "./"
         elif rel != ".." and not rel.startswith(("./", "../")):
