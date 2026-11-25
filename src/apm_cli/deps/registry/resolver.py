@@ -29,6 +29,7 @@ from ...models.dependency.reference import DependencyReference
 from ...models.dependency.types import GitReferenceType, ResolvedReference
 from ...utils.console import _rich_info
 from ...utils.credential_rendering import redact_url_userinfo
+from ...utils.realpath_win import release_held
 from .auth import (
     RegistryAuthContext,
     make_auth_context,
@@ -72,6 +73,7 @@ def _clear_install_target(target_path: Path) -> None:
     target_path.mkdir(parents=True, exist_ok=True)
     if not any(target_path.iterdir()):
         return
+    release_held(target_path)
     for child in target_path.iterdir():
         if child.is_dir():
             shutil.rmtree(child, ignore_errors=True)

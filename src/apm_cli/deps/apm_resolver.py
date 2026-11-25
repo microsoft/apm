@@ -823,6 +823,12 @@ class APMDependencyResolver:
             return None
 
     @staticmethod
+    def _resolved_no_deeper(tree, dep_ref: DependencyReference, depth: int) -> bool:
+        """Whether *dep_ref*'s package, under any ref, already has a node no deeper (#4968)."""
+        same_origin = tree.get_node(dep_ref.get_unique_key())
+        return same_origin is not None and same_origin.depth <= depth
+
+    @staticmethod
     def _depth_limit_chain(dep_ref: DependencyReference, parent_node: DependencyNode | None) -> str:
         """Name the chain that reached ``max_depth`` (req-rs-006), root first."""
         chain = [dep_ref.to_display_reference()]
@@ -838,8 +844,7 @@ class APMDependencyResolver:
         *,
         root_package: APMPackage | None = None,
     ) -> DependencyTree:
-        """
-        Build complete tree of all dependencies and sub-dependencies.
+        """Build complete tree of all dependencies and sub-dependencies.
 
         Uses breadth-first traversal to build the dependency tree level by level.
         This allows for early conflict detection and clearer error reporting.
@@ -1009,8 +1014,7 @@ class APMDependencyResolver:
                     # Prod wins over dev: if existing was dev and this is prod, promote it
                     if existing_node.is_dev and not is_dev:
                         existing_node.is_dev = False
-                    # We've already processed this dependency at a shallower or equal depth
-                    # Create parent-child relationship if parent exists
+                    # Already processed no deeper: link it under this parent, if any
                     if parent_node and all(
                         child is not existing_node for child in parent_node.children
                     ):
@@ -1033,11 +1037,10 @@ class APMDependencyResolver:
                         scheduled_nodes.add(existing_node.get_id())
                     continue
 
-                # Check maximum depth to prevent infinite recursion. Exceeding
-                # the cap fails resolution naming the chain (req-rs-006, #4277).
-                # An edge to a node already resolved no deeper reuses it above,
-                # so only a node that would be created past the cap is refused.
-                if depth > self.max_depth:
+                # Past max_depth fails naming the chain (req-rs-006, #4277) unless a node
+                # sits no deeper: the same key (reused above) or the same package under
+                # another ref (#4968; still walked, so its ref reaches conflict selection).
+                if depth > self.max_depth and not self._resolved_no_deeper(tree, dep_ref, depth):
                     chain = self._depth_limit_chain(dep_ref, parent_node)
                     self.depth_limit_chains.append(chain)
                     tree.resolution_errors.append(
@@ -1045,9 +1048,7 @@ class APMDependencyResolver:
                     )
                     continue
 
-                # Create a new node for this dependency
-                # Note: In a real implementation, we would load the actual package here
-                # For now, create a placeholder package
+                # Create a node for this dependency around a placeholder package
                 placeholder_package = APMPackage(
                     name=dep_ref.get_display_name(), version="unknown", source=dep_ref.repo_url
                 )
@@ -1862,7 +1863,12 @@ class APMDependencyResolver:
             from apm_cli.marketplace.user_manifest import dependency_marketplaces_error
 
             raise DownloadedPackageError(dependency_marketplaces_error(package.name))
+        from apm_cli.utils.realpath_win import register_held_root
+
         if downloaded_candidate is None or self._activation_callback is None:
+            # Already at its final placement (existing install or direct download).
+            if package.package_path is not None:
+                register_held_root(package.package_path, self._apm_modules_dir)
             return package
         try:
             live_path = self._activation_callback(downloaded_candidate)
@@ -1875,6 +1881,8 @@ class APMDependencyResolver:
             ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
+        # Placed for good: path resolution may now hold it (Windows) for this command.
+        register_held_root(live_path, self._apm_modules_dir)
         package.package_path = self._remap_candidate_path(
             package.package_path,
             downloaded_candidate,

@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.deploy_state import ABSENT as _ABSENT
 from apm_cli.install.deploy_state import ensure_listable as _ensure_listable
+from apm_cli.install.deploy_state import entry_matches_expected as _entry_matches_expected
+from apm_cli.install.deploy_state import interrupted_staging as _interrupted_staging
 from apm_cli.install.deploy_state import path_state as _state
 
 if TYPE_CHECKING:
@@ -60,7 +62,8 @@ def _dir_holds_apm_state(unit: _Replay, current: Mapping[str, Any], whole: Any) 
     if modes != {None} and current.get("mode") not in modes:
         return False
     entries: Mapping[str, str] = current["dir"]
-    accounted, unknown = set(), set()
+    known = {*prior, *sealed, *unit.events}
+    accounted, unknown = _interrupted_staging(unit.events, entries, known), set()
     for rel, fingerprint in entries.items():
         event = unit.events.get(rel)
         pending = isinstance(event, tuple)
@@ -75,11 +78,3 @@ def _dir_holds_apm_state(unit: _Replay, current: Mapping[str, Any], whole: Any) 
         if entries[rel].startswith("dir:") and any(a.startswith(f"{rel}/") for a in accounted):
             accounted.add(rel)
     return accounted == set(entries)
-
-
-def _entry_matches_expected(fingerprint: str, expected: str | None) -> bool:
-    if expected is None:
-        return True
-    if expected == "dir":
-        return fingerprint.startswith("dir:")
-    return fingerprint.rsplit(":", 1)[0] == expected

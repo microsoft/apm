@@ -1,0 +1,6 @@
+{
+  "id": "reference.depth_reuses_canonical_shallowest_node_identity",
+  "phase": 1,
+  "oracle_tier": "semantic",
+  "law": "Dependency depth uses canonical ref-insensitive source identity and reuses the depth of the shallowest node by (depth, id); a different origin keeps its own depth."
+}

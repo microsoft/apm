@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -177,15 +178,111 @@ def _swap_offsets(idx: bytes, first: str, second: str) -> bytes:
     return bytes(out)
 
 
-def test_a_loose_object_sends_the_whole_package_to_git(world: Path, monkeypatch) -> None:
-    """P3 (all or nothing): the pack misses the commit, so git verifies every object."""
+def test_a_loose_commit_on_top_of_the_pack_verifies_in_process(world: Path, monkeypatch) -> None:
+    """P3: git reads loose objects from the same object directories; so does the pack source."""
     _bare, checkout, _sha = _checkout(world)
     (checkout / "a.txt").write_bytes(b"alpha two\n")
     _git(checkout, "commit", "-q", "-am", "c2")
     loose = _git(checkout, "rev-parse", "HEAD").strip()
     _assert_loose(checkout, loose)
-    verdict = _verdict(checkout, loose, monkeypatch, git_only=False)
-    _assert_verdicts(verdict, (True, 1), expected=True, pack_spawns=1)
+    pack = _verdict(checkout, loose, monkeypatch, git_only=False)
+    git = _verdict(checkout, loose, monkeypatch, git_only=True)
+    _assert_verdicts(pack, git, expected=True, pack_spawns=0)
+
+
+def test_a_corrupt_loose_commit_on_top_of_the_pack_goes_to_git(world: Path, monkeypatch) -> None:
+    """Mixed case: tree objects in the pack, a loose commit that does not inflate exactly."""
+    _bare, checkout, _sha = _checkout(world)
+    (checkout / "a.txt").write_bytes(b"alpha two\n")
+    _git(checkout, "commit", "-q", "-am", "c2")
+    loose = _git(checkout, "rev-parse", "HEAD").strip()
+    path = checkout / ".git" / "objects" / loose[:2] / loose[2:]
+    original = path.read_bytes()
+    os.chmod(path, 0o644)
+    path.write_bytes(original + b"x")
+    pack = _verdict(checkout, loose, monkeypatch, git_only=False)
+    git = _verdict(checkout, loose, monkeypatch, git_only=True)
+    _assert_verdicts(pack, git, expected=git[0], pack_spawns=1)
+
+
+def test_a_loose_object_that_grows_while_read_goes_to_git(world: Path, monkeypatch) -> None:
+    """The read is bounded by the opened size: bytes appended after the fstat are refused."""
+    from apm_cli.cache import pack_objects
+
+    checkout, sha = _loose_only_checkout(world)
+    path = checkout / ".git" / "objects" / sha[:2] / sha[2:]
+    real_fstat = pack_objects.os.fstat
+
+    def fstat_then_grow(fd):
+        info = real_fstat(fd)
+        if (
+            pack_objects.os.path.samestat(info, os.stat(path))
+            and info.st_size == path.stat().st_size
+        ):
+            with open(path, "ab") as handle:
+                handle.write(b"grown")
+        return info
+
+    os.chmod(path, 0o644)
+    monkeypatch.setattr(pack_objects.os, "fstat", fstat_then_grow)
+    pack = _verdict(checkout, sha, monkeypatch, git_only=False)
+    _assert_verdicts(pack, (pack[0], 1), expected=pack[0], pack_spawns=1)
+
+
+def _loose_only_checkout(root: Path) -> tuple[Path, str]:
+    """A checkout whose objects are all loose, as the in-process fetch writes them."""
+    _bare, checkout, sha = _checkout(root)
+    alternates = checkout / ".git" / "objects" / "info" / "alternates"
+    source = Path(alternates.read_text(encoding="utf-8").strip())
+    alternates.unlink()
+    for pack in sorted((source / "pack").glob("*.pack")):
+        with pack.open("rb") as handle:
+            subprocess.run(
+                ["git", "-C", str(checkout), "unpack-objects", "-q"], stdin=handle, check=True
+            )
+    return checkout, sha
+
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES))
+def test_a_loose_only_checkout_gives_git_verdict_without_git(
+    world: Path, monkeypatch, shape: str
+) -> None:
+    """The in-process fetch writes loose objects: verify reads them with no cat-file spawn."""
+    checkout, sha = _loose_only_checkout(world)
+    _assert_loose(checkout, sha)
+    if _SHAPES[shape] is not None:
+        _SHAPES[shape](checkout)
+    pack = _verdict(checkout, sha, monkeypatch, git_only=False)
+    git = _verdict(checkout, sha, monkeypatch, git_only=True)
+    _assert_verdicts(pack, git, expected=shape == "clean", pack_spawns=0)
+
+
+@pytest.mark.parametrize("damage", ["truncate", "garbage", "header", "link"])
+def test_a_damaged_loose_object_never_passes(world: Path, monkeypatch, damage: str) -> None:
+    """A loose commit the reader cannot take exactly sends the package to git."""
+    checkout, sha = _loose_only_checkout(world)
+    path = checkout / ".git" / "objects" / sha[:2] / sha[2:]
+    original = path.read_bytes()
+    os.chmod(path, 0o644)
+    if damage == "truncate":
+        path.write_bytes(original[:-4])
+    elif damage == "garbage":
+        path.write_bytes(original + b"x")
+    elif damage == "header":
+        path.write_bytes(
+            zlib.compress(b"commit 99999\0" + zlib.decompress(original).partition(b"\0")[2])
+        )
+    else:
+        if sys.platform == "win32":
+            pytest.skip("symlink creation needs a privilege on Windows")
+        target = path.with_name("elsewhere")
+        target.write_bytes(original)
+        path.unlink()
+        path.symlink_to(target)
+    pack = _verdict(checkout, sha, monkeypatch, git_only=False)
+    git = _verdict(checkout, sha, monkeypatch, git_only=True)
+    # The reader refused (git answered the whole package) and the verdict is git's.
+    _assert_verdicts(pack, git, expected=git[0], pack_spawns=1)
 
 
 def test_a_replace_ref_sends_the_package_to_git(world: Path, monkeypatch) -> None:

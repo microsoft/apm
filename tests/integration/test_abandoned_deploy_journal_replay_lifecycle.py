@@ -571,6 +571,42 @@ def test_a_write_killed_before_its_seal_is_restored(tmp_path: Path, apm_binary_p
     assert _stores(chain) == [], _evidence(result)
 
 
+def test_a_staging_file_left_by_a_killed_atomic_write_is_restored(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5395: killed between staging a new skill's file and its rename, the
+    staging file beside APM's unsealed write is APM's: the skill is rolled back,
+    nothing is reported as a user change and no snapshot store is retained."""
+    chain = _SCAN.world(tmp_path, apm_binary_path)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    chain.ok("install", *_SCAN.args)
+    before = _tree_state(chain.project)
+    _write_package(chain, revision="v2", description="agent helper v2", extra=True)
+    new_skill = chain.project / "pkg" / ".apm" / "skills" / "pkg-new-skill"
+    new_skill.mkdir(parents=True)
+    (new_skill / "SKILL.md").write_text(
+        "---\nname: pkg-new-skill\ndescription: new skill\n---\n# new skill\n",
+        encoding="utf-8",
+    )
+    _kill_mid_refusal(
+        chain, "stage+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_PATH="pkg-new-skill/SKILL.md"
+    )
+    _abandoned(chain)
+    staged = [p for p in chain.project.rglob("apm-atomic-*") if "pkg-new-skill" in p.parts]
+    assert staged, "the kill left no staging file in the new skill"
+    shutil.rmtree(new_skill)
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert "Kept" not in _text(result), _evidence(result)
+    assert not any(p.exists() for p in staged), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    assert chain.run("audit", "--ci").returncode == 0
+
+
 def test_a_shared_config_without_its_baseline_is_kept_and_reported(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -661,16 +697,22 @@ def test_a_kill_after_two_writers_changed_one_shared_config_is_restored(
 # record. A later install's cleanup that rewrites them records them as legacy, so a
 # kill after that rewrite is restored on the next install like any recorded write.
 
-_USERS_SETTINGS = {"permissions": {"allow": ["Bash(ls)"]}}
+# Nested user settings, and scalar ones the cleaned file keeps (#5067).
+_USERS_SETTINGS = {
+    "nested": {"permissions": {"allow": ["Bash(ls)"]}},
+    "scalar": {"model": "sonnet"},
+}
 
 
+@pytest.mark.parametrize("kept", sorted(_USERS_SETTINGS))
 def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, kept: str
 ) -> None:
+    users_settings = _USERS_SETTINGS[kept]
     chain = Chain(tmp_path / "cleanup", apm_binary_path, dirs=(".claude", ".github"))
     settings = chain.project / _SETTINGS
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(json.dumps(_USERS_SETTINGS, indent=2) + "\n", encoding="utf-8")
+    settings.write_text(json.dumps(users_settings, indent=2) + "\n", encoding="utf-8")
     _write_root_hook(chain, "v1")
     chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
     chain.ok("install")
@@ -686,7 +728,7 @@ def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
     journal = _journal(_abandoned(chain))
     assert _unit(journal, _SETTINGS)["path"] == _SETTINGS, journal
     assert _SIDECAR not in {line.get("path") for line in journal}, journal
-    assert json.loads(settings.read_text(encoding="utf-8")) == _USERS_SETTINGS
+    assert json.loads(settings.read_text(encoding="utf-8")) == users_settings
     chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
 
     result = chain.run("install")

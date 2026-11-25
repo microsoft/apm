@@ -31,7 +31,7 @@ from typing import BinaryIO
 
 from .file_ops import robust_rmtree
 from .paths import is_within, relative_posix, relative_to
-from .realpath import resolve_path
+from .realpath import proven_link_free, resolve_path
 
 
 class PathTraversalError(ValueError):
@@ -365,6 +365,14 @@ def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
     parts = _collapse_relative_parts(base_dir, relative_to(path, base_dir).parts)
     if parts is None:
         raise ValueError(f"{path} leaves {base_dir} or steps back over a link")
+    if parts and proven_link_free(base_dir.joinpath(*parts[:-1])):
+        # Every component up to the leaf's directory was proven link-free this
+        # command (utils/realpath.py); only the leaf can be a link.
+        leaf = base_dir.joinpath(*parts)
+        try:
+            return leaf if _is_link(leaf) else None
+        except FileNotFoundError:
+            return None
     current = base_dir
     for part in parts:
         current /= part

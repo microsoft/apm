@@ -12,6 +12,7 @@ tests/lifecycle/oracles.py).
 CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp MCPOWN=copilot.
 CELL: OP=install SCOPE=user LOCK=absent PRIM=mcp MCPOWN=copilot (two COPILOT_HOME
 profiles, #4801).
+CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp CHECKOUT=recloned (#5396).
 CELL: OP=install SCOPE=project LOCK=absent PRIM=mcp TGT=multi-narrowed (#4784),
 and the same with no targets: in apm.yml (auto-detected: nothing is reported).
 OWNER: install/mcp/write_receipts.py -- per-entry write evidence bound to this
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 
 import pytest
 import yaml
@@ -90,6 +92,7 @@ CREDITS = credits(
             _NO_LOCK_RETARGET
         ],
         "test_auto_detected_targets_report_no_kept_entry_without_the_lockfile": [_NO_LOCK],
+        "test_a_recloned_checkout_sets_the_old_evidence_aside_once_and_converges": [_NO_LOCK],
     },
 )
 
@@ -453,3 +456,46 @@ def test_auto_detected_targets_report_no_kept_entry_without_the_lockfile(lifecyc
     audit = scenario.run("audit --ci", read_only=True)
     assert "kept-mcp-entries" not in audit.output, audit.output
     scenario.finish()
+
+
+_SET_ASIDE = "Set aside MCP write evidence another checkout of this project wrote"
+
+
+def test_a_recloned_checkout_sets_the_old_evidence_aside_once_and_converges(
+    lifecycle_world,
+) -> None:
+    """#5396: a fresh clone at the same path has no installation identity, so the old
+    checkout's evidence can never bind again. The first install sets it aside (renamed,
+    never deleted) and leaves its entries as they are; the next install converges."""
+    scenario = _start(lifecycle_world)
+    _deploy(scenario)
+    evidence = _evidence_file(scenario)
+    config = lifecycle_world.project / ".mcp.json"
+    before = config.read_bytes()
+    # A re-clone: the gitignored installation identity and the uncommitted lock are gone.
+    shutil.rmtree(lifecycle_world.project / ".apm-local")
+    scenario.lock_path.unlink()
+    scenario.model = scenario.model.with_lock("absent")
+
+    first = scenario.run("install", credit=[_NO_LOCK])
+
+    _assert_set_aside_once(first.output, evidence)
+    assert config.read_bytes() == before, "an entry the old evidence lists was changed"
+    second = scenario.run("install")
+    _assert_converged(second.output)
+    scenario.run("audit --ci", read_only=True, exit=0)
+    scenario.finish()
+
+
+def _assert_set_aside_once(output: str, evidence) -> None:
+    flat = " ".join(output.split())
+    assert _SET_ASIDE in flat, output
+    assert _UNUSABLE not in flat, output
+    assert evidence.with_name(evidence.name + ".superseded").is_file(), "the old evidence is kept"
+
+
+def _assert_converged(output: str) -> None:
+    flat = " ".join(output.split())
+    assert _SET_ASIDE not in flat, output
+    assert _UNUSABLE not in flat, output
+    assert "Kept every MCP entry" not in flat, output

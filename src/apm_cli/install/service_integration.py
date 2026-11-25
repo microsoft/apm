@@ -290,14 +290,16 @@ def _staged_lockfile_state(lock_path: Path) -> object:
 
 def _staged_lockfile_unchanged(lock_path: Path, before: object) -> bool:
     """Whether the lockfile staged for *lock_path* still holds the text it held *before*."""
-    from apm_cli.deps.lockfile_write_authority import StagedDocument, staged_lockfile_text
+    from apm_cli.deps.lockfile_write_authority import StagedDocument
 
     after = _staged_lockfile_state(lock_path)
     if after is before:
         return True
-    if isinstance(before, StagedDocument):
-        before = before.text()
-    return staged_lockfile_text(lock_path) == before
+    # Compare the state already read: never read the lockfile a second time.
+    texts = [
+        state.text() if isinstance(state, StagedDocument) else state for state in (before, after)
+    ]
+    return texts[0] == texts[1]
 
 
 class ServiceReconciliation:

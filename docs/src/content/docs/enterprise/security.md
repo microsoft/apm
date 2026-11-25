@@ -138,6 +138,24 @@ and keep `--allow-insecure` and `--allow-insecure-host` out of standard CI.
 `registry_source.allow_non_registry` is a separate source-routing control, not an
 insecure-transport setting.
 
+## Git and gh executable discovery
+
+APM never runs a `git` or `gh` executable from inside the project it is working
+on, so a repository cannot plant one on `PATH`. Before searching `PATH`, APM
+chooses a directory to exclude, called the **exclusion root**. It searches the
+resolved current working directory and its parents in this order:
+
+1. The nearest directory containing `.git`.
+2. If no `.git` is found anywhere in that search, the nearest directory
+   containing an `apm.yml` file.
+3. If neither is found, the current working directory itself.
+
+APM skips `PATH` directories and resolved executables located at this root or
+in any of its subdirectories, including symlinks resolving back into it.
+`--global` changes the installation scope, not these rules. If this hides your
+only Git installation, see
+[Git discovery troubleshooting](../../troubleshooting/install-failures/#git-works-in-the-terminal-but-apm-cannot-find-it).
+
 ## Content scanning
 
 `apm install` scans the files it is about to deploy, before any reaches an agent folder.

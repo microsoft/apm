@@ -912,9 +912,9 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            "                with provenance.recorded_config_write(json_path):\n"
+            "                with provenance.recorded_config_write(json_path, skeleton=defaults or {}):\n"
             '                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
-            "                with provenance.recorded_config_write(json_path):\n"
+            "                with provenance.recorded_config_write(json_path, skeleton=defaults or {}):\n"
             '                    json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
             id="raw-write-text",
         ),
@@ -4435,6 +4435,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="        if rest_eligible:",
         new="        if True:  # bypass rest_eligible",
         intent="GitLab file downloads bypass the executed HTTPS plan gate before REST.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-held-directory-release",
+        rule_id="transport-platform-held-directory-release",
+        path="src/apm_cli/commands/uninstall/local_reanchor.py",
+        old="            release_held(current)\n            current.rename(target)\n",
+        new="            current.rename(target)\n",
+        intent="A re-anchor move renames a package directory path resolution may still hold.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-held-root-registration",
+        rule_id="transport-platform-held-root-registration",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="from ...utils.realpath_win import release_held\n",
+        new="from ...utils.realpath_win import register_held_root, release_held\n",
+        intent="A module other than package activation can register a held directory.",
     ),
     MutationCase(
         guard_id="transport-platform-host-credential-resolution",
@@ -8190,8 +8206,8 @@ def test_every_stale_deleter_consumes_the_skip_set(
         pytest.param(
             "install-deployment-bundle-admission-owner",
             "src/apm_cli/install/local_bundle_handler.py",
-            "            bundled_deps=bundle_policy_subjects(bundle_info),\n",
-            "",
+            "        policy_subjects = bundle_policy_subjects(bundle_info)\n",
+            "        policy_subjects = ()\n",
             id="bundle-identity-skips-dependency-deny",
         ),
         pytest.param(

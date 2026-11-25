@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.bundle_admission import admit_bundle, bundle_policy_subjects
 from apm_cli.install.errors import PolicyViolationError
+from apm_cli.install.local_bundle_pending import BundleRecordStage, recorded_bundle
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
@@ -54,6 +56,32 @@ def _bundle_with_packages(root: Path, name: str, packages: list[str] | None) -> 
             lock.add_dependency(LockedDependency(repo_url=repo, resolved_commit="a" * 40))
         (root / "apm.lock.yaml").write_text(lock.to_yaml(), encoding="utf-8")
     return SimpleNamespace(source_dir=root, package_id=name, plugin_json={"name": name})
+
+
+def test_pending_record_preserves_bundle_policy_subjects(
+    tmp_path: Path,
+) -> None:
+    bundle = _bundle_with_packages(tmp_path / "bundle", "tool", ["acme/lib"])
+    subjects = bundle_policy_subjects(bundle)
+    scope = tmp_path / "scope"
+    key = "tool#1.0@sha256:abc123"
+
+    BundleRecordStage(scope, "tool", key, ("hooks",), subjects).commit()
+
+    record_path = scope / "apm_modules" / ".local-bundle-pending.json"
+    assert record_path.is_file()
+    assert (
+        json.loads(record_path.read_text(encoding="utf-8"))["bundles"]["tool"]["policy_subjects"][
+            "packages"
+        ][0]["canonical_ref"]
+        == subjects.packages[0].get_canonical_dependency_string()
+    )
+    stored = recorded_bundle(scope, key)
+    assert stored is not None
+    assert stored.policy_subjects is not None
+    assert [
+        subject.get_canonical_dependency_string() for subject in stored.policy_subjects.packages
+    ] == [subject.get_canonical_dependency_string() for subject in subjects.packages]
 
 
 def _admit(bundle: SimpleNamespace, project: Path, **dependencies: object) -> None:

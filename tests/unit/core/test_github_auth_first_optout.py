@@ -338,6 +338,50 @@ class TestCredentialedGithubEnvTlsInheritance:
         assert "http.sslbackend" not in _indexed_git_config(env)
         mock_tls.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("host", "env", "unauth_first"),
+        [
+            # No token on GHE Cloud: the auth-only attempt (repro run 45447423201).
+            ("lifecycle.ghe.com", {}, False),
+            ("lifecycle.ghe.com", {"GITHUB_APM_PAT": "tok"}, False),
+            # GHES: the anonymous attempt and the credentialed one.
+            ("ghes.corp.example", {"GITHUB_HOST": "ghes.corp.example"}, True),
+            (
+                "ghes.corp.example",
+                {"GITHUB_HOST": "ghes.corp.example", "GITHUB_APM_PAT": "tok"},
+                False,
+            ),
+        ],
+    )
+    def test_enterprise_github_hosts_keep_the_ambient_tls_config(
+        self, host: str, env: dict[str, str], unauth_first: bool
+    ) -> None:
+        """A user's sslBackend/sslCAInfo (corporate TLS inspection) reaches the isolated
+        env for GHE Cloud and GHES too, as a plain ``git clone`` of that host reads it."""
+        isolated = {"GIT_CONFIG_GLOBAL": "/isolated/empty-gitconfig", "GIT_CONFIG_NOSYSTEM": "1"}
+        seen: list[dict[str, str]] = []
+
+        def operation(_token: str | None, git_env: dict[str, str]) -> str:
+            seen.append(git_env)
+            return "ok"
+
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("apm_cli.config.get_github_auth_first", return_value=False),
+            patch(
+                "apm_cli.utils.git_env.real_git_tls_config",
+                return_value={"http.sslbackend": "openssl", "http.sslcainfo": "/ca/corp.pem"},
+            ),
+        ):
+            result = AuthResolver().try_with_fallback(
+                host, operation, unauth_first=unauth_first, base_env=dict(isolated)
+            )
+
+        assert result == "ok"
+        carried = _indexed_git_config(seen[0])
+        assert carried["http.sslbackend"] == "openssl"
+        assert carried["http.sslcainfo"] == "/ca/corp.pem"
+
     def test_opted_out_caller_requesting_unauth_first_skips_anonymous_entirely(self) -> None:
         """issue #2545 follow-up: a caller like validation.py always passes
         unauth_first=True for github.com without checking the opt-out itself.

@@ -145,3 +145,38 @@ def test_update_accepts_a_swapped_ref_visibly_and_frozen_audit_agree(
         "Accepted by this update." in output
     ), _evidence(updated)
     assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: swapped}
+
+
+def test_update_repairs_conflicting_legacy_pins_when_ref_matches_installed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Conflicting legacy alias pins matching the installed ref repair on --yes (#5243)."""
+    world = _SwapWorld(tmp_path, apm_binary_path)
+    world.declare_marketplace_dependency()
+    world.apm("install", *_FLAGS)
+    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}
+
+    mirror = "mirror"
+    world.apm("marketplace", "add", _REMOTE, "--name", mirror, "--ref", "main")
+    legacy_pins = {f"{_ALIAS}/{_PLUGIN}": "main", f"{mirror}/{_PLUGIN}": "v2"}
+    world.pins.write_text(json.dumps(legacy_pins), encoding="utf-8")
+    before = world.snapshot()
+
+    dry_run = world.apm("update", "--dry-run", *_FLAGS)
+    dry_output = " ".join((dry_run.stdout + dry_run.stderr).split())
+    assert "Marketplace ref pin repairs:" in dry_output, _evidence(dry_run)
+    assert f"replace conflicting legacy pins ({_ALIAS}=main, {mirror}=v2) -> main" in dry_output, (
+        _evidence(dry_run)
+    )
+    assert world.snapshot() == before, "dry-run modified durable state"
+
+    world.apm("update", *_FLAGS, expected=1)
+    assert world.snapshot() == before, "declined/non-interactive update modified durable state"
+
+    updated = world.apm("update", "--yes", *_FLAGS)
+    updated_output = " ".join((updated.stdout + updated.stderr).split())
+    assert (
+        f"replace conflicting legacy pins ({_ALIAS}=main, {mirror}=v2) -> main" in updated_output
+    ), _evidence(updated)
+    assert "Repaired 1 marketplace ref pin." in updated_output, _evidence(updated)
+    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}

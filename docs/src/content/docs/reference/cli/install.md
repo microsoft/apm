@@ -71,6 +71,13 @@ hash portability is not guaranteed.
 |---|---|---|
 | `--root DIR` | `$PWD` | Redirect every write -- `apm_modules/`, `apm.lock.yaml`, `.gitignore`, and integrated harness files -- under `DIR`, while `apm.yml`, `.apm/`, and local-path dependencies still resolve from the current working directory. Mirrors `pip install --target` / `npm install --prefix`. `DIR` is created if missing (except under `--dry-run`, which refuses to create it); an install that fails removes the directories it created if they are still empty. Not valid with `--global` (user scope), which exits `2`. |
 
+When run from a subdirectory of a project without an `apm.yml`, project-scope
+`apm install` (including `--dry-run` and positional packages) discovers the
+nearest ancestor `apm.yml`. Sources, deploy paths, `apm_modules/`,
+`apm.lock.yaml`, and target provenance anchor to that project root, restoring the
+working directory on exit. Passing `--root DIR` keeps sources resolving from the
+working directory without discovery.
+
 `apm install --root DIR --frozen` checks `DIR/apm.lock.yaml` against the
 source manifest. A source-side lockfile is not a substitute for a missing or
 stale deployment lock. To create or repair it, rerun the same install command
@@ -87,6 +94,13 @@ use the user installation's lockfile; retain `--global` when retrying.
 | `--only apm\|mcp` | both | Install only APM packages or MCP/LSP service dependencies. Use `--only=apm` to skip service configuration and `--only=mcp` to select MCP and LSP services only. |
 | `-g`, `--global` | off | Install to user scope under the APM home (`$APM_HOME`, default `~/.apm`) instead of the current project. `apm install -g --mcp NAME` creates or updates `$APM_HOME/apm.yml`, then deploys only to global-capable runtimes, such as Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot. `APM_HOME` does not move target files; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract). Mixed selections skip workspace-only targets with a warning. A selection with no global-capable target exits `2` before changing the user manifest, lockfile, or runtime configuration. |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Later `apm audit --ci` and `apm uninstall` keep the layout recorded in the lockfile; pass the flag again to [`apm update`](../update/). Env: `APM_LEGACY_SKILL_PATHS=1`. |
+
+Git discovery can fail during both project and user-scope (`--global`)
+installs. If Git works in your terminal but `apm doctor` reports
+`git not found on PATH` or `apm install` reports
+`not accessible or doesn't exist`, see
+[Git discovery troubleshooting](../../../troubleshooting/install-failures/#git-works-in-the-terminal-but-apm-cannot-find-it)
+to check whether executable discovery is the cause.
 
 File primitives resolve targets in this order: `--target`, manifest
 `targets:`, `apm config set target ...`, then auto-detection. MCP resolves

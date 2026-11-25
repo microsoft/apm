@@ -39,6 +39,7 @@ from ...models.dependency.selection import (
 from ...native_plugins.scopes import native_harnesses, native_source_current
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
+from ...utils.realpath_win import release_held
 from .local_survivors import (
     _reintegration_error_detail,
     _surviving_local_refs_at_install_path,
@@ -292,6 +293,7 @@ def _recover_local_refresh_backups(
         if install_path.exists():
             safe_rmtree(backup_path, apm_modules_dir)
             continue
+        release_held(backup_path)
         backup_path.rename(install_path)
         logger.progress(f"Recovered interrupted local materialization for _local/{target_name}")
 
@@ -397,6 +399,7 @@ def _activate_staged_local_refresh(
         raise LocalSurvivorRefreshError(
             "A stale local refresh backup must be recovered before activation."
         )
+    release_held(install_path)
     if install_path.exists():
         install_path.rename(backup_path)
     try:
