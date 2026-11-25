@@ -870,6 +870,7 @@ def run(ctx: InstallContext) -> None:
                 ),
                 logger=ctx.logger,
                 active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+                include_dependency_mcp=ctx.install_mcp,
             )
             # Hook approval pins are re-checked through the trust owner before
             # any hook deploys or retires, as audit --ci checks them (#4188).

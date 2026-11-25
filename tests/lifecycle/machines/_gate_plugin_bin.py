@@ -31,7 +31,6 @@ bin/ byte-identical, so it proves PRIM=bin with that modifier (``bin_context``).
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -40,7 +39,7 @@ import yaml
 
 from tests.lifecycle import driver
 from tests.lifecycle.machines._gate_matrix import _mcp_servers, mcp_install_problems
-from tests.lifecycle.machines._kit import Bench, KnownCell, Step, StepRunner
+from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
@@ -68,26 +67,19 @@ COMPILE_DENIED = (1,)
 _COMPILE_BLOCKED = r"Compile blocked by org policy"
 LOCK_DENIED = (1,)
 _RESOLVE_BLOCKED = r"Blocked by org policy at .*\(dependency-denylist\)\. Nothing was changed"
-# Strict known cells: the step must still fail its oracle on main; a pass is an error.
-# approve under an org dependency deny says "approved" and points at apm install,
-# which refuses: the approval names no org block (#5236).
-_ORG_BLOCK_NAMED = r"(?i)org policy"
-# The tracked misleading approval itself: it succeeds, announces the approval and
-# points at an install that the org policy will refuse.
-_APPROVED = rf"\[\+\] Approved \S*{PLUGIN} "
+# approve under an org dependency deny refuses: it names the org block, records nothing
+# in apm.yml and never points at an install the org policy will refuse (#5236).
+APPROVE_DENIED = (1,)
+_ORG_DEPENDENCY_BLOCK = (
+    rf"\S*{PLUGIN} is denied by org policy \(dependency-denylist: denied by pattern: "
+    r"\S+\); approving cannot lift it"
+)
+# What a refused approval must never print (#5236).
+_APPROVED = r"\[\+\] Approved "
 _INSTALL_HINT = r"Run 'apm install' to deploy the approved executables"
 _PACK_BLOCKED = r"Pack blocked by org policy: \S*p-native-claude-bin\. Nothing was packed"
-KNOWN_PLUGIN: dict[str, str] = {"G1|approve|bin|denied-dependency|project": "#5236"}
-# The same cells for the known-cell issue snapshot (tests/quality/known_cell_issues.py).
-KNOWN_CELLS = (
-    KnownCell(
-        "G1|approve|bin|denied-dependency|project",
-        "I7",
-        "#5236",
-        _ORG_BLOCK_NAMED,
-        lambda *_args: False,
-    ),
-)
+# No strict known cells remain in this spine (#5236 is fixed).
+KNOWN_PLUGIN: dict[str, str] = {}
 # The project gate matrix (and the pack spine, for pack) already label their steps under
 # the org deny with these ops (their bin/ never deploys, so they credit no bin cell,
 # #4981); this spine's steps carry a ``plugin`` suffix there so each machine id keeps one
@@ -166,9 +158,7 @@ class GatePluginBin(StepRunner):
         self._mcp_before = (
             _mcp_servers(self.bench.deploy_root) if not self.dry and op == "mcp-install" else None
         )
-        if not self.dry and cell in KNOWN_PLUGIN:
-            self._known(cell, words, requested)
-        elif not self.dry:
+        if not self.dry:
             # A decision is recorded, not applied: the next resolving command retires
             # what it no longer allows (the deny prints that hint), as in the user spine.
             # install --mcp touches MCP configuration only and keeps bin/ byte-identical
@@ -187,29 +177,6 @@ class GatePluginBin(StepRunner):
             self._check_outcome(op, requested, step, retires)
             self._credit(op, cell, step, retires, frozenset(exits), says)
         self.state = requested
-
-    def _known(self, cell: str, words: tuple[str, ...], requested: PluginBinState) -> None:
-        """Run a strict known cell: I1-I9 hold, but its own oracle must fail (else remove it)."""
-        step = self.step(
-            words, exits=frozenset({0, 1}), cells=(cell,), model=requested.model(), mutating=False
-        )
-        output = step.result.stdout + step.result.stderr
-        assert not re.search(_ORG_BLOCK_NAMED, output), (
-            f"{cell} now names the org block: remove it from KNOWN_PLUGIN "
-            f"({KNOWN_PLUGIN[cell]})\n{output}"
-        )
-        # Only the tracked misleading approval counts; any other outcome is a new cause.
-        tracked = (
-            step.result.returncode == 0
-            and re.search(_APPROVED, output)
-            and re.search(_INSTALL_HINT, " ".join(output.split()))
-        )
-        assert tracked, (
-            f"{cell} no longer shows the approval {KNOWN_PLUGIN[cell]} tracks "
-            f"(exit {step.result.returncode}): re-key or remove the cell\n{output}"
-        )
-        assert set(step.after.deployed) == set(step.before.deployed), cell
-        self.expected_seen.add(cell)
 
     def _requested(self, op: str, retires: bool = False) -> PluginBinState:
         state = replace(self.state)
@@ -363,6 +330,7 @@ class GatePluginBin(StepRunner):
         absent: dict[str, list[str]] = {}
         unchanged: dict[str, tuple[str, ...]] = {"outside": ("*",)}
         matches: tuple[str, ...] = says
+        forbids: tuple[str, ...] = ()
         if retires:
             absent["project"] = sorted(self.root_files)
             matches = (*says, _RETIRED)
@@ -370,6 +338,10 @@ class GatePluginBin(StepRunner):
             # A catalog command leaves every project byte alone; approve leaves the root.
             whole = op in ("marketplace", "install-dry-run", "pack")
             unchanged["project"] = ("*",) if whole else (ROOT, *SETTINGS)
+        if op == "approve" and exits == frozenset(APPROVE_DENIED):
+            # A refused approval writes nothing and points at no install (#5236).
+            unchanged["project"] = ("*",)
+            forbids = (_APPROVED, _INSTALL_HINT)
         if not retires and step.after.deployed:
             present["project"] = [BIN_PATH]
         evidence = Evidence(
@@ -377,6 +349,7 @@ class GatePluginBin(StepRunner):
             present=present,
             unchanged=unchanged,
             output_matches=matches,
+            output_forbids=forbids,
             exit=exits,
         )
         check_obligation(
@@ -509,7 +482,7 @@ def replay_plugin_bin(machine: GatePluginBin) -> None:
     machine.deny_by_policy()
     machine.run("marketplace", "marketplace", "add", machine.marketplace_url())
     machine.run("audit-ci", "audit", "--ci", exits=AUDIT_DENIED, says=(_DENYLISTED,))
-    machine.run("approve", "approve", PLUGIN)
+    machine.run("approve", "approve", PLUGIN, exits=APPROVE_DENIED, says=(_ORG_DEPENDENCY_BLOCK,))
     machine.run("compile", "compile", exits=COMPILE_DENIED, says=(_COMPILE_BLOCKED,))
     machine.run("lock", "lock", exits=LOCK_DENIED, says=(_RESOLVE_BLOCKED,))
     machine.run("pack", "pack", "--dry-run", exits=(1,), says=(_PACK_BLOCKED,))

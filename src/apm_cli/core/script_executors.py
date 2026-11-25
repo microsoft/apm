@@ -1568,17 +1568,20 @@ def _execute_command(
         # spawns) in its OWN process group, so a timeout can reap the
         # whole tree via killpg instead of orphaning backgrounded
         # grandchildren (subprocess.run's timeout kills only the shell).
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            start_new_session=True,
-        )
+        from ..cli import interrupts_deferred
+
+        with interrupts_deferred():
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=cwd,
+                start_new_session=True,
+            )
         stdout, stderr, capped = _capture_bounded(proc, event.to_json(), timeout)
         returncode = proc.returncode
         if capped:

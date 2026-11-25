@@ -426,6 +426,9 @@ def _resolve_targets_by_scope(
         raise SystemExit(2) from exc
 
     _provenance_msg = format_provenance(_resolved)
+    from apm_cli.install import verdict_attest
+
+    verdict_attest.note_run_targets(_provenance_msg)
     if ctx.logger:
         ctx.logger.announce_targets(_provenance_msg)
     else:

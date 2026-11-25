@@ -15,6 +15,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, TypeVar
 
+from apm_cli.utils.realpath_win import release_held
+
 _T = TypeVar("_T")
 
 _lock = threading.Lock()
@@ -43,6 +45,8 @@ def invocation_scope() -> Iterator[None]:
             _memos, _overlapped = {}, False
         else:
             _memos, _overlapped = None, True
+    if _overlapped:
+        release_held()  # holds are per invocation: none while scopes overlap
     try:
         yield
     finally:
@@ -51,6 +55,13 @@ def invocation_scope() -> Iterator[None]:
             _depth -= 1
             if _depth == 0:
                 _memos, _overlapped = None, False
+        release_held()
+
+
+def invocation_active() -> bool:
+    """Whether exactly one invocation scope is open (per-invocation state is allowed)."""
+    with _lock:
+        return _memos is not None and not _overlapped
 
 
 def invocation_memo(name: str) -> dict[Any, Any] | None:
@@ -66,7 +77,8 @@ def forget_invocation_memos() -> None:
 
     Called after user code (a lifecycle command script) runs mid-command: it
     may have refreshed credentials or changed the git remote, so nothing
-    learned before it may answer a later lookup.
+    learned before it may answer a later lookup. Held directories are released
+    too: user code may rename or delete what APM held.
     """
     global _generation, _forgotten
     with _lock:
@@ -76,6 +88,7 @@ def forget_invocation_memos() -> None:
             for memo in _memos.values():
                 memo.clear()  # a reference captured before the script sees nothing
             _memos.clear()
+    release_held()
 
 
 def forget_epoch() -> int:

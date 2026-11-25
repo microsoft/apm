@@ -2895,3 +2895,60 @@ def test_a_journal_dropped_without_discard_closes_its_fd(tmp_path: Path, apm_hom
         still_open = False
     assert not still_open
     assert manifest.read_text(encoding="utf-8").count("\n") >= 2
+
+
+_STAGED = "apm-atomic-k3x9q2_z"
+_WRITE = ("pending", "sha256:" + "0" * 64, None)
+_SEALED = "sha256:" + "0" * 64 + ":420"
+
+
+@pytest.mark.parametrize(
+    ("name", "events", "recorded", "restored"),
+    [
+        (_STAGED, {"SKILL.md": _WRITE}, False, True),
+        (_STAGED, {"SKILL.md": _SEALED}, False, False),
+        ("notes.md", {"SKILL.md": _WRITE}, False, False),
+        (_STAGED, {"SKILL.md": _WRITE}, True, False),
+        (_STAGED, {"": "removal"}, False, False),
+        ("apm-atomic-notes.md", {"SKILL.md": _WRITE}, False, False),
+    ],
+    ids=[
+        "staging-beside-unsealed-write",
+        "staging-with-no-open-write",
+        "user-file",
+        "recorded-staging-name-edited",
+        "pending-directory-removal-only",
+        "staging-prefix-wrong-shape",
+    ],
+)
+def test_a_staging_file_is_apms_only_beside_an_unsealed_write(
+    tmp_path: Path, name: str, events: dict, recorded: bool, restored: bool
+) -> None:
+    """#5395: an atomic write killed before its rename left its staging file.
+
+    It is APM's in-flight state only when nothing recorded it and a content
+    write APM began in that directory never sealed; anything else is kept.
+    """
+    from apm_cli.install.deploy_snapshot import _apply, _decide, _Replay
+    from apm_cli.install.deploy_state import file_mode
+
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / name).write_bytes(b"partial bytes")
+    sealed = {name: "sha256:" + "1" * 64 + ":420"} if recorded else {}
+    whole = {"dir": sealed, "mode": file_mode(skill)}
+    if events.get("") == "removal":
+        # A removal of the directory APM began after sealing it, never sealed: replay
+        # judges the partial tree entry by entry (#5087).
+        events = {"": ("pending", "absent", whole)}
+    unit = _Replay("skill", skill, "absent", None, {}, (), events={"": whole, **events})
+
+    apply, kept = _decide([unit])
+    for decided in apply:
+        _apply(decided)
+
+    assert kept == ([] if restored else [("skill", "it changed after the interrupted install")])
+    # Restored: the directory APM created is gone; kept: the file is untouched.
+    assert skill.exists() is not restored
+    if not restored:
+        assert (skill / name).read_bytes() == b"partial bytes"

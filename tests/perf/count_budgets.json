@@ -3,10 +3,10 @@
   "journeys": {
     "install-cold": {
       "fs.files_written": {
-        "budget": 1819,
-        "measured": 1732,
-        "reason": "#5330 in-process pinned fetch: the checkout's files are now written by the apm process (inprocess_fetch.py os.open), which the counter sees, instead of by an uncounted git clone/checkout child; tree-10, offline mirror, rtt 0; max of CI runs 45401098857 (1520) and 45403013362 (1732)",
-        "pr": "#5340"
+        "budget": 1404,
+        "measured": 1337,
+        "reason": "1819 -> 1404: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1950,
@@ -27,22 +27,22 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 15059,
-        "measured": 14341,
-        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
-        "pr": "#5380"
+        "budget": 6848,
+        "measured": 6521,
+        "reason": "15059 -> 6848: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
-        "budget": 1185,
-        "measured": 1128,
-        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
-        "pr": "#5380"
+        "budget": 658,
+        "measured": 626,
+        "reason": "1185 -> 658: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.stat_calls": {
-        "budget": 21960,
-        "measured": 20914,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 13725,
+        "measured": 13071,
+        "reason": "21960 -> 13725: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 10,
@@ -51,10 +51,10 @@
         "pr": "#5378"
       },
       "git.remote": {
-        "budget": 13,
-        "measured": 12,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 3,
+        "measured": 2,
+        "reason": "13 -> 3: #5325/#5333 memoized git reads; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.var": {
         "budget": 5,
@@ -63,24 +63,24 @@
         "pr": "#5340"
       },
       "http.connects": {
-        "budget": 14,
-        "measured": 13,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 4,
+        "measured": 3,
+        "reason": "14 -> 4: #5330/#5353 in-process fetch and listing replace the git clones (#5339 request row); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "http.requests": {
-        "budget": 42,
-        "measured": 40,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 21,
+        "measured": 20,
+        "reason": "42 -> 21: #5330/#5353 in-process fetch and listing replace the git clones (#5339 request row); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       }
     },
     "install-warm": {
       "fs.files_written": {
-        "budget": 856,
-        "measured": 815,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 440,
+        "measured": 419,
+        "reason": "856 -> 440: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1917,
@@ -101,34 +101,28 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 15826,
-        "measured": 15072,
-        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
-        "pr": "#5380"
+        "budget": 7749,
+        "measured": 7380,
+        "reason": "15826 -> 7749: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
-        "budget": 1201,
-        "measured": 1143,
-        "reason": "Linux portable_relpaths back on the kernel form (#5354 had moved it to Path.resolve, which the counter sees: realpath 1128 -> 1648, lstat 14341 -> 20069 cold); measured on main Smoke shard 3 job 138622524876 at 1daf3015 (pre-#5354); tree-10, offline mirror, rtt 0",
-        "pr": "#5380"
+        "budget": 669,
+        "measured": 637,
+        "reason": "1201 -> 669: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.stat_calls": {
-        "budget": 21844,
-        "measured": 20803,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 13764,
+        "measured": 13108,
+        "reason": "21844 -> 13764: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.config": {
-        "budget": 13,
-        "measured": 12,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 9,
+        "measured": 8,
+        "reason": "13 -> 9: #5325/#5333 memoized git config reads; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.ls-tree": {
         "budget": 11,
@@ -187,38 +181,26 @@
         "pr": "#5338"
       },
       "fs.lstat_calls": {
-        "budget": 23099,
-        "measured": 21999,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 3106,
+        "measured": 2958,
+        "reason": "23099 -> 3106: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
-        "budget": 2762,
-        "measured": 2630,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 440,
+        "measured": 419,
+        "reason": "2762 -> 440: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.stat_calls": {
-        "budget": 6999,
-        "measured": 6665,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
+        "budget": 4672,
+        "measured": 4449,
+        "reason": "6999 -> 4672: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.remote": {
         "budget": 3,
         "measured": 2,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "http.connects": {
-        "budget": 1,
-        "measured": 0,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
-        "pr": "#5338"
-      },
-      "http.requests": {
-        "budget": 1,
-        "measured": 0,
         "reason": "baseline: tree-10, offline mirror, rtt 0; max of CI runs 45367791683 and 45367797615 on main 22324e63",
         "pr": "#5338"
       }
@@ -293,10 +275,10 @@
     },
     "update": {
       "fs.files_written": {
-        "budget": 376,
-        "measured": 358,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 355,
+        "measured": 338,
+        "reason": "376 -> 355: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 873,
@@ -323,22 +305,16 @@
         "pr": "#5345"
       },
       "fs.realpath_calls": {
-        "budget": 243,
-        "measured": 231,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 222,
+        "measured": 211,
+        "reason": "243 -> 222: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.stat_calls": {
-        "budget": 7819,
-        "measured": 7446,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 6676,
+        "measured": 6358,
+        "reason": "7819 -> 6676: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 9,
@@ -385,10 +361,10 @@
     },
     "install-cold-auth": {
       "fs.files_written": {
-        "budget": 1572,
-        "measured": 1497,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
+        "budget": 1174,
+        "measured": 1118,
+        "reason": "1572 -> 1174: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1979,
@@ -409,56 +385,26 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 16774,
-        "measured": 15975,
-        "reason": "lstat_calls 11802 -> 15975: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
-        "pr": "#5378"
+        "budget": 6929,
+        "measured": 6599,
+        "reason": "16774 -> 6929: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
-        "budget": 1810,
-        "measured": 1723,
-        "reason": "realpath_calls 1202 -> 1723: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
-        "pr": "#5378"
+        "budget": 672,
+        "measured": 640,
+        "reason": "1810 -> 672: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.stat_calls": {
-        "budget": 21899,
-        "measured": 20856,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 1,
-        "measured": 0,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
-      },
-      "git.checkout": {
-        "budget": 1,
-        "measured": 0,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
-      },
-      "git.clone": {
-        "budget": 1,
-        "measured": 0,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
+        "budget": 13857,
+        "measured": 13197,
+        "reason": "21899 -> 13857: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 12,
         "measured": 11,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
-      },
-      "git.ls-remote": {
-        "budget": 1,
-        "measured": 0,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
-      },
-      "git.ls-tree": {
-        "budget": 1,
-        "measured": 0,
         "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
         "pr": "#5353"
       },
@@ -489,10 +435,10 @@
     },
     "install-warm-auth": {
       "fs.files_written": {
-        "budget": 868,
-        "measured": 826,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 438,
+        "measured": 417,
+        "reason": "868 -> 438: #5367 cut install writes; #5383 (converged install attests its state) and #5410 trim warm/update writes; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.hash_objects": {
         "budget": 1943,
@@ -513,40 +459,28 @@
         "pr": "#5345"
       },
       "fs.lstat_calls": {
-        "budget": 16147,
-        "measured": 15378,
-        "reason": "lstat_calls 11199 -> 15378: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
-        "pr": "#5378"
+        "budget": 7755,
+        "measured": 7385,
+        "reason": "16147 -> 7755: #5372/#5385/#5368 (train 1124l) and #5382 (each directory proven link-free once per command) cut path checks; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.realpath_calls": {
-        "budget": 1757,
-        "measured": 1673,
-        "reason": "realpath_calls 1150 -> 1673: #5354 (resolve fewer) raises realpath by ~52 per package on every install journey and each realpath lstat()s its components: main Smoke install-cold realpath 1128 -> 1648, lstat 14341 -> 20069 between 1daf3015 (#5361) and 02982144 (#5354); max of main c0296fab: Lifecycle Smoke shard 3 job 138627957694, Integration shard 2 job 138630122210, Lifecycle Full Suite run 45446694499",
-        "pr": "#5378"
+        "budget": 670,
+        "measured": 638,
+        "reason": "1757 -> 670: #5372/#5385/#5368 (train 1124l) and #5382 cut realpath calls; earlier #5367/#5380; night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "fs.stat_calls": {
-        "budget": 21825,
-        "measured": 20785,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
-      },
-      "git.cat-file": {
-        "budget": 11,
-        "measured": 10,
-        "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
-        "pr": "#5345"
+        "budget": 13765,
+        "measured": 13109,
+        "reason": "21825 -> 13765: #5372/#5385/#5368 (train 1124l) and #5382 cut stat calls; earlier #5367 (#5370 adds ~60 TLS probe stats, within this); night train cimq/train-night 5c782a24, max of Lifecycle Full Suite runs 45544430254 and 45544451817",
+        "pr": "#5421"
       },
       "git.config": {
         "budget": 9,
         "measured": 8,
         "reason": "baseline: tree-10, offline mirror, rtt 0; CI run 45409372587 at baa516b6 (main 784c9dae + #5340)",
         "pr": "#5345"
-      },
-      "git.ls-remote": {
-        "budget": 1,
-        "measured": 0,
-        "reason": "authenticated install fetches and lists in process (A'): CI runs 45446195288 shard 3 and 45446195827 shard 2 at f619cfc4",
-        "pr": "#5353"
       },
       "git.ls-tree": {
         "budget": 11,

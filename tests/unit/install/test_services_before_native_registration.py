@@ -241,3 +241,34 @@ def test_a_type_only_service_change_is_kept_by_the_rollback(tmp_path: Path) -> N
     rollback.write(lock_path)
 
     assert "flag: true" in lock_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("staged", [False, True], ids=["on-disk", "staged"])
+def test_the_mcp_before_after_compare_reads_the_lockfile_once(tmp_path: Path, staged) -> None:
+    """The unchanged-lockfile check reuses the state it read; no second read (#4939)."""
+    from apm_cli.deps import lockfile_write_authority
+    from apm_cli.install.service_integration import (
+        _staged_lockfile_state,
+        _staged_lockfile_unchanged,
+    )
+    from tests.unit.deps.test_lockfile_read_cost import _count_calls
+
+    path = get_lockfile_path(tmp_path)
+    LockFile().write(path)
+    verdicts: list[bool] = []
+
+    def compare() -> None:
+        before = _staged_lockfile_state(path)
+        verdicts.append(_staged_lockfile_unchanged(path, before))
+
+    with lockfile_write_scope(LockfileWriter.INSTALL):
+        if staged:
+            LockFile.read(path).write(path)
+            changed = LockFile.read(path)
+            changed.mcp_servers = ["srv"]
+            changed.write(path)
+        reads = _count_calls(lockfile_write_authority._disk_text.__code__, compare)
+
+    assert verdicts == [True]
+    assert reads == (0 if staged else 2)
+    assert path.read_text(encoding="utf-8")

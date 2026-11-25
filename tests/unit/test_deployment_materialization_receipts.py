@@ -1401,7 +1401,8 @@ def test_recording_many_writes_resolves_each_root_once(
         paths.append(extra)
     session = _session(root, lock)
     # Every resolution reaches one of these: pathlib's realpath, the Linux
-    # /proc form's open(O_PATH), or the openat2 form's fsencode.
+    # /proc form's open(O_PATH), the openat2 form's fsencode, or the Windows
+    # fast form's final-path call.
     resolved: list[str] = []
     realpath, open_, fsencode = os.path.realpath, os.open, os.fsencode
 
@@ -1421,6 +1422,16 @@ def test_recording_many_writes_resolves_each_root_once(
         patch.setattr(os.path, "realpath", counted)
         patch.setattr(os, "open", counted_open)
         patch.setattr(os, "fsencode", counted_fsencode)
+        if sys.platform == "win32":
+            import nt  # type: ignore[import-not-found]
+
+            final_path = nt._getfinalpathname
+
+            def counted_final(value, *args, **kwargs):
+                resolved.append(os.fspath(value))
+                return final_path(value, *args, **kwargs)
+
+            patch.setattr(nt, "_getfinalpathname", counted_final)
         session.record({p: compute_file_hash(p) for p in paths}, [TARGET], "pkg")
     session.flush()
     assert resolved.count(os.fspath(TARGET.skills_deploy_path(root))) == 1

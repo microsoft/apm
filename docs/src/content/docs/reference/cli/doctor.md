@@ -24,12 +24,15 @@ seconds before timing out.
 
 | Check | What it verifies | Affects exit code? |
 |---|---|---|
-| Git | `git --version` succeeds. | Yes |
+| Git | `git --version` succeeds using APM's selected executable. | Yes |
 | Network | Git can read the `HEAD` ref from `github.com/git/git.git`. | Yes |
 | Authentication | APM's credential resolver finds a token for `github.com`. The resolver can use environment variables, the GitHub CLI, or a git credential helper. A missing token means unauthenticated rate limits apply. | No |
 | Marketplace config | The `marketplace:` block in `apm.yml`, or legacy `marketplace.yml`, can be parsed when present. | No |
 | Marketplace authoring | Configured output formats, duplicate package names, and version alignment are reported when marketplace config is present. | No |
 | Executable trust | In an APM project, reports malformed executable-trust configuration under either `executables` or the deprecated `allowExecutables` key, naming the offending block in `apm.yml`. Local allows overridden by organization policy point to `apm policy explain`. | No |
+
+If the Git check fails despite `git --version` working in your terminal, see
+[Git discovery troubleshooting](../../../troubleshooting/install-failures/#git-works-in-the-terminal-but-apm-cannot-find-it).
 
 The GitHub CLI is a possible credential source; `apm doctor` does not require
 it or report its installation as a separate check.

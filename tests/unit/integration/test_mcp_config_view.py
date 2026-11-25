@@ -59,6 +59,49 @@ def test_dependency_omission_requires_bound_selection_evidence(
     assert changed.problems
 
 
+@pytest.mark.parametrize("damage", ["none", "missing", "stale", "different-selection"])
+def test_frozen_skills_only_checks_exact_omission(tmp_path: Path, damage: str) -> None:
+    """Frozen selection accepts only evidence for the current declaration and selection."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "package"
+    _write_manifest(source, name="tools", mcp=[_self_defined("tools", "inert")])
+    dependency = LockedDependency(
+        repo_url="_local/tools", source="local", local_path=str(source), depth=1
+    )
+    lock = _lock(dependency)
+    modules = tmp_path / "apm_modules"
+    view = CurrentMcpConfigView.select(
+        root,
+        lock,
+        modules,
+        admission=McpAdmission(None),
+        recorded=None,
+        include_dependency_mcp=False,
+    )
+    lock.mcp_omissions = view.omission_evidence(lock)
+    if damage == "missing":
+        lock.mcp_omissions.clear()
+    elif damage == "stale":
+        _write_manifest(source, name="tools", mcp=[_self_defined("tools", "changed")])
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text(lock.to_yaml(), encoding="utf-8")
+    # Frozen replay reads the evidence back from the lockfile on disk.
+    recorded = LockFile.from_yaml(lock_path.read_text(encoding="utf-8"))
+
+    selected = CurrentMcpConfigView.select(
+        root,
+        recorded,
+        modules,
+        admission=McpAdmission(None),
+        recorded=recorded,
+        include_dependency_mcp=damage == "different-selection",
+    )
+    assert bool(selected.problems) is (damage != "none")
+    if damage == "none":
+        assert recorded.mcp_omissions == lock.mcp_omissions
+        assert selected.diff(recorded.mcp_configs).is_empty
+
+
 @pytest.mark.parametrize(
     "declaration,approved,omitted",
     [

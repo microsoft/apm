@@ -221,8 +221,21 @@ first-approval prompt (`Nothing written.`), so a script never commits an
 approval that was not recorded. It also exits 1, writing nothing, when the
 org policy outcome blocks, exactly as `apm install` would (for example an
 unreachable policy under `policy.fetch_failure_default: block`); run
-`apm policy status --no-cache` to diagnose. The first pinned approval in a project also
-prints `Teammates need APM 0.37 or later to read pinned approvals.`
+`apm policy status --no-cache` to diagnose. When a blocking org policy denies
+the package itself (its dependency deny list or allow list), approve names the
+package and the check, says approving cannot lift it, and exits 1 writing
+nothing. If a scanned package has no lockfile reference, approve uses a
+matching root `apm.yml` dependency reference when available; under a blocking
+dependency allow or deny policy, it otherwise refuses the named approval and
+bulk approval skips and names the package because its source cannot be checked.
+For a content-bound local bundle key, approve checks the bundle and the
+package identities recorded in its embedded lockfile before writing a grant.
+Pending bundle records made by older APM versions without those identities are
+refused under a restrictive dependency policy; reinstall the bundle to refresh
+the record. A no-lockfile `replace:` declaration is checked against its
+effective source, including when the dependency has an alias.
+The first pinned approval in a project also prints
+`Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
 `[changed since approval]`, `[denied]`, or `[not approved]`. Before any layer

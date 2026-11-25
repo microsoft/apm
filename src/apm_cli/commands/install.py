@@ -148,6 +148,7 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
+from apm_cli.install.verdict_attest import attest_clean_install
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -195,6 +196,7 @@ from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
     explicit_policy_option,
+    setup_project_root_discovery,
     trust_transitive_mcp_option,
 )
 
@@ -1206,9 +1208,8 @@ def install(  # noqa: PLR0913
     # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
-    logger = dry_run_manifest_tmp = None
-    command_result: InstallResult | None = None
-    transaction: InstallTransaction | None = None
+    logger = dry_run_manifest_tmp = command_result = transaction = None
+    packages = setup_project_root_discovery(ctx, packages, enabled=not global_ and not root)
     from ..install.service import InstallService, resolve_frozen
 
     frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
@@ -1640,15 +1641,18 @@ def install(  # noqa: PLR0913
             )
             command_result = transaction.complete(command_result)
 
-            command_result = _post_install_summary(
-                logger=logger,
-                apm_count=apm_count,
-                mcp_count=mcp_count,
-                lsp_count=lsp_count,
-                apm_diagnostics=apm_diagnostics,
-                force=force,
-                elapsed_seconds=time.perf_counter() - install_started_at,
-                result=command_result,
+            command_result = attest_clean_install(
+                _post_install_summary(
+                    logger=logger,
+                    apm_count=apm_count,
+                    mcp_count=mcp_count,
+                    lsp_count=lsp_count,
+                    apm_diagnostics=apm_diagnostics,
+                    force=force,
+                    elapsed_seconds=time.perf_counter() - install_started_at,
+                    result=command_result,
+                ),
+                dry_run=dry_run,
             )
             summary_rendered = True
 
@@ -1814,6 +1818,7 @@ def _install_apm_packages(ctx, outcome):
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,
                 target=ctx.target or ctx.runtime,
+                install_mcp=ctx.install_mode != InstallMode.APM,
             ),
             allow_pending_mcp=ctx.install_mode != InstallMode.MCP,
         )

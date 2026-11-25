@@ -1,0 +1,15 @@
+{
+  "issue": 5395,
+  "fixed_in": "Unreleased",
+  "summary": "An install killed between staging an atomic write and its rename left the staging file in a new skill directory; recovery read it as a user change, kept the skill and retained the snapshot store. It is now APM's in-flight state beside an unsealed write.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_staging_file_left_by_a_killed_atomic_write_is_restored",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_staging_file_is_apms_only_beside_an_unsealed_write"
+  ]
+}

@@ -866,6 +866,8 @@ transport-platform-git-semver-preflight
 transport-platform-github-credential-class
 transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
+transport-platform-held-directory-release
+transport-platform-held-root-registration
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-http-session-construction

@@ -26,7 +26,7 @@ import os
 import secrets
 import stat
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -575,6 +575,27 @@ def _holds_entries(data: bytes) -> bool:
     return any(isinstance(value, (dict, list)) and _has_leaf(value) for value in parsed.values())
 
 
+def _bare_skeleton(data: bytes, skeleton: Mapping[str, Any]) -> bool:
+    """Whether a cleaned config holds only its target's *skeleton* (#5067).
+
+    The skeleton is the target's injected top-level defaults (same type and
+    value) plus containers with nothing in them. Any other key, a scalar user
+    setting included, is the user's content, so the file is not bare.
+    Unparseable content is never taken for a skeleton.
+    """
+    try:
+        parsed = json.loads(data.decode("utf-8")) if data.strip() else {}
+    except (UnicodeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return all(
+        (key in skeleton and type(skeleton[key]) is type(value) and skeleton[key] == value)
+        or (isinstance(value, (dict, list)) and not _has_leaf(value))
+        for key, value in parsed.items()
+    )
+
+
 def _has_leaf(value: object) -> bool:
     """Whether a nested value holds anything but empty containers (event scaffolding)."""
     if isinstance(value, dict):
@@ -648,15 +669,21 @@ def _plan_write(path: Path, before: bytes | None, manifest_root: Path | None) ->
         ) from exc
 
 
-def _note(path: Path, before: bytes | None, after: bytes, origin: Origin | None) -> None:
+def _note(
+    path: Path,
+    before: bytes | None,
+    after: bytes,
+    origin: Origin | None,
+    skeleton: Mapping[str, Any],
+) -> None:
     """Record *origin* and the bytes APM wrote under *path*'s own key."""
     if before == after or origin is None:
         return  # nothing written (a converged install records nothing, I2), or unrecorded
     store = _Store.load()
     # Its record file, with its history, is read before the record changes (#5037).
     recorded = store.lookup(path)[1]
-    if origin is Origin.LEGACY and recorded is None and not _holds_entries(after):
-        return  # a new legacy record never claims a bare skeleton (#5038)
+    if origin is Origin.LEGACY and recorded is None and _bare_skeleton(after, skeleton):
+        return  # a new legacy record never claims a bare skeleton (#5038, #5067)
     key = config_file_key(path)
     row: dict[str, Any] = {"origin": origin.value, "hash": _digest(after)}
     try:
@@ -698,15 +725,19 @@ def _prior_digest(entry: Any, journal: str | None) -> str | None:
 
 @contextmanager
 def recorded_config_write(
-    path: str | os.PathLike[str], *, manifest_root: str | os.PathLike[str] | None = None
+    path: str | os.PathLike[str],
+    *,
+    manifest_root: str | os.PathLike[str] | None = None,
+    skeleton: Mapping[str, Any] | None = None,
 ) -> Iterator[None]:
     """Record who created *path* around one APM write of it.
 
     *manifest_root* (the project, or ``$APM_HOME`` at user scope) classifies a
     file that existed without a record; a cleanup rewrite passes none and
-    records such a file as legacy only when it holds entries before and after
-    (#5038). A link or other non-regular path is
-    never recorded. Recording failures never fail the write.
+    records such a file as legacy only when it held entries before and is not
+    left as the target's bare *skeleton* (its injected top-level defaults,
+    plus empty containers) after (#5038, #5067). A link or other non-regular
+    path is never recorded. Recording failures never fail the write.
     """
     path = Path(path)
     if _replaying.get():
@@ -727,7 +758,7 @@ def recorded_config_write(
     try:
         after = _regular_bytes(path)
         if after is not None:
-            _note(path, before, after, origin)
+            _note(path, before, after, origin, skeleton or {})
     except (OSError, ValueError):
         _log.debug("Could not record the creation of %s", path, exc_info=True)
 

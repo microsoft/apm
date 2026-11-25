@@ -219,3 +219,32 @@ def test_pin_treats_non_utf8_config_as_missing(tmp_path: Path) -> None:
         b"\xff\xfe[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n"
     )
     assert not _checkout_has_materialization_pins(checkout)
+
+
+def test_a_racing_checkout_landed_first_is_checked(tmp_path: Path) -> None:
+    """A checkout another process landed first is used only when it verifies.
+
+    The in-process checkout (lever C) and the git checkout share this contract;
+    whichever one runs here, an unverified winner is evicted and refused.
+    """
+    from apm_cli.cache import git_cache as git_cache_module
+
+    origin, sha = _lf_origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    real_land = git_cache_module.atomic_land
+    checkouts = cache._checkouts_root
+
+    def land(staged, final, lock):
+        # Another process won the race for the checkout (the bare lands normally).
+        if checkouts in Path(final).parents:
+            return False
+        return real_land(staged, final, lock)
+
+    with (
+        patch.object(git_cache_module, "atomic_land", side_effect=land),
+        patch.object(git_cache_module, "verify_checkout_sha", return_value=False),
+        patch.object(cache, "_evict_checkout") as evict,
+        pytest.raises(RuntimeError, match=r"concurrent checkout failed integrity"),
+    ):
+        cache.get_checkout(str(origin), sha, locked_sha=sha)
+    evict.assert_called()
