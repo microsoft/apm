@@ -1321,7 +1321,9 @@ def _remove_proven_members(
             complete = False
             continue
         try:
-            retry_on_sharing_violation(partial(write_seam.unlink, member), "unlink")
+            retry_on_sharing_violation(
+                partial(write_seam.unlink, member), "unlink", path=member, root=skill_dir
+            )
             result.deleted.append(member_rel)
             result.deleted_targets.append(member)
         except OSError as exc:
@@ -1607,6 +1609,7 @@ def remove_stale_deployed_files(
 
                 # Never follow a final symlink to the file it points at.
                 stale_target = cowork_locator(stale_path, _cowork_root_cached)
+                deploy_root = _cowork_root_cached
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -1636,6 +1639,7 @@ def remove_stale_deployed_files(
                 result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue
             stale_target = project_root / stale_path
+            deploy_root = project_root
 
         if _stale_target_absent(stale_target, allow_final_symlink=allow_final_symlink):
             # File already gone -- treat as cleaned (no-op success).
@@ -1711,7 +1715,12 @@ def remove_stale_deployed_files(
 
         # All gates passed -- safe to delete.
         try:
-            retry_on_sharing_violation(partial(write_seam.unlink, stale_target), "unlink")
+            retry_on_sharing_violation(
+                partial(write_seam.unlink, stale_target),
+                "unlink",
+                path=stale_target,
+                root=deploy_root,
+            )
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
         except Exception as exc:
