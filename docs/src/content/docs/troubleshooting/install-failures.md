@@ -9,6 +9,58 @@ When `apm install` fails, work through these sections in order. Most failures fa
 
 For TLS-specific failures see [SSL / TLS issues](../ssl-issues/). For the full flag reference see [`apm install`](../../reference/cli/install/). For env-var precedence see [Environment variables](../../reference/environment-variables/).
 
+## Git works in the terminal, but APM cannot find it
+
+Symptom: `git --version` works in your terminal, but `apm doctor` reports
+`git not found on PATH`. An install may instead report
+`not accessible or doesn't exist`; check the `git` row in `apm doctor`
+before treating that message as an authentication problem.
+
+If the network row says `git not found; cannot test network`, the check
+could not run: it does not establish a network failure.
+
+To recover a project install, stay in your project directory: changing it
+changes which `apm.yml` APM installs and where it deploys. Move Git, or the
+`PATH` entry that finds it, outside the project's exclusion root instead,
+rerun `apm doctor`, and retry once its `git` row passes. For `apm doctor`
+itself and for global (`--global`) installs, you can instead run from another
+working directory, but APM recomputes the exclusion root there: pick one whose
+own exclusion root contains neither Git's `PATH` directory nor its resolved
+executable. For example, moving from `/home/example` to `/home` makes `/home`
+the root, which still excludes `/home/example/tools/bin/git`. Network access,
+authentication, or later installation steps may still need attention.
+
+APM skips any `git` found at or below an **exclusion root**: the nearest
+directory containing `.git`, else the nearest containing `apm.yml`, else the
+working directory itself. The full rules are in
+[Git and gh executable discovery](../../enterprise/security/#git-and-gh-executable-discovery).
+`--global` does not change them, so keep it when retrying a global install.
+Moving to a subdirectory will not help if an ancestor `.git` or `apm.yml` keeps
+Git inside the excluded directory.
+
+### Example: Git installed under your home directory
+
+Suppose Git is installed in `tools/bin` inside your home directory, and
+`work` is a sibling of `tools`. These paths are illustrative, not
+recommended installation locations:
+
+| OS | Home directory | Git executable |
+|---|---|---|
+| Windows | `C:\Users\example` | `C:\Users\example\tools\bin\git.exe` |
+| Linux | `/home/example` | `/home/example/tools/bin/git` |
+| macOS | `/Users/example` | `/Users/example/tools/bin/git` |
+
+Git's `bin` directory is on `PATH`, with no other Git installation or
+symlink redirection. Neither working directory nor any parent contains
+`.git` or `apm.yml`.
+
+Run `apm doctor` from each directory without changing Git or `PATH`:
+
+| Working directory | Exclusion root | Git discovery |
+|---|---|---|
+| Home directory | Home directory | Fails: `tools/bin` is a subdirectory of the home directory, so APM skips it. |
+| `work` | `work` | Succeeds: both `tools/bin` and Git's resolved executable are outside the root. |
+
 ## 1. Authentication failures
 
 Symptom: `403`, `401`, "authentication required", or "Repository not found" on a repo you can clone manually with `git`.

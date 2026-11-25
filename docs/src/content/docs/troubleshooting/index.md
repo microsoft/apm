@@ -10,6 +10,19 @@ commands under it, and follow the link. Looking up an exact error message instea
 Start with `apm doctor` for most problems: it checks git, network access and credentials,
 and exits non-zero when a critical check fails.
 
+## Git works in the terminal, but APM cannot find it
+
+**What you see:** `apm doctor` reports `git not found on PATH` even though
+Git works in your terminal. Compare the two checks:
+
+```bash frame="terminal"
+git --version
+apm doctor
+```
+
+See [Git discovery troubleshooting](./install-failures/#git-works-in-the-terminal-but-apm-cannot-find-it)
+for recovery steps and a cross-platform example.
+
 ## Nothing was installed (no harness detected)
 
 **What you see:** `Error: No harness detected`, and `apm install` exits with code 2.
