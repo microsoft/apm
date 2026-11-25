@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -470,6 +471,8 @@ class TestOneAnchoredDirectoryIsOneDependency:
         """
         import apm_cli.utils.paths as paths_module
 
+        if sys.platform == "win32" and volume != "folding" and stored.lower() == other.lower():
+            pytest.skip("Windows resolves and compares paths caselessly: no case-only spelling")
         vendor = tmp_path / "vendor"
         (vendor / stored).mkdir(parents=True)
         monkeypatch.setattr(paths_module, "_same_entry", lambda *_: volume != "sensitive")
@@ -513,6 +516,50 @@ class TestOneAnchoredDirectoryIsOneDependency:
 
         assert edge.anchored_local_path == (outside / "Ext").resolve().as_posix()
         assert not listed, listed
+
+    @pytest.mark.parametrize(
+        ("legacy", "volume_folds", "matched"),
+        [
+            ("vendor/f-pkg", True, True),
+            ("vendor/f-pkg", False, False),
+            ("../vendor/f-pkg", True, False),
+        ],
+        ids=["folding", "case-sensitive", "outside-root"],
+    )
+    def test_a_pre_fix_row_spelled_another_way_is_read_only_where_the_volume_folds(
+        self, tmp_path: Path, monkeypatch, legacy: str, volume_folds: bool, matched: bool
+    ) -> None:
+        """#5424: --frozen finds a pre-fix row only when samefile proves one directory."""
+        from apm_cli.deps import local_identity
+
+        (tmp_path / "vendor" / "F-Pkg").mkdir(parents=True)
+        monkeypatch.setattr(local_identity.os.path, "samefile", lambda *_: volume_folds)
+        row = LockedDependency(
+            repo_url="_local/f-pkg",
+            source="local",
+            local_path="../f-pkg",
+            declaring_parent="./vendor/d",
+            anchored_local_path=legacy,
+        )
+        edge = self._edge(tmp_path, "F-Pkg", {})
+
+        found = local_identity.locked_spelling(edge, {f"local:{legacy}": row}, tmp_path)
+
+        assert edge.anchored_local_path == "vendor/F-Pkg"
+        assert found.anchored_local_path == (legacy if matched else "vendor/F-Pkg")
+        assert (
+            local_identity.locked_spelling(found, {found.get_unique_key(): row}, tmp_path) is found
+        )
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="a backslash separates on Windows")
+    def test_a_posix_name_holding_a_backslash_keeps_its_identity(self, tmp_path: Path) -> None:
+        """#5424: ``a\\b`` is one POSIX name, never the path ``a/b``."""
+        (tmp_path / "vendor" / "a\\b").mkdir(parents=True)
+        (tmp_path / "vendor" / "a" / "b").mkdir(parents=True)
+
+        edge = self._edge(tmp_path, "a\\b", {})
+
+        assert edge.get_unique_key() == "local:vendor/a\\b"
 
     @staticmethod
     def _lockfile(*rows: tuple[str, str, str | None]) -> LockFile:

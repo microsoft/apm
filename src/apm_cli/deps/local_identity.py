@@ -9,13 +9,14 @@ on one lockfile row per anchored directory.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+import os
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from pathlib import Path
-from typing import TypeVar
+from pathlib import Path, PurePosixPath
+from typing import Any, TypeVar
 
 from ..models.dependency.reference import DependencyReference
-from ..utils.paths import portable_relpath, relative_posix, stored_spelling
+from ..utils.paths import portable_relpath, relative_posix, spelling_key, stored_spelling
 from ..utils.realpath import resolve_path
 
 _T = TypeVar("_T")
@@ -68,10 +69,53 @@ def stored_directory(anchored: Path, root: Path | None) -> Path:
     except (OSError, RuntimeError):
         return anchored
     rest = relative_posix(anchored, base)
-    if not rest or rest == ".":
+    if not rest or rest == "." or (os.sep != "\\" and "\\" in rest):
+        # A POSIX name may hold a literal backslash, which is not a separator.
         return anchored
     stored = stored_spelling(base, rest)
     return base / stored if stored is not None and stored != rest else anchored
+
+
+def _below_root(anchor: str) -> bool:
+    """Whether an ``anchored_local_path`` is project-relative (not an out-of-project path)."""
+    parts = PurePosixPath(anchor).parts
+    return (
+        bool(parts)
+        and not PurePosixPath(anchor).is_absolute()
+        and ".." not in parts
+        and ":" not in parts[0]
+    )
+
+
+def locked_spelling(
+    ref: DependencyReference, locked: Mapping[str, Any], root: Path | None
+) -> DependencyReference:
+    """*ref* keyed as a pre-#5424 lock row that names its directory another way.
+
+    Before :func:`stored_directory`, a transitive row kept the declared
+    spelling (``vendor/f-pkg`` for a stored ``F-Pkg``). When *ref*'s key is not
+    locked, a row whose ``anchored_local_path`` has the same caseless key and
+    is the same directory below *root* (``samefile``) names it, so ``install
+    --frozen`` accepts such a lock, read-only, until a plain install re-keys
+    it. A case-sensitive volume never confirms two spellings. Scans the rows
+    only on a miss.
+    """
+    anchor = ref.anchored_local_path
+    if not anchor or root is None or ref.get_unique_key() in locked or not _below_root(anchor):
+        return ref
+    want = spelling_key(anchor)
+    for row in locked.values():
+        legacy = getattr(row, "anchored_local_path", None)
+        if not legacy or legacy == anchor or spelling_key(legacy) != want:
+            continue
+        if not _below_root(legacy):
+            continue
+        try:
+            if os.path.samefile(root / legacy, root / anchor):
+                return replace(ref, anchored_local_path=legacy)
+        except OSError:
+            continue
+    return ref
 
 
 def root_local_dirs(

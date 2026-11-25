@@ -492,6 +492,59 @@ def _lock_rows_named(world: ReplayWorld, name: str) -> list[str]:
     return sorted(row["repo_url"] for row in lock["dependencies"] if row.get("name") == name)
 
 
+@pytest.mark.windows_compat
+def test_a_pre_fix_transitive_row_spelled_another_way_stays_frozen(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5424 upgrade: a pre-fix row keyed by the declared spelling ``vendor/f-pkg``.
+
+    The stored directory is ``F-Pkg``. ``--frozen`` accepts the lock read-only
+    with its bytes unchanged; a plain install re-keys it to the stored
+    spelling, and ``--frozen`` passes on that lock too.
+    """
+    import hashlib
+
+    if not _fs_folds_case(tmp_path):
+        pytest.skip("case-sensitive filesystem: the spellings name different directories")
+    world = ReplayWorld.create(tmp_path / "w", apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "F-Pkg", "f")
+    _skill_package(vendor / "d", "d", ("../f-pkg",))
+    _manifest(world, [], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    row = next(row for row in lock["dependencies"] if row.get("name") == "f")
+    assert row["anchored_local_path"] == "vendor/F-Pkg", row
+    row["anchored_local_path"] = "vendor/f-pkg"
+    for entry in lock.get("deployments", []):
+        entry["owners"] = [
+            "local:vendor/f-pkg" if owner == "local:vendor/F-Pkg" else owner
+            for owner in entry.get("owners", [])
+        ]
+        if entry.get("active_owner") == "local:vendor/F-Pkg":
+            entry["active_owner"] = "local:vendor/f-pkg"
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+    modules = world.project / "apm_modules" / "_local"
+    slot = lambda anchor: hashlib.sha256(anchor.encode()).hexdigest()[:12]  # noqa: E731
+    shutil.move(modules / slot("vendor/F-Pkg"), modules / slot("vendor/f-pkg"))
+    pre_fix = lock_bytes(world.project)
+
+    world.apm("install", "--frozen")
+    assert lock_bytes(world.project) == pre_fix
+    world.apm("install")
+    rekeyed = _row_named_f(world)
+    assert rekeyed["anchored_local_path"] == "vendor/F-Pkg", rekeyed
+    collapsed = lock_bytes(world.project)
+    world.apm("install", "--frozen")
+    assert lock_bytes(world.project) == collapsed
+
+
+def _row_named_f(world: ReplayWorld) -> dict:
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    return next(row for row in lock["dependencies"] if row.get("name") == "f")
+
+
 @pytest.mark.skipif(
     sys.platform == "win32" or not hasattr(os, "geteuid") or os.geteuid() == 0,
     reason="needs POSIX permissions enforced for a non-root user",
