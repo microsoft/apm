@@ -45,6 +45,7 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..install.local_bundle_pending import PendingBundle
     from ..models.dependency.reference import DependencyReference
     from ..security.executables import ExecutableDeclaration
 
@@ -325,7 +326,7 @@ def approve_cmd(
         # Refuse a still-denied package before any approval path writes (#4923).
         _refuse_still_denied(manifest, user_scope, deny, selected, logger=logger)
         # The org dependency denylist blocks the package itself: approving cannot lift it (#5236).
-        _refuse_policy_denied_dependencies(manifest, selected, logger=logger)
+        _refuse_policy_denied_dependencies(manifest, selected, logger=logger, bundles=bundles)
         if bundle_keys:
             _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
             if not packages:
@@ -1354,10 +1355,14 @@ def _refuse_still_denied(
 
 
 def _refuse_policy_denied_dependencies(
-    manifest: Path, declarations: list[ExecutableDeclaration], *, logger: CommandLogger
+    manifest: Path,
+    declarations: list[ExecutableDeclaration],
+    *,
+    logger: CommandLogger,
+    bundles: Sequence[PendingBundle] = (),
 ) -> None:
     """Exit 1 before any write when org policy blocks a named package (#5236)."""
-    if _report_policy_denied(manifest, declarations, logger=logger):
+    if _report_policy_denied(manifest, declarations, logger=logger, bundles=bundles):
         _rich_info("Nothing written.", symbol="info")
         sys.exit(1)
 
@@ -1383,9 +1388,13 @@ def _unlocked_dependency_ref(
         installed_path = Path(declaration.install_path).resolve()
         modules_path = manifest.parent / "apm_modules"
         references = {}
-        for reference in package.get_all_apm_dependencies():
+        from ..models.dependency.replacement import project_manifest_dependencies
+
+        for reference in project_manifest_dependencies(package, modules_dir=modules_path):
             try:
-                candidate_path = reference.get_install_path(modules_path).resolve()
+                candidate_path = reference.ownership_reference.get_install_path(
+                    modules_path
+                ).resolve()
             except (OSError, ValueError):
                 continue
             if candidate_path == installed_path:
@@ -1401,6 +1410,7 @@ def _report_policy_denied(
     *,
     logger: CommandLogger,
     bulk: bool = False,
+    bundles: Sequence[PendingBundle] = (),
 ) -> set[str]:
     """Name each of *declarations* a blocking org dependency policy denies; return them.
 
@@ -1411,7 +1421,7 @@ def _report_policy_denied(
     A no-lockfile scan uses a matching root-manifest reference when available;
     otherwise restrictions fail closed because the source cannot be verified.
     """
-    if not declarations:
+    if not declarations and not bundles:
         return set()
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ..install.exec_gate import policy_denied_dependencies
@@ -1447,6 +1457,46 @@ def _report_policy_denied(
         else:
             subjects.append((identity, reference))
     denied.update(policy_denied_dependencies(subjects, policy))
+    from ..policy.matcher import dependency_policy_subject
+
+    bundle_names = []
+    bundle_packages = []
+    bundles_without_subjects = []
+    bundles_without_packages: list[str] = []
+    for bundle in bundles:
+        policy_subjects = bundle.policy_subjects
+        if policy_subjects is None:
+            bundles_without_subjects.append(bundle)
+            continue
+        bundle_names.extend(
+            (dependency_policy_subject(reference), reference) for reference in policy_subjects.names
+        )
+        bundle_packages.extend(
+            (dependency_policy_subject(reference), reference)
+            for reference in policy_subjects.packages
+        )
+        if not policy_subjects.packages and allow is not None:
+            bundle_identity = (
+                dependency_policy_subject(policy_subjects.names[0])
+                if policy_subjects.names
+                else bundle.approval_key
+            )
+            bundles_without_packages.append(bundle_identity)
+    denied_names = policy_denied_dependencies(bundle_names, policy)
+    denied.update(
+        {
+            identity: reason
+            for identity, reason in denied_names.items()
+            if "denied by pattern" in reason
+        }
+    )
+    denied.update(policy_denied_dependencies(bundle_packages, policy))
+    for bundle in bundles_without_subjects:
+        denied[bundle.approval_key] = (
+            "org policy: no authoritative dependency references are available"
+        )
+    for identity in bundles_without_packages:
+        denied[identity] = "org policy: bundle records no packages for dependencies.allow to match"
     for identity, reason in sorted(denied.items()):
         detail = reason.removeprefix("org policy: ")
         check = (
@@ -1454,10 +1504,12 @@ def _report_policy_denied(
             if "denied by pattern" in detail or allow is None
             else "dependency-allowlist"
         )
-        reason = (
-            f"denied by org policy ({check}: {detail}); "
-            "approving cannot lift it: ask its owner to change apm-policy.yml"
+        remedy = (
+            "reinstall the bundle to refresh its policy subjects"
+            if "no authoritative dependency references" in detail
+            else "ask its owner to change apm-policy.yml"
         )
+        reason = f"denied by org policy ({check}: {detail}); approving cannot lift it: {remedy}"
         if bulk:
             logger.progress(f"Skipped: {identity} is {reason}", symbol="info")
         else:

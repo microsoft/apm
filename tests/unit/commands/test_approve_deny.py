@@ -1406,35 +1406,69 @@ def test_user_bundle_approve_retires_legacy_approvals_on_save(
     assert manifest.read_bytes() == before
 
 
-def test_key_only_bundle_approve_refuses_a_denylisted_recorded_package(
+def test_key_only_bundle_approve_refuses_a_denylisted_bundle_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A bundle's recorded package subjects are checked before its key is approved (#5417)."""
+    """A bundle's authoritative local source is checked before its key is approved (#5417)."""
+    from types import SimpleNamespace
+
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.bundle_admission import bundle_policy_subjects
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
     manifest, _config = _bundle_project(tmp_path, monkeypatch)
-    record = manifest.parent / "apm_modules" / ".local-bundle-pending.json"
-    data = json.loads(record.read_text(encoding="utf-8"))
-    data["bundles"]["bun"]["policy_subjects"] = {
-        "names": [{"repo_url": "_local/bun", "source": "local", "is_local": True}],
-        "packages": [{"repo_url": "evil/repo", "host": "github.com"}],
-    }
-    record.write_text(json.dumps(data), encoding="utf-8")
-    before = manifest.read_bytes()
-    policy = ApmPolicy(
-        enforcement="block", dependencies=DependencyPolicy(deny=("evil/**",))
+    bundle_source = tmp_path / "bundle-source"
+    bundle_source.mkdir()
+    bundle_lock = LockFile()
+    bundle_lock.add_dependency(LockedDependency(repo_url="evil/repo", resolved_commit="a" * 40))
+    bundle_lock.write(bundle_source / "apm.lock.yaml")
+    subjects = bundle_policy_subjects(
+        SimpleNamespace(
+            source_dir=bundle_source,
+            package_id="bun",
+            plugin_json={"name": "bun"},
+        )
     )
+    record_bundle_executables(
+        manifest.parent,
+        "bun",
+        _BUNDLE_KEY,
+        ["hooks"],
+        policy_subjects=subjects,
+    )
+    before = manifest.read_bytes()
+    policy = ApmPolicy(enforcement="block", dependencies=DependencyPolicy(deny=("_local/bun",)))
 
     with _serve_policy(policy):
         result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY])
 
     flat = " ".join(result.output.split())
     assert result.exit_code == 1, result.output
-    assert "evil/repo is denied by org policy (dependency-denylist:" in flat
+    assert "_local/bun is denied by org policy (dependency-denylist:" in flat
     assert "Nothing written." in flat
     assert manifest.read_bytes() == before
 
 
-def test_approve_refuses_aliased_replacement_source_without_lockfile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("dependencies", "refused"),
+    [
+        pytest.param(
+            DependencyPolicy(deny=("github.com/evil/**",)),
+            True,
+            id="deny-effective-source",
+        ),
+        pytest.param(
+            DependencyPolicy(allow=("github.com/evil/**",)),
+            False,
+            id="allow-effective-source",
+        ),
+    ],
+)
+def test_approve_checks_aliased_replacement_source_without_lockfile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependencies: DependencyPolicy,
+    refused: bool,
 ) -> None:
     """No-lockfile approval checks an aliased dependency's effective replacement (#5417)."""
     from apm_cli.models.apm_package import APMPackage
@@ -1473,18 +1507,22 @@ def test_approve_refuses_aliased_replacement_source_without_lockfile(
     monkeypatch.chdir(project)
     before = manifest.read_bytes()
     assert not (project / "apm.lock.yaml").exists()
-    policy = ApmPolicy(
-        enforcement="block", dependencies=DependencyPolicy(deny=("github.com/evil/**",))
-    )
+    policy = ApmPolicy(enforcement="block", dependencies=dependencies)
 
     with patch("apm_cli.commands.approve.resolve_trust_policy", return_value=policy):
         result = CliRunner().invoke(approve_cmd, ["hooky"])
 
     flat = " ".join(result.output.split())
-    assert result.exit_code == 1, result.output
-    assert "evil/hooky is denied by org policy (dependency-denylist:" in flat
-    assert "Nothing written." in flat
-    assert manifest.read_bytes() == before
+    if refused:
+        assert result.exit_code == 1, result.output
+        assert "hooky is denied by org policy (dependency-denylist:" in flat
+        assert "denied by pattern: github.com/evil/**" in flat
+        assert "Nothing written." in flat
+        assert manifest.read_bytes() == before
+    else:
+        assert result.exit_code == 0, result.output
+        assert "Approved hooky" in flat
+        assert yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]["allow"]
 
 
 @pytest.mark.parametrize(

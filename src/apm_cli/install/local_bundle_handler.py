@@ -35,6 +35,7 @@ from .deployed_paths import log_bundle_deployed
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.policy.models import LocalBundleSubjects
 
     from .local_bundle_pending import BundleRecordStage
 
@@ -159,6 +160,7 @@ def install_local_bundle(
             refuse_unmanaged_bundle_files,
         )
 
+        policy_subjects = bundle_policy_subjects(bundle_info)
         verify_integrity = plugin_bundle_integrity(bundle_info, logger)
         integrity_verified = False
 
@@ -197,6 +199,7 @@ def install_local_bundle(
             (bundle_mcp_deps, bundle_lsp_deps),
             scope_dir=None if dry_run else _bundle_lock_root(global_),
             create_config=create_config,
+            policy_subjects=policy_subjects,
         )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
@@ -229,7 +232,7 @@ def install_local_bundle(
             logger=logger,
             dry_run=dry_run,
             fetch_result=policy_fetch_result,
-            bundled_deps=bundle_policy_subjects(bundle_info),
+            bundled_deps=policy_subjects,
         )
         from .commit_gate import judge_bundle_manifest_scripts
 
@@ -728,6 +731,7 @@ def _stage_bundle_executables(
     *,
     scope_dir: Path | None,
     create_config: bool,
+    policy_subjects: LocalBundleSubjects,
 ) -> BundleRecordStage | None:
     """Stage this install's exact-content key and executable types; not on dry runs.
 
@@ -742,7 +746,13 @@ def _stage_bundle_executables(
     from .local_bundle_paths import declared_bundle_exec_types
 
     declared = declared_bundle_exec_types(bundle_info, *service_deps, create_config=create_config)
-    return BundleRecordStage(scope_dir, slug, approval_key, tuple(declared) if approval_key else ())
+    return BundleRecordStage(
+        scope_dir,
+        slug,
+        approval_key,
+        tuple(declared) if approval_key else (),
+        policy_subjects if approval_key else None,
+    )
 
 
 def _bundle_owner_key(bundle_info) -> str:

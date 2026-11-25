@@ -228,6 +228,12 @@ nothing. If a scanned package has no lockfile reference, approve uses a
 matching root `apm.yml` dependency reference when available; under a blocking
 dependency allow or deny policy, it otherwise refuses the named approval and
 bulk approval skips and names the package because its source cannot be checked.
+For a content-bound local bundle key, approve checks the bundle and the
+package identities recorded in its embedded lockfile before writing a grant.
+Pending bundle records made by older APM versions without those identities are
+refused under a restrictive dependency policy; reinstall the bundle to refresh
+the record. A no-lockfile `replace:` declaration is checked against its
+effective source, including when the dependency has an alias.
 The first pinned approval in a project also prints
 `Teammates need APM 0.37 or later to read pinned approvals.`
 
