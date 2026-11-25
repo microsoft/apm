@@ -3091,9 +3091,8 @@
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#5236",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=denied-executable": {
@@ -14923,6 +14922,7 @@
     "G1|approve|hook|denied-dependency|project",
     "G1|approve|lsp|denied-dependency|project",
     "G1|approve|mcp|denied-dependency|project",
+    "G1|approve|other-file|denied-dependency|project",
     "G1|approve|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -20220,6 +20220,7 @@
   },
   "pair|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
+    "G1|approve|bin|denied-dependency|project",
     "G1|audit-ci|bin|denied-dependency|project|plugin",
     "G1|compile|bin|denied-dependency|project|plugin",
     "G1|lock|bin|denied-dependency|project|plugin",

@@ -45,6 +45,7 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..models.dependency.reference import DependencyReference
     from ..security.executables import ExecutableDeclaration
 
 
@@ -323,6 +324,8 @@ def approve_cmd(
         selected, missing = _select_packages(manifest, packages)
         # Refuse a still-denied package before any approval path writes (#4923).
         _refuse_still_denied(manifest, user_scope, deny, selected, logger=logger)
+        # The org dependency denylist blocks the package itself: approving cannot lift it (#5236).
+        _refuse_policy_denied_dependencies(manifest, selected, logger=logger)
         if bundle_keys:
             _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
             if not packages:
@@ -786,7 +789,9 @@ def _approve_recommended(
     if not selected:
         _rich_info("No installed packages match the org-recommended set.", symbol="info")
         return
-    _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger, bulk=True)
+    selected = _without_policy_denied(manifest, selected, logger=logger)
+    if selected:
+        _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger, bulk=True)
 
 
 def _approve_all_pending(
@@ -802,7 +807,9 @@ def _approve_all_pending(
     if not pending:
         _rich_success("All packages with executables are already approved.")
         return
-    _record_and_save(manifest, user_scope, allow, deny, pending, logger=logger, bulk=True)
+    pending = _without_policy_denied(manifest, pending, logger=logger)
+    if pending:
+        _record_and_save(manifest, user_scope, allow, deny, pending, logger=logger, bulk=True)
 
 
 def _select_packages(
@@ -1346,6 +1353,118 @@ def _refuse_still_denied(
     sys.exit(1)
 
 
+def _refuse_policy_denied_dependencies(
+    manifest: Path, declarations: list[ExecutableDeclaration], *, logger: CommandLogger
+) -> None:
+    """Exit 1 before any write when org policy blocks a named package (#5236)."""
+    if _report_policy_denied(manifest, declarations, logger=logger):
+        _rich_info("Nothing written.", symbol="info")
+        sys.exit(1)
+
+
+def _without_policy_denied(
+    manifest: Path, declarations: list[ExecutableDeclaration], *, logger: CommandLogger
+) -> list[ExecutableDeclaration]:
+    """The bulk approvals the org dependency policy admits; each blocked one is named (#5407)."""
+    denied = _report_policy_denied(manifest, declarations, logger=logger, bulk=True)
+    return [decl for decl in declarations if _identity(decl) not in denied]
+
+
+def _unlocked_dependency_ref(
+    manifest: Path, declaration: ExecutableDeclaration
+) -> DependencyReference | None:
+    """Resolve a no-lockfile declaration only from its matching root dependency entry."""
+    if declaration.install_path is None:
+        return None
+    from ..models.apm_package import APMPackage
+
+    try:
+        package = APMPackage.from_apm_yml(manifest, create_config=False)
+        installed_path = Path(declaration.install_path).resolve()
+        modules_path = manifest.parent / "apm_modules"
+        references = {}
+        for reference in package.get_all_apm_dependencies():
+            try:
+                candidate_path = reference.get_install_path(modules_path).resolve()
+            except (OSError, ValueError):
+                continue
+            if candidate_path == installed_path:
+                references[reference.get_unique_key()] = reference
+    except (OSError, ValueError):
+        return None
+    return next(iter(references.values())) if len(references) == 1 else None
+
+
+def _report_policy_denied(
+    manifest: Path,
+    declarations: list[ExecutableDeclaration],
+    *,
+    logger: CommandLogger,
+    bulk: bool = False,
+) -> set[str]:
+    """Name each of *declarations* a blocking org dependency policy denies; return them.
+
+    A dependency the deny list matches, or one outside a configured allow list,
+    is named with that check. The same dependency check install, compile and
+    audit apply (:func:`~apm_cli.install.exec_gate.policy_denied_dependencies`),
+    under the same enforcement: ``block`` denies, ``warn`` and ``off`` admit.
+    A no-lockfile scan uses a matching root-manifest reference when available;
+    otherwise restrictions fail closed because the source cannot be verified.
+    """
+    if not declarations:
+        return set()
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..install.exec_gate import policy_denied_dependencies
+
+    policy = _load_org_policy(manifest.parent, logger=logger)
+    if getattr(policy, "enforcement", "block") != "block":
+        return set()
+    dependency_policy = getattr(policy, "dependencies", None)
+    allow = getattr(dependency_policy, "allow", None)
+    deny = getattr(dependency_policy, "deny", ()) or ()
+    if allow is None and not deny:
+        return set()
+
+    keyed = [decl for decl in declarations if decl.lock_key]
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent)) if keyed else None
+    locked = (
+        {dep.get_unique_key(): dep for dep in lockfile.get_package_dependencies()}
+        if lockfile is not None
+        else {}
+    )
+    subjects = []
+    denied = {}
+    for declaration in declarations:
+        dependency = locked.get(declaration.lock_key) if declaration.lock_key else None
+        reference = (
+            dependency.to_dependency_ref()
+            if dependency is not None
+            else _unlocked_dependency_ref(manifest, declaration)
+        )
+        identity = _identity(declaration)
+        if reference is None:
+            denied[identity] = "org policy: no authoritative dependency reference is available"
+        else:
+            subjects.append((identity, reference))
+    denied.update(policy_denied_dependencies(subjects, policy))
+    for identity, reason in sorted(denied.items()):
+        detail = reason.removeprefix("org policy: ")
+        check = (
+            "dependency-denylist"
+            if "denied by pattern" in detail or allow is None
+            else "dependency-allowlist"
+        )
+        reason = (
+            f"denied by org policy ({check}: {detail}); "
+            "approving cannot lift it: ask its owner to change apm-policy.yml"
+        )
+        if bulk:
+            logger.progress(f"Skipped: {identity} is {reason}", symbol="info")
+        else:
+            _rich_error(f"{identity} is {reason}")
+    return set(denied)
+
+
 def _still_denied(
     manifest: Path,
     declarations: list[ExecutableDeclaration],
@@ -1545,6 +1664,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                     replace(
                         declaration,
                         install_path=str(package_dir),
+                        lock_key=locked.get_unique_key(),
                         depth=locked.depth,
                         content_verified=installed_content_matches_lock(locked, package_dir),
                         native_plugin=native,
