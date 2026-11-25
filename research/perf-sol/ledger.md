@@ -50,3 +50,4 @@
 20:32 lanes: locked-warm stubs (lockread ce8b1c41, cacheverify 81184d9a, reach 88924b5a) + family heads requested; W A/A base 45464739763
 21:29 NIGHT MODE stop; state in night-state.md
 00:39 WAKE godspeed: records cut, locked whole-phase, read night runs
+01:44 F23 #5414 killed (main fast path now cheaper); F24 warm cache-hit design-doc

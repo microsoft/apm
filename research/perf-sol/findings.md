@@ -156,3 +156,11 @@ Handoff: files/statcut-handoff.md. Fold into the Windows Paths PR if the line bu
 ## F22 (01:30) Warm cache-hit remainder on main 1e4a208e + #5410 (ec258a86 -> stub 34bd5f70)
 - L warm 0.978 / warm-auth 0.987; spawns 64 -> 15 / 67 -> 16 [45515065061]. The remainder is the ls-tree link plan (git_sparse._plan_tracked_symlinks). W pending (45515035586 schannel, 45515126517 openssl).
 - Hooks/MCP fully enabled (tree-50-exec): hooks 0.975, MCP 0.992 W. sklinks ~0.
+
+## F23 (02:00, 25 Nov) Locked-warm early-decline car #5414: KILLED on current main
+- vs main 1e4a208e: install-locked-warm L 2.221x worse (4.31 -> 9.57 s) [45517792540]; with #5383: W 2.27x / L 2.21x [45517942152 / 45517968159].
+- Trace [45519638267]: main serves fresh clone with "applied a verified diff (667 files)", which is now ~2.2x cheaper than the full pipeline. The F21 upper bound (e62f520f) is stale on main.
+- On main, locked-warm (4.3 s L) < warm (7.8 s L): the locked-minus-warm regression is gone.
+- Differential fast vs full on main [45518143217]: lockfile + 1,441 project files byte-identical; only the random installation identity + bound receipts differ.
+- LESSON: re-measure a deletion upper bound on CURRENT main before building the car.
+## F24 Warm cache-hit remainder (main + #5410): W schannel warm 0.960 / auth 0.957 / update 0.952 [45515035586]; OpenSSL 0.961 / 0.966 / 0.958 [45515126517]; spawns 66 -> 16. Lead ruling: no car, design doc.
