@@ -319,3 +319,8 @@
 05:43 | Bets pulse: #5382/#5377 H8-signed in train; #5406 final candidate 42878803; Lane N notes bets-notes 947fafe1; standby + Car 3 prep | #5406 land | none
 05:47 | tick: main 1e4a208e; inbox silent; research ended; waiting #5406 / E2 Car 1 bench | none | none
 05:58 | tick: main 1e4a208e; inbox silent; 30-min notes push | E2 Car 1 bench ~06:40 | none
+06:09 | tick: main 1e4a208e; inbox silent; VP pulse sent | E2 Car 1 bench ~06:40 | none
+06:12 | E2 Car 1 head 982053d8 (head2 L 0.960/W 0.977 cold, unverified); gave render-diff CI method (harness fork + -policy fixtures, read DIFF RESULT) | E2 diff runs | none
+06:16 | Bets pulse: #5406 READY 42878803, final H8 (desk 402/403), not merged; standby + Car 3 prep | #5406 merge -> SoL re-check | none
+06:20 | tick: main 1e4a208e; inbox silent; #5406 ready not merged | E2 diff/bench | none
+06:31 | tick: main 1e4a208e; inbox silent; #5406 ready not merged; notes push | E2 diff/bench | none
