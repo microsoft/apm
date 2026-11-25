@@ -219,6 +219,17 @@ def render(g, srcs):
     a("")
     a(g["table"]())
     a("")
+    slow = [r for r in ROWS if r["src"] == "final" and r.get("band") and r["ratio"] > 1.0 and r["tls"] == "default"]
+    noise = [r for r in slow if r["band"][0] <= 1.0]
+    real = [r for r in slow if r["band"][0] > 1.0]
+    if slow:
+        nm = lambda r: f"{g['TNAME'][r['journey']]} {OSN[r['os']]} {r['fixture']}"
+        a("Rows below 1.00x: " + (", ".join(nm(r) for r in noise) + " have 95% bands that include 1.0 (noise, not "
+          "regressions)" if noise else "")
+          + ("; " if noise and real else "")
+          + ("; ".join(f"{nm(r)} is {(r['ratio'] - 1) * 100:+.0f}% with its band above 1.0 "
+                       f"({r['base_cpu'] * 1000:.0f} -> {r['new_cpu'] * 1000:.0f} ms)" for r in real) if real else "") + ".")
+        a("")
 
     lr = cell("install-cold", "linux", ANON, "tree-50", "final")
     wd = cell("install-cold", "windows", ANON, "tree-50", "final")
