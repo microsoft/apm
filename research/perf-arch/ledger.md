@@ -276,3 +276,5 @@
 03:18 | regent ruling in doc sec 6 verbatim; Lane N added (SoL, end FRI 27 03:30) | SoL W re-run | none
 03:19 | W stacked 0.719 invalid: win32 resolve_path redefinition bypassed lexical stub; rebuilt 6d67f5aa rerun ~25 min; lesson in doc sec 8 | SoL W | W stacked
 03:19 | E2 _trusted_hash memo neutral (main + K) -> doc sec 2 | SoL W 03:55 | none
+03:30 | tick; notes dc4b631479a1ac1457feeeb7b91099531c35665e | SoL W stacked ~03:55; QL re-H8 #5382 | none
+03:33 | W stacked 0.568 (~7.1 s, at target) [45532025700]; sec1 FINAL; SoL starts Lane N | doc assembly; QL #5382 | none
