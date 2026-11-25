@@ -66,6 +66,13 @@ os.environ.pop("APM_HOME", None)
 # A runner's CI makes `apm install` frozen (req-lk-018); tests that need it set it.
 os.environ.pop("CI", None)
 
+# Git must not reach the host's credential helpers (osxkeychain on macOS):
+# a blocked helper stalls each `git credential fill` until its timeout and
+# outlives the killed git (#5474). See tests/utils/credential_helpers.py.
+from tests.utils import credential_helpers as _credential_helpers  # noqa: E402
+
+_credential_helpers.isolate_git_credential_helpers(Path(tempfile.mkdtemp(prefix="apm-test-git-")))
+
 
 def _hermetic_home(_cls=Path) -> Path:
     """Resolve a home dir without ever raising.
@@ -504,3 +511,4 @@ def pytest_configure(config: pytest.Config) -> None:
 
     if not config.pluginmanager.has_plugin(_KNOWN_CELLS_PLUGIN):
         config.pluginmanager.register(known, _KNOWN_CELLS_PLUGIN)
+    _credential_helpers.register(config)
