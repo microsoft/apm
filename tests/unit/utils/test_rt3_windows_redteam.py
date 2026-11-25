@@ -330,3 +330,73 @@ def test_rt3_damaged_loose_object_heals_and_never_serves(tmp_path: Path, damage:
     # The heal warning goes to stdout first; the served bytes come last.
     assert result.stdout.endswith(_BODY), f"served {result.stdout[-80:]!r}"
     assert b"EVIL" not in result.stdout
+
+
+def _origin_with(tmp_path: Path, files: dict[str, bytes]) -> tuple[Path, str]:
+    src = tmp_path / "origin"
+    for rel, data in files.items():
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_bytes(data)
+    _git("init", "-q", "-b", "main", str(src))
+    for key, value in (("user.email", "t@e.x"), ("user.name", "T"), ("core.autocrlf", "false")):
+        _git("-C", str(src), "config", key, value)
+    _git("-C", str(src), "add", ".")
+    _git("-C", str(src), "commit", "-q", "-m", "x")
+    return src, _git("-C", str(src), "rev-parse", "HEAD")
+
+
+def _invocation(cache: Path, origin: Path, sha: str, rel: str, env: dict[str, str]):
+    code = (
+        "import sys; from pathlib import Path\n"
+        "from apm_cli.cache.git_cache import GitCache\n"
+        "c = GitCache(Path(sys.argv[1])).get_checkout(sys.argv[2], sys.argv[3], locked_sha=sys.argv[3])\n"
+        "sys.stdout.buffer.write(b'@@' + (c / sys.argv[4]).read_bytes())\n"
+    )
+    return subprocess.Popen(
+        [sys.executable, "-c", code, str(cache), str(origin), sha, rel],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**env, "PYTHONPATH": os.pathsep.join(sys.path)},
+    )
+
+
+def _served(proc) -> tuple[int, bytes, bytes]:
+    out, err = proc.communicate(timeout=300)
+    return proc.returncode, out.split(b"@@", 1)[-1], err
+
+
+@pytest.mark.parametrize("autocrlf", ["true", "input"])
+def test_rt3_eol_attributes_under_host_autocrlf_serve_stable_bytes(
+    tmp_path: Path, autocrlf: str
+) -> None:
+    files = {
+        ".gitattributes": b"*.md text eol=crlf\n*.sh text eol=lf\n",
+        "skills/demo/SKILL.md": _BODY,
+        "skills/demo/run.sh": b"#!/bin/sh\necho hi\n",
+    }
+    origin, sha = _origin_with(tmp_path, files)
+    system = tmp_path / "system.gitconfig"
+    system.write_text(f"[core]\n\tautocrlf = {autocrlf}\n", encoding="ascii")
+    env = {**_git_env(), "GIT_CONFIG_SYSTEM": str(system)}
+    cache = tmp_path / "cache"
+    served = []
+    for _ in range(2):  # cold, then a fresh process verifying the warm cache
+        code, body, err = _served(_invocation(cache, origin, sha, "skills/demo/SKILL.md", env))
+        assert code == 0, err.decode(errors="replace")[-2000:]
+        served.append(body)
+    assert served[0] == served[1], "warm verify served different bytes than the cold landing"
+    assert served[0] in (_BODY, _BODY.replace(b"\n", b"\r\n")), served[0][:80]
+
+
+def test_rt3_concurrent_cold_landings_agree(tmp_path: Path) -> None:
+    """Four processes race the same cold checkout (the #5410 lost-race landing)."""
+    origin, sha, _blob = _origin(tmp_path)
+    cache = tmp_path / "cache"
+    procs = [_invocation(cache, origin, sha, "skills/demo/SKILL.md", _git_env()) for _ in range(4)]
+    results = [_served(p) for p in procs]
+    bad = [
+        (code, body[:60], err.decode(errors="replace")[-600:])
+        for code, body, err in results
+        if code != 0 or body != _BODY
+    ]
+    assert bad == []

@@ -270,3 +270,54 @@ def test_rt3_short_name_cwd_then_long_name_cwd_agree(tmp_path: Path, apm_binary_
     )
     world.apm("uninstall", "./vendor/a", cwd=world.project)
     assert not (world.project / ".claude" / "skills" / "a-skill").exists()
+
+
+def _subst(target: Path) -> str | None:
+    import subprocess
+
+    for letter in "PQRSTUVWXYZ":
+        if os.path.exists(f"{letter}:\\"):
+            continue
+        done = subprocess.run(["subst", f"{letter}:", str(target)], capture_output=True)
+        if done.returncode == 0:
+            return f"{letter}:"
+    return None
+
+
+@_WINDOWS
+@pytest.mark.parametrize("spelling", ["subst", "unc"])
+def test_rt3_subst_and_unc_cwd_then_long_cwd_agree(
+    tmp_path: Path, apm_binary_path: Path, spelling: str
+) -> None:
+    import subprocess
+
+    world, outside = _world(tmp_path, apm_binary_path)
+    drive = None
+    if spelling == "subst":
+        drive = _subst(world.project.parent)
+        if drive is None:
+            pytest.skip("no free drive letter for subst")
+        cwd = Path(f"{drive}\\") / world.project.name
+    else:
+        text = str(world.project)
+        cwd = Path(f"\\\\localhost\\{text[0]}$\\{text[3:]}")
+        if not cwd.is_dir():
+            pytest.skip("admin share unavailable")
+    try:
+        first = world.apm("install", cwd=cwd, expect=None)
+        assert first.returncode == 0, f"{first.stdout[-1500:]}\n{first.stderr[-1500:]}"
+        lock = (world.project / "apm.lock.yaml").read_bytes()
+        assert (world.project / ".claude" / "skills" / "a-skill" / "SKILL.md").is_file()
+        again = world.apm("install", cwd=world.project, expect=None)
+        assert again.returncode == 0, f"{again.stdout[-1500:]}\n{again.stderr[-1500:]}"
+        assert (world.project / "apm.lock.yaml").read_bytes() == lock, (
+            "lockfile churned between the aliased and the long cwd:\n"
+            f"{lock.decode()}\n---\n{(world.project / 'apm.lock.yaml').read_text()}"
+        )
+        removal = world.apm("uninstall", "./vendor/a", cwd=cwd, expect=None)
+        assert removal.returncode == 0, f"{removal.stdout[-1500:]}\n{removal.stderr[-1500:]}"
+        assert not (world.project / ".claude" / "skills" / "a-skill").exists()
+        assert _snapshot(outside) == {}
+    finally:
+        if drive:
+            subprocess.run(["subst", drive, "/D"], capture_output=True)
