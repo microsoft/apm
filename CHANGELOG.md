@@ -108,10 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` updates an LSP server entry whose `${CLAUDE_PLUGIN_ROOT}` package moved, instead of keeping it as a user edit. (closes #4872, #5437)
 - APM keeps an emptied hook settings file it has no creation record for, and warns, instead of deleting it. (#5445)
 - Two apm processes sharing `APM_HOME` no longer drop each other's config file records, so your files keep their deletion protection. (closes #5270, #5444)
-- `apm install` no longer reports "up to date" after a change to an `AGENTS.md` or `CLAUDE.md` that decides Claude rules. (#5447)
 - After restoring an older `apm.lock.yaml`, one `apm install` records a local skill's own deployed file instead of skipping it as unmanaged. (#5452)
 - `apm install` migrates a legacy `approvals.yml` only during a full install, not while checking whether the fast path applies. (#5429)
-- On Windows, `apm install` keeps a CRLF `.gitignore` CRLF when it adds `apm_modules/`. (#5460)
 - `apm plugin init <name>` rejects an invalid plugin name before creating the project directory, leaving nothing on disk. (closes #5404, #5464)
 - `apm marketplace init --name X` with an existing `apm.yml` writes `name: X` in the `marketplace:` block instead of ignoring the flag. (closes #5405, #5465)
 
