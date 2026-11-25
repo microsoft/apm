@@ -406,22 +406,24 @@ def judge_mcp_install_files(
             _entry_scripts_checks(scripts_policy, manifest_path, dry_run=dry_run)
         )
     files_policy = policies[roots["files"]]
-    if files_policy is not None and files_policy.unmanaged_files.effective_action == "deny":
+    unmanaged = None
+    if judges_unmanaged_files(files_policy):
         path = resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True)
         root, lockfile = get_deploy_root(scope), LockFile.read(path)
-        checks[roots["files"]].append(
-            _check_unmanaged_files(
-                root,
-                lockfile,
-                files_policy.unmanaged_files,
-                projected_writes=projected_writes(),
-            )
+        unmanaged = _check_unmanaged_files(
+            root,
+            lockfile,
+            files_policy.unmanaged_files,
+            projected_writes=projected_writes(),
         )
+        checks[roots["files"]].append(unmanaged)
     for policy_root, found in checks.items():
         if found:
             _report_install_policy_checks(
                 logger, policies[policy_root], found, dry_run=dry_run, source=None
             )
+    if unmanaged is not None:
+        _warn_unmanaged_files(logger, files_policy, unmanaged)
 
 
 def judge_bundle_manifest_scripts(
@@ -799,7 +801,7 @@ def check_before_release(ctx: InstallContext, lockfile: LockFile | None) -> None
 
 def _projected_config_writes(ctx: InstallContext, policy: Any) -> tuple[str, ...]:
     """MCP config files the install's MCP stage will write after this gate (#4956)."""
-    if policy is None or policy.unmanaged_files.effective_action != "deny":
+    if not judges_unmanaged_files(policy):
         return ()
     from apm_cli.install.config_writes import pipeline_config_files
 
@@ -818,27 +820,38 @@ def refuse_unmanaged_files(
 ) -> None:
     """Refuse a governed file no row of *lockfile* claims under ``unmanaged_files: deny``.
 
+    Under ``warn`` the same check reports the files without blocking.
     *projected_writes* are the config files the install is about to write through
     server ownership; they are judged with the files already on disk (#4956).
     """
-    if policy is None or policy.unmanaged_files.effective_action != "deny":
+    if not judges_unmanaged_files(policy):
         return
     from apm_cli.policy.policy_checks import _check_unmanaged_files
 
-    _report_install_policy_checks(
-        logger,
-        policy,
-        [
-            _check_unmanaged_files(
-                project_root,
-                lockfile,
-                policy.unmanaged_files,
-                projected_writes=projected_writes,
-            )
-        ],
-        dry_run=dry_run,
-        source=source,
+    check = _check_unmanaged_files(
+        project_root,
+        lockfile,
+        policy.unmanaged_files,
+        projected_writes=projected_writes,
     )
+    _report_install_policy_checks(logger, policy, [check], dry_run=dry_run, source=source)
+    _warn_unmanaged_files(logger, policy, check, source=source)
+
+
+def judges_unmanaged_files(policy: Any) -> bool:
+    """Whether *policy* has the install judge ``unmanaged_files`` (``deny`` or ``warn``)."""
+    return policy is not None and policy.unmanaged_files.effective_action in ("deny", "warn")
+
+
+def _warn_unmanaged_files(
+    logger: Any, policy: Any, check: Any, *, source: str | None = None
+) -> None:
+    """Report a passing ``unmanaged_files: warn`` result, which blocks nothing."""
+    if logger is None or policy.unmanaged_files.effective_action != "warn":
+        return
+    from apm_cli.policy.install_preflight import emit_passed_check_warnings
+
+    emit_passed_check_warnings(logger, [check], source=source)
 
 
 def _enforced_install_policy(ctx: InstallContext) -> Any:

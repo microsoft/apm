@@ -12,6 +12,8 @@
     "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_counts_the_mcp_config_an_install_creates",
     "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_warn_counts_the_mcp_config_an_install_creates",
     "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_refuses_a_config_file_that_is_a_link_or_a_fifo",
-    "tests/integration/test_install_policy_fields_lifecycle.py::test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes"
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_refuses_a_merged_config_beside_user_hooks",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_unmanaged_files_deny_refuses_a_hook_file_the_install_skips"
   ]
 }

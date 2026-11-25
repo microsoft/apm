@@ -1194,6 +1194,7 @@ def integrate_local_bundle(
         "commands": 0,
         "hooks": hook_result.hook_files,
         "hook_config_files": hook_result.configs,
+        "verified_hook_config_files": hook_result.verified_configs,
         "instructions": 0,
         "prompts": 0,
         "sub_skills": 0,

@@ -962,3 +962,44 @@ def test_bundle_dry_run_previews_the_hook_files_a_forced_reinstall_writes(
     assert ".claude/apm-hooks.json" in preview, preview
     assert _state(world, None, keep_git_cache=False) == before
     _assert_ok(world, "install", "--force", "--target", "claude", bundle)
+
+
+def _approve_parked_exec_bundle(world: World, target: str) -> str:
+    return _park_and_approve_exec_bundle(world, target)
+
+
+def test_unmanaged_files_deny_refuses_a_merged_config_beside_user_hooks(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#4956: a merge that keeps user-authored hooks leaves the shared config unmanaged."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, "claude")
+    claude = world.project / ".claude"
+    claude.mkdir(exist_ok=True)
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [_USER_HOOK]}}) + "\n", encoding="utf-8"
+    )
+
+    text = _assert_refused(world, _UNMANAGED, "--target", "claude", bundle)
+
+    assert ".claude/settings.json" in text, text
+
+
+def test_unmanaged_files_deny_refuses_a_hook_file_the_install_skips(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#4956: without --force the install keeps an edited, unclaimed hook file."""
+    world = lifecycle_world
+    use_policy(world, "unmanaged-deny")
+    _seed(world)
+    bundle = _approve_parked_exec_bundle(world, "copilot")
+    _assert_ok(world, "install", "--target", "copilot", bundle)
+    hook = world.project / ".github" / "hooks" / "p-exec-hooks.json"
+    hook.write_text(hook.read_text(encoding="utf-8").replace("echo p-exec", "echo mine"))
+    (world.project / "apm.lock.yaml").unlink()
+
+    text = _assert_refused(world, _UNMANAGED, "--target", "copilot", bundle)
+
+    assert ".github/hooks/p-exec-hooks.json" in text, text

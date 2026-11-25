@@ -272,7 +272,7 @@ def install_local_bundle(
             user_scope=global_,
             logger=logger,
             dry_run=dry_run,
-            mcp_runtimes=[t.name for t in targets] if bundle_mcp_deps else (),
+            mcp_writes=(bundle_mcp_deps, [t.name for t in targets]),
         )
         result = deploy(dry_run=dry_run, logger=logger, create_config=create_config)
 

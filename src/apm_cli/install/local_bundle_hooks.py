@@ -33,6 +33,8 @@ class BundleHookResult:
     # Hook configs and ownership sidecars the run writes beside the scripts; a
     # dry run lists them (#4956).
     configs: list[str] = field(default_factory=list)
+    # The configs among them whose ownership verifies once written (#5277).
+    verified_configs: list[str] = field(default_factory=list)
 
 
 def integrate_local_bundle_hooks(
@@ -129,6 +131,7 @@ def integrate_local_bundle_hooks(
             slug,
             approval_key,
             scope,
+            force=force,
         )
         return result
 
@@ -207,12 +210,17 @@ def _preview_hook_claims(
     slug: str,
     approval_key: str | None,
     scope: Any,
+    *,
+    force: bool,
 ) -> None:
-    """List what a forced hook install writes, by running it in a scratch project (#4956).
+    """List what the hook install writes, by running it in a scratch project (#4956).
 
-    The project and its lockfile are untouched, so every script is a claim and
-    every other file written is a hook config or ownership sidecar. A user-scope
-    install writes under HOME, which a scratch project cannot stand in for.
+    The run keeps the caller's ``force`` and the project's prior bundle claims
+    over a copy of the destinations it reads (hook scripts, merged configs,
+    sidecars, ``apm.yml``), so a script the real run would skip is no claim and
+    every file written is a script claim, a hook config or an ownership
+    sidecar. The project and its lockfile are untouched. A user-scope install
+    writes under HOME, which a scratch project cannot stand in for.
     """
     from ..core.scope import InstallScope
     from ..integration.config_file_provenance import replay_render
@@ -222,13 +230,12 @@ def _preview_hook_claims(
 
     if scope == InstallScope.USER:
         return
+    managed_files = _prior_bundle_claims(project_root)
     with tempfile.TemporaryDirectory(prefix="apm-bundle-hook-preview-") as tmp:
         scratch = Path(tmp) / "project"
         scratch.mkdir()
-        for target in hook_targets:
-            # Opt-in targets (Kiro) write only into a directory that already exists.
-            if (project_root / target.root_dir).is_dir():
-                (scratch / target.root_dir).mkdir(exist_ok=True)
+        spec_files = _seed_preview_destinations(project_root, scratch, hook_targets)
+        seeded = _file_hashes(scratch)
         try:
             package_info = _bundle_hook_package(
                 bundle_info, verified_files, Path(tmp) / "stage" / slug, slug
@@ -248,8 +255,8 @@ def _preview_hook_claims(
                     slug,
                     approval_key,
                     False,
-                    force=True,
-                    managed_files=set(),
+                    force=force,
+                    managed_files=managed_files,
                     scope=scope,
                 )
             )
@@ -261,12 +268,61 @@ def _preview_hook_claims(
                     result.scripts.append(record)
                     result.script_hashes[record] = compute_file_hash(Path(target_path))
         integrator.take_rendered_writes()
-        written = (path for path in sorted(scratch.rglob("*")) if path.is_file())
+        after = _file_hashes(scratch)
         result.configs = [
             rel
-            for rel in (portable_relpath(path, scratch) for path in written)
-            if rel not in scripts
+            for rel, digest in after.items()
+            if rel not in scripts and (seeded.get(rel) != digest or rel in spec_files)
         ]
+        result.verified_configs = _verified_configs(scratch, project_root, result.configs)
+
+
+def _file_hashes(root: Path) -> dict[str, str]:
+    from ..utils.content_hash import compute_file_hash
+    from ..utils.paths import portable_relpath
+
+    return {
+        portable_relpath(path, root): compute_file_hash(path)
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _seed_preview_destinations(project_root: Path, scratch: Path, hook_targets: Any) -> set[str]:
+    """Copy the destinations a hook install reads into *scratch*; return its config files.
+
+    Opt-in targets (Kiro) write only into a directory that already exists.
+    """
+    from ..core.scope import manifest_file
+    from .manifest_reconcile import merge_hook_config_projection_specs
+
+    specs = merge_hook_config_projection_specs(list(hook_targets))
+    config_files = {*specs, *(sidecar for sidecar, _key in specs.values())}
+    for target in hook_targets:
+        root = project_root / target.root_dir
+        if not root.is_dir():
+            continue
+        (scratch / target.root_dir).mkdir(exist_ok=True)
+        if (root / "hooks").is_dir():
+            shutil.copytree(root / "hooks", scratch / target.root_dir / "hooks", symlinks=True)
+    for rel in config_files:
+        src = project_root / rel
+        if (scratch / rel).parent.is_dir() and src.is_file():
+            shutil.copy2(src, scratch / rel, follow_symlinks=False)
+    manifest = manifest_file(project_root)
+    if manifest.is_file() and not manifest.is_symlink():
+        shutil.copy2(manifest, scratch / manifest.name)
+    return config_files
+
+
+def _verified_configs(scratch: Path, project_root: Path, configs: list[str]) -> list[str]:
+    """The *configs* whose ownership verifies in *scratch* under the project's lockfile."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..integration.hook_ownership import verified_apm_hook_files
+
+    lockfile = LockFile.read(get_lockfile_path(project_root)) or LockFile()
+    verified = verified_apm_hook_files(scratch, lockfile)
+    return [rel for rel in configs if rel in verified]
 
 
 def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage: Path, slug: str):
