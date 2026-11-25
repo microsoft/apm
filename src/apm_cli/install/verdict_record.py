@@ -749,6 +749,11 @@ def _verified_stdout(argv: list[str], root: Path, *, attested: bool = False) -> 
     raw = _read_nofollow(_record_path(root))
     if raw is None or not _location_trusted(root):
         raise _Miss("")
+    from apm_cli.core.agents_md_compile_record import may_carry
+
+    if not attested and may_carry(root):
+        # The full run decides Claude rules from it; a replay never does (#5434).
+        raise _Miss("a compiled AGENTS.md may carry a Claude rule")
     key = _key(create=False)
     if key is None:
         raise _Miss("no key")
