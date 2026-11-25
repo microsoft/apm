@@ -482,13 +482,10 @@ def test_s16c_installed_cli_subdirectory_install(tmp_path, apm_binary_path: Path
     assert (sub_project / "apm.lock.yaml").read_text(encoding="utf-8") == (
         root_project / "apm.lock.yaml"
     ).read_text(encoding="utf-8")
-    sub_claude_files = sorted(
-        p.relative_to(sub_project) for p in sub_project.glob(".claude/**/*") if p.is_file()
-    )
-    root_claude_files = sorted(
-        p.relative_to(root_project) for p in root_project.glob(".claude/**/*") if p.is_file()
-    )
-    assert sub_claude_files == root_claude_files
+    # The same deployed files with the same bytes (#4545 scope).
+    sub_claude = _snapshot_dir(sub_project / ".claude")
+    assert sub_claude, "the subdirectory install deployed nothing"
+    assert sub_claude == _snapshot_dir(root_project / ".claude")
 
 
 def test_s16d_installed_cli_subdirectory_add_package(tmp_path, apm_binary_path: Path):
