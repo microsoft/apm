@@ -286,7 +286,8 @@ def table():
         cs = []
         for os_ in OSES:
             a, b = cell(j, os_, pop, "tree-50"), cell(j, os_, pop, "tree-10")
-            cs.append(f"{fmt(a)} / {fmt(b)}" if (a or b) else "measuring")
+            cs.append(f"{fmt(a)} / {fmt(b)}" if (a or b) else
+                      ("Linux only" if j == "install-frozen-noop" else "measuring"))
         if j in ("install-noop-replay", "install-noop", "install-frozen-noop", "update", "uninstall", "prune", "outdated", "compile",
                  "audit", "audit-ci", "pack", "install-bundle", "boot-version", "boot-help") and pop == ANON:
             p = "all" if j.startswith(("install-noop", "install-frozen-noop", "compile", "audit", "pack", "install-bundle", "boot")) else popshort[pop]

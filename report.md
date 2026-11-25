@@ -1,8 +1,8 @@
 # APM performance since the epic
 
-*PERF org report for the CEO, v2 2026-11-25 06:08 CET (data: Journey Hunt report.json; NEW = the fat train head). Final refresh after Wednesday's final bench pass.*
+*PERF org report for the CEO, v2 2026-11-25 06:08 CET (data: CI perf-bench runs, collect_ci.py; NEW = the fat train head). Wednesday's bench pass.*
 
-**Baseline (paired).** **Before the epic** = main `e37400fa` (v0.38.0) vs the fat train head (#5406) `42878803`: Journey Hunt bench (6 pairs per cell).
+**Baseline (paired).** **Before the epic** = main `e37400fa` (v0.38.0) vs the fat train head (#5406) `42878803`: CI bench (15 pairs for anonymous install cells, 6 for the rest).
 
 **Runner classes.** Ratios are the claim. Cold t50 cells on Linux and Windows drew no EPYC 9V74 runner (5 pairs each on EPYC 7763, 9V45 and Xeon 8573C), so their seconds are pooled medians across classes.
 
@@ -63,7 +63,7 @@ Speedup = 1 / paired p50, tree-50 / tree-10, vs e37400fa (before the epic). *p* 
 | install warm | anonymous | 1.90x / 1.62x | 1.49x / 1.36x | 1.23x / 1.20x |
 | re-install #2 (unchanged) | all | 6.62x / 3.06x | 5.88x / 2.92x | 6.55x / 3.10x |
 | re-install #3+ (repeat user) | all | 27.30x / 11.24x | 21.97x / 9.14x | 22.97x / 9.75x |
-| --frozen no-op (CI re-run) | all | 5.04x / 2.81x | measuring | measuring |
+| --frozen no-op (CI re-run) | all | 5.04x / 2.81x | Linux only | Linux only |
 | install cold | authenticated | 2.71x / 1.83x | 3.12x / 2.25x | 2.91x / 2.19x |
 | install warm | authenticated | 1.89x / 1.67x | 1.66x / 1.34x | 1.34x / 1.23x |
 | install cold | GHE anonymous | 1.49x / 1.27x | 1.33x / 1.18x | 1.42x / 1.24x |

@@ -56,12 +56,12 @@ def render(g, srcs):
     a = out.append
     a("# APM performance since the epic")
     a("")
-    a(f"*PERF org report for the CEO, {'v2' if FAT else 'v1'} {g["STAMP"]} CET (data: Journey Hunt report.json"
+    a(f"*PERF org report for the CEO, {'v2' if FAT else 'v1'} {g["STAMP"]} CET (data: " + ("CI perf-bench runs, collect_ci.py" if FAT else "Journey Hunt report.json")
       + ("; NEW = the fat train head" if FAT else "") + "). "
-      "Final refresh after Wednesday's final bench pass.*")
+      + ("Wednesday's bench pass.*" if FAT else "Final refresh after Wednesday's final bench pass.*"))
     a("")
     a(("**Two baselines, both paired.** (a) " if any(r["src"] == "interim" for r in ROWS) else "**Baseline (paired).** ") + "**Before the epic** = main `e37400fa` (v0.38.0) vs "
-      + (g.get("NEW_LABEL") or ("the measured head" if FAT else "main")) + f" `{new}`: Journey Hunt bench (6 pairs per cell" + ("; rows marked *provisional* come from the v1 harness "
+      + (g.get("NEW_LABEL") or ("the measured head" if FAT else "main")) + f" `{new}`: " + ("CI bench (15 pairs for anonymous install cells, 6 for the rest" if FAT else "Journey Hunt bench (6 pairs per cell") + ("; rows marked *provisional* come from the v1 harness "
       "and are replaced when v2 lands" if any(r["prov"] for r in ROWS if r["src"] == "final") else "") + ")."
       + ((" (b) **Validated interim** = main `703acd6f` (Nov 23 evening, already after the "
       "locked engine #4893) vs main `c0296fab`, 15 pairs, install only, **Windows on the OpenSSL TLS backend**. "
