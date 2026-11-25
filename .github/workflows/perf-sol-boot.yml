@@ -2,7 +2,7 @@ name: Perf SoL trace (research)
 
 on:
   push:
-    branches: [perf-research/arch-trace2]
+    branches: [perf-research/arch-trace3]
 
 permissions:
   contents: read
@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04]
-        product: [693df2196af5271b8423d7eb1b468bf3da7d4070, 480b061f42abbc62b90936b67ba02fd4c5b404da, 1e4a208e073a3ea1484f71ceba8d065f23a815ec]
+        os: [ubuntu-24.04, windows-2025]
+        product: [1e4a208e073a3ea1484f71ceba8d065f23a815ec]
     defaults:
       run:
         shell: bash
@@ -48,7 +48,7 @@ jobs:
           APM_BENCH_NO_IMPORTTIME: "1"
         run: |
           set -euo pipefail
-          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-locked-warm,install-warm --rtt 0 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
+          APM_BENCH_IMPORTTIME_DIR="$GITHUB_WORKSPACE/out/stderr" uv run --frozen python -m tests.benchmarks.journeys run --fixtures tree-50 --journeys install-noop,install-locked-warm,install-warm,install-frozen-warm --rtt 0 --runs 1 --apm "$APM_ABS" --out "$GITHUB_WORKSPACE/out/j" --work "$GITHUB_WORKSPACE/work"
           grep -h "install fast path" "$GITHUB_WORKSPACE"/out/stderr/*.txt | sort | uniq -c
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
