@@ -21,9 +21,12 @@ _real_parse = ast.parse
 
 
 def _site(skip: int) -> str:
-    for frame in traceback.extract_stack()[: -skip][::-1]:
-        if "architecture_linter" in frame.filename or "lint_architecture" in frame.filename:
-            return f"{Path(frame.filename).name}:{frame.name}"
+    frame = sys._getframe(skip)
+    while frame is not None:
+        name = frame.f_code.co_filename
+        if ("architecture_linter" in name or "lint_architecture" in name) and "probe" not in name:
+            return f"{Path(name).name}:{frame.f_code.co_name}"
+        frame = frame.f_back
     return "?"
 
 
@@ -35,7 +38,7 @@ def traced_parse(source, filename="<unknown>", *args, **kwargs):
         name = str(filename)
         parses[name] += 1
         parse_time[name] += time.perf_counter() - started
-        parse_sites[_site(2)] += 1
+        parse_sites[_site(1)] += 1
 
 
 ast.parse = traced_parse
@@ -48,7 +51,7 @@ def hook(event, args):
             path = os.fsdecode(args[0])
             if path.endswith(".py"):
                 reads[path] += 1
-                read_sites[_site(3)] += 1
+                read_sites[_site(1)] += 1
 
 
 sys.addaudithook(hook)
