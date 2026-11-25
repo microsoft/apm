@@ -440,3 +440,24 @@ def test_a_failed_chain_stat_still_treats_home_ancestors_as_a_ceiling(
     assert _find_apm_yml(work) is None
     assert above.read_text(encoding="utf-8") == "name: above\nversion: 1.0.0\n"
     assert not (tmp_path / "apm.lock.yaml").exists()
+
+
+def test_an_unreadable_home_level_is_still_a_ceiling(tmp_path: Path, monkeypatch) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+    from apm_cli.utils import executable_exclusion as ee
+
+    home, work = _home_world(tmp_path, monkeypatch)
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+    (tmp_path / "apm.yml").write_text("name: above\nversion: 1.0.0\n", encoding="utf-8")
+    ee._HOME_CHAIN.clear()
+    real_stat = os.stat
+
+    def denied(path, *args, **kwargs):
+        if Path(path) in (home, tmp_path):
+            raise PermissionError("denied")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(ee.os, "stat", denied)
+
+    assert _find_apm_yml(work) is None
+    assert ee.is_home_or_above(tmp_path, home)

@@ -84,7 +84,9 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
     try:
         wanted = os.stat(directory)
     except OSError:
-        return False
+        # Fail closed: an unreadable directory spelled as a HOME level stays a ceiling.
+        levels = {os.path.normcase(str(level)) for level in (home, *home.parents)}
+        return os.path.normcase(str(directory)) in levels
     if chain is None:
         return any(same_directory(directory, level) for level in (home, *home.parents))
     return (wanted.st_dev, wanted.st_ino) in chain

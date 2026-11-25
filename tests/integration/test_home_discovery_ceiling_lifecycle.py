@@ -80,13 +80,17 @@ def _own_receipt(
     return frozenset({receipt.relative_to(home).as_posix()})
 
 
-def _outside(value: object, project: str) -> object:
+def _inside(key: str, project: Path) -> bool:
+    return Path(key).is_relative_to(project)
+
+
+def _outside(value: object, project: Path) -> object:
     """Drop every record keyed by a path inside *project* from parsed receipt JSON."""
     if isinstance(value, dict):
         return {
             k: _outside(v, project)
             for k, v in value.items()
-            if not (isinstance(k, str) and k.startswith(project))
+            if not (isinstance(k, str) and _inside(k, project))
         }
     if isinstance(value, list):
         return [_outside(v, project) for v in value]
@@ -96,7 +100,7 @@ def _outside(value: object, project: str) -> object:
 def _records_outside(home: Path, project: Path) -> dict[str, object]:
     base = home / ".apm" / "deployment-receipts" / "config-files"
     return {
-        path.name: _outside(json.loads(path.read_text(encoding="utf-8")), project.as_posix())
+        path.name: _outside(json.loads(path.read_text(encoding="utf-8")), project)
         for path in sorted(base.glob("*.json"))
     }
 
@@ -335,3 +339,11 @@ def test_a_walk_from_the_user_metadata_directory_never_edits_the_global_manifest
     assert result.returncode == 1, _describe(result)
     assert "No apm.yml found" in result.stdout + result.stderr, _describe(result)
     assert (manifest.read_bytes(), lock.read_bytes()) == before, _describe(result)
+
+
+def test_a_sibling_directory_sharing_a_name_prefix_is_not_inside_the_project() -> None:
+    project = Path("/x/me")
+
+    assert _inside("/x/me/a.json", project)
+    assert not _inside("/x/me2/a.json", project)
+    assert _outside({"/x/me2/a.json": 1, "/x/me/a.json": 2}, project) == {"/x/me2/a.json": 1}
