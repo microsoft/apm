@@ -67,10 +67,12 @@ def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dic
                 native_owners[normalized] = unique_key
     # The project's own skill directories, after every dependency (#5399). Their owner
     # is PROJECT_SKILLS: falsy, so a dependency's overlap still reads "another package".
+    from apm_cli.integration.cleanup import _is_skill_directory_entry
+
     for deployed_path in lockfile.local_deployed_files or ():
-        parts = deployed_path.rstrip("/").replace("\\", "/").split("/")
-        if len(parts) >= 2 and parts[-2] == "skills":
-            owned_by.setdefault(parts[-1], PROJECT_SKILLS)
+        if _is_skill_directory_entry(deployed_path):  # every target's layout (grok-bot)
+            name = deployed_path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+            owned_by.setdefault(name, PROJECT_SKILLS)
     return owned_by, native_owners
 
 
