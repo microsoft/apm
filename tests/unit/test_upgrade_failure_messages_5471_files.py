@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.core.scope import set_source_root_override
 from apm_cli.deps.lockfile import LockedDependency, LockFile, LockfileFormatError
 from apm_cli.install.errors import FrozenInstallError
 from apm_cli.install.request import InstallRequest
@@ -30,6 +31,26 @@ def test_libyaml_lockfile_parse_error_ends_with_the_regenerate_fix(tmp_path: Pat
         .rstrip()
         .endswith("Move apm.lock.yaml aside, then run 'apm install' to regenerate apm.lock.yaml.")
     )
+
+
+def test_lockfile_parse_error_under_root_override_names_absolute_path_and_root(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    deploy = tmp_path / "deploy"
+    source.mkdir()
+    deploy.mkdir()
+    lock = deploy / "apm.lock.yaml"
+    lock.write_text("lockfile_version: '1'\ndependencies: [unclosed\n", encoding="utf-8")
+    set_source_root_override(source)
+    try:
+        with pytest.raises(LockfileFormatError) as refusal:
+            LockFile.read(lock)
+    finally:
+        set_source_root_override(None)
+    text = str(refusal.value)
+    assert f"Move {lock.resolve()} aside" in text
+    assert f"run 'apm install --root {deploy.resolve()}'" in text
 
 
 def test_frozen_under_blocking_mcp_policy_leads_with_the_policy_refusal(

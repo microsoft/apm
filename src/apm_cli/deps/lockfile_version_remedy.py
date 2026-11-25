@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 _VERSION = re.compile(r"Unsupported lockfile version (.+?);")
@@ -40,11 +41,17 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
 def _with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
     """Return *exc* ending with how to regenerate *path*, whose YAML did not parse."""
     from ..core import remediation
-    from ..core.scope import is_user_scope_root
+    from ..core.scope import get_source_root_override, is_user_scope_root
 
-    regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
-    if is_user_scope_root(path.parent):
-        regen = regen.with_command("apm install -g")
+    if get_source_root_override() is not None:
+        # Under `apm install --root` a bare `apm install` would act on the source repo.
+        deploy_dir = path.resolve().parent
+        regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.resolve())
+        regen = regen.with_command(f"apm install --root {shlex.quote(str(deploy_dir))}")
+    else:
+        regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
+        if is_user_scope_root(path.parent):
+            regen = regen.with_command("apm install -g")
     error = type(exc)(f"{exc}\n{regen.sentence()}")
     error.__cause__ = exc
     return error
