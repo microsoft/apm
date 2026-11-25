@@ -71,3 +71,56 @@ def _listdir(path="."):
 def install() -> None:
     os.scandir = _scandir
     os.listdir = _listdir
+    install_walk2()
+
+
+# --- O-walk2: zero-cost os.walk / Path.glob / Path.rglob for apm_modules trees -----------------
+import pathlib as _pathlib
+
+_ORIG_WALK = os.walk
+_ORIG_GLOB = _pathlib.Path.glob
+_ORIG_RGLOB = _pathlib.Path.rglob
+_TREES: dict[str, dict] = {}
+_GLOBS: dict[tuple, list] = {}
+
+
+def _walk(top, topdown=True, onerror=None, followlinks=False):
+    key = _key(top) if topdown and not followlinks else None
+    if key is None:
+        yield from _ORIG_WALK(top, topdown, onerror, followlinks)
+        return
+    form = os.fspath(top)
+    tree = _TREES.get(form)
+    if tree is None:
+        tree = {root: (dirs, files) for root, dirs, files in _ORIG_WALK(form, True, onerror, False)}
+        _TREES[form] = tree
+    stack = [form]
+    while stack:
+        root = stack.pop()
+        entry = tree.get(root)
+        if entry is None:
+            continue
+        dirs = list(entry[0])
+        yield root, dirs, list(entry[1])
+        for name in reversed(dirs):
+            stack.append(os.path.join(root, name))
+
+
+def _glob_cached(orig, kind):
+    def method(self, pattern, *args, **kwargs):
+        key = _key(self)
+        if key is None or args or kwargs:
+            return orig(self, pattern, *args, **kwargs)
+        ck = (kind, str(self), pattern)
+        found = _GLOBS.get(ck)
+        if found is None:
+            found = _GLOBS[ck] = list(orig(self, pattern))
+        return iter(found)
+
+    return method
+
+
+def install_walk2() -> None:
+    os.walk = _walk
+    _pathlib.Path.glob = _glob_cached(_ORIG_GLOB, "glob")
+    _pathlib.Path.rglob = _glob_cached(_ORIG_RGLOB, "rglob")
