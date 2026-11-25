@@ -341,9 +341,20 @@ def test_a_walk_from_the_user_metadata_directory_never_edits_the_global_manifest
     assert (manifest.read_bytes(), lock.read_bytes()) == before, _describe(result)
 
 
-def test_a_sibling_directory_sharing_a_name_prefix_is_not_inside_the_project() -> None:
-    project = Path("/x/me")
+def test_a_sibling_project_sharing_a_name_prefix_is_not_inside_the_project(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    isolated, environment, package = _world(tmp_path)
+    project, sibling = isolated.home / "work" / "me", isolated.home / "work" / "me2"
+    for folder in (project, sibling):
+        (folder / ".claude").mkdir(parents=True)
 
-    assert _inside("/x/me/a.json", project)
-    assert not _inside("/x/me2/a.json", project)
-    assert _outside({"/x/me2/a.json": 1, "/x/me/a.json": 2}, project) == {"/x/me2/a.json": 1}
+    result = _run(apm_engine_command, ("install", str(package)), sibling, environment)
+
+    assert result.returncode == 0, _describe(result)
+    assert (sibling / ".claude" / "skills" / "a-skill").is_dir(), _describe(result)
+    assert not _inside(sibling.as_posix() + "/apm.yml", project)
+    assert _inside(project.as_posix() + "/apm.yml", project)
+    assert _outside({sibling.as_posix() + "/a": 1, project.as_posix() + "/a": 2}, project) == {
+        sibling.as_posix() + "/a": 1
+    }
