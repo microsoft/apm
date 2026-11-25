@@ -320,6 +320,164 @@ class TestResolveTrustedExecutable:
             _resolve_trusted_executable("git")
 
 
+_USER_TOOL_DIRS = [
+    pytest.param(Path(".local") / "bin", id="posix"),
+    pytest.param(Path("AppData") / "Local" / "Programs" / "Git" / "cmd", id="windows"),
+]
+
+
+@pytest.mark.trusted_executable
+class TestTrustedExecutableUnderHome:
+    """Helper tools under HOME resolve unless a project below HOME encloses them (#5006)."""
+
+    @staticmethod
+    def _layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        home = (tmp_path / "Users" / "dev user").resolve()
+        home.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        return home
+
+    @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
+    def test_cwd_is_home_without_marker_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        git = _tool(home / tool_dir, "git")
+        monkeypatch.chdir(home)
+
+        with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
+            assert _resolve_trusted_executable("git") == str(git.resolve())
+
+    @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
+    def test_unmarked_cwd_below_home_still_resolves_home_tool(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        git = _tool(home / tool_dir, "git")
+        downloads = home / "Downloads"
+        downloads.mkdir()
+        monkeypatch.chdir(downloads)
+
+        with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
+            assert _resolve_trusted_executable("git") == str(git.resolve())
+
+    @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
+    def test_dotfiles_git_at_home_is_not_the_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        (home / ".git").mkdir()
+        git = _tool(home / tool_dir, "git")
+        cwd = home / "work" / "x"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+
+        with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
+            assert _resolve_trusted_executable("git") == str(git.resolve())
+
+    @pytest.mark.parametrize("tool_dir", _USER_TOOL_DIRS)
+    def test_nearest_marker_wins_over_dotfiles_git(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_dir: Path
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        (home / ".git").mkdir()
+        project = home / "code" / "p"
+        project.mkdir(parents=True)
+        (project / "apm.yml").write_text("name: p\n", encoding="utf-8")
+        git = _tool(home / tool_dir, "git")
+        monkeypatch.chdir(project)
+
+        with patch("os.get_exec_path", return_value=[str(home / tool_dir)]):
+            assert _resolve_trusted_executable("git") == str(git.resolve())
+
+    def test_marker_above_home_excludes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        (home.parent / ".git").mkdir()
+        git = _tool(home / ".local" / "bin", "git")
+        cwd = home / "work"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+
+        with patch("os.get_exec_path", return_value=[str(home / ".local" / "bin")]):
+            assert _resolve_trusted_executable("git") == str(git.resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_tool_only_inside_project_names_path_and_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        project = home / "code" / "p"
+        (project / ".git").mkdir(parents=True)
+        shadow = _tool(project / "bin", name)
+        monkeypatch.chdir(project)
+
+        with (
+            patch("os.get_exec_path", return_value=[str(project / "bin")]),
+            pytest.raises(FileNotFoundError) as excinfo,
+        ):
+            _resolve_trusted_executable(name)
+
+        message = str(excinfo.value)
+        assert f"{name} at {shadow.resolve()} is inside the project {project.resolve()}" in message
+        assert "Install" in message
+        assert message.isascii()
+
+    def test_get_git_executable_surfaces_project_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        project = home / "code" / "p"
+        (project / ".git").mkdir(parents=True)
+        _tool(project / "bin", "git")
+        monkeypatch.chdir(project)
+        reset_git_cache()
+
+        with (
+            patch("os.get_exec_path", return_value=[str(project / "bin")]),
+            pytest.raises(FileNotFoundError) as excinfo,
+        ):
+            get_git_executable()
+
+        assert "is inside the project" in str(excinfo.value)
+        assert "Please install git" not in str(excinfo.value)
+
+    def test_tool_inside_and_outside_project_resolves_outside(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = self._layout(tmp_path, monkeypatch)
+        project = home / "code" / "p"
+        project.mkdir(parents=True)
+        (project / "apm.yml").write_text("name: p\n", encoding="utf-8")
+        _tool(project / "bin", "git")
+        outside = _tool(home / ".local" / "bin", "git")
+        monkeypatch.chdir(project)
+
+        with patch(
+            "os.get_exec_path",
+            return_value=[str(project / "bin"), str(home / ".local" / "bin")],
+        ):
+            assert _resolve_trusted_executable("git") == str(outside.resolve())
+
+    def test_trusted_path_environment_keeps_home_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.utils.git_env import trusted_path_environment
+
+        home = self._layout(tmp_path, monkeypatch)
+        (home / ".git").mkdir()
+        bin_dir = home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        cwd = home / "work"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+
+        env = trusted_path_environment({"PATH": str(bin_dir)})
+
+        assert env["PATH"] == str(bin_dir.resolve())
+
+
 class TestGitSubprocessEnv:
     """Test environment sanitization."""
 
