@@ -463,7 +463,7 @@ W3d ruled them in row `w3d:ruling:v040-gaps`; the wording below is W3d's.
 ## 6. Linux bar -- REGENT RULING (approved, via PERF VP 03:25 CET)
 "L <= 3.5 s stays the North Star; v0.40 ships the Python manifest architecture at a measured ~4.3 s L milestone."
 - Measured basis: the stacked ceiling, L 0.701, ~4.3 s on 9V74 [45530064444].
-- The native-core gate is MET: walk+stat+hash+copy = 45% of L CPU (65% with realpath; hash 0.2%) [45520769932 / 45530101839].
+- The native-core gate read as MET: walk+stat+hash+copy = 45% of L CPU (65% with realpath; hash 0.2%) [45520769932 / 45530101839]. Superseded: that gate counted fs-named Python frames, not syscall CPU; the zero-cost oracles free ~5% (section 8).
 - The native filesystem-op core is a RESEARCH lane (Lane N, section 7). It is not part of the v0.40 commitment.
 - Alternative considered, not chosen: revise the L bar to ~4.3 s with no native lane.
 W: stacked ceiling 0.568 vs main+#5374 [45532025700]; ~6.0 s on 9V74 (schannel calibration [45534359514]): AT the 7.5 s target. On the slowest runner class (7763) it is ~8.3-8.6 s.
@@ -613,7 +613,17 @@ Lane N method (approved 03:50 CET; plan: SoL lane-n-plan.md):
 - frozen + MCP decline (trace artifact);
 - warm cache-hit remainder (~0.5 s W);
 - "lock-phase 21-23%" (confound).
+- Lane N zero-cost oracles (stacked heads, cold t50, 6 pairs, 18/18 valid; engagement proven per OS by served counts, trace 45540082415; on W resolve_path = realpath.py:235, the override after the win32 block, and the native _resolve_windows was called 0 times):
+  - O-resolve (every Path.resolve / os.path.realpath lexical): L 0.956 [45534288568] / W 0.954 [45534253181] / M 0.916 [45534321911]; ~0.19 s L at 9V74.
+  - O-walk2 (os.walk / scandir / listdir / glob / rglob served at zero cost in integrate): L 0.992 [45538269139] / W 0.987 [45538289388] / M 1.026 [45538306906]; ~0.03 s L at 9V74.
+  - Both are below the 0.5 s L bar. KILL decision pending the O-TIME whole-run absolute bound (CPU inside every walk/stat/exists/is_* primitive).
 - **Lessons:**
+  - attribution ranks, deletion sizes; 45% fs leaf-kind -> ~5% deletable. The 45% native-core gate counted fs-NAMED Python frames, not syscall CPU:
+    - kinds are mapped by frame-name substring (":resolve", ":read", ":stat", ":walk"...), which catches abspath (the ceiling's own lexical replacement), click's resolve, read_manifest_text, etc.;
+    - a leaf is the innermost Python frame including its own bytecode (pathlib wrappers inside per-file caller loops that a native walk does not remove);
+    - file_io is needed bytes and copy machinery (M2's lane);
+    - the sampler charges per-thread CPU deltas to the frame on top, which biases toward long-lived generator/wrapper frames.
+  - New rule: native only if a zero-cost oracle frees >= the bar.
   - re-measure ceilings on current main;
   - profiles rank, paired deletion sizes;
   - every headline claim needs one real-network confirmation (S88);

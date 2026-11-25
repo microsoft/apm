@@ -291,3 +291,12 @@
 04:11 | SoL Lane N: O-resolve L 0.956/W 0.954/M 0.916; O-walk v1 L 0.999/W 0.987/M 0.861 (memo ~0 CPU); O-walk2 in flight ~25 min; kill if <0.5 s L | SoL kill call + attribution reconcile | none
 04:13 | tick: main 1e4a208e unchanged; inbox silent; awaiting SoL O-walk2 (~04:40) | pulse+push ~04:25 | none
 04:15 | Bets pulse: train #5406 head 5c782a24 (8f56b436 interim-H8 fallback + #5419); #5382/#5377 inside; standby | none | none
+04:25 | pulse VP (Lane N first reads; kill default if O-walk2 <0.5 s); notes push 23c1092e | O-walk2 ~04:40 | none
+04:25 | VP ruling: Lane N kill stands if O-walk2 <0.5 s L, after per-OS engagement counts; replacement bet by deletion. Tasked SoL (counts), Bets (A import fork-server bound, B integrate pass-count deletion) | O-walk2 ~04:40; Bets A ~05:10, B ~05:25 | none
+04:29 | Bets probe arch-lanen-probe running (A1 importtime, A2 import-only, A3 fork-server L/M, B1 pass counter); W uses A2 proxy | Bets read ~04:55 | none
+04:34 | Bets A: fork-server deletion L 0.854 [45540258614] M 0.905 [45540273103]; importtime L 0.663s; L ~3.67s at 9V74 (not 3.5); fixture t10/t50 being confirmed; B counts 6.5x/2.9x/7.8x redundant; B = result-level dedup | B+combined ~05:30 | none
+04:36 | VP challenged A3 (read wrapper t10 row); traced: PROBE fork_oracle line t50/6 pairs (lanen_probe.py:20); Bets reruns A3 on 3 shards; LESSON: verify rows before forwarding | A3x3 + B ~05:40 | none
+04:36 | VP withdrew A3 rejection; A3 PROVISIONAL (1 shard); ORACLE-tagged row rule sent to Bets+SoL | A3x3 + B ~05:40 | none
+04:47 | tick: main 1e4a208e; inbox silent; O-walk2 not yet reported (due ~04:40, +6 min); Bets A3x3 + B in flight; tick prompt refreshed | SoL O-walk2; push ~04:55 | none
+04:47 | SoL O-walk2 L 0.992/W 0.987/M 1.026 (verified); engagement proven per OS; O-TIME absolute bound ~15 min then kill line | kill ~05:05 | none
+04:48 | Bets A3x3 verified: fork-server L 0.807 med (0.806-0.826) [45541271380], M 0.883 [45541286025]; L ~3.47 s at 9V74 = AT line; combined B+fork ~05:30 | O-TIME kill ~05:05; combined ~05:30 | none
