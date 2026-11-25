@@ -1,9 +1,18 @@
 """Keep ``apm_modules/`` out of git for project-scope installs (#3879)."""
 
+import os
 from pathlib import Path
 
 from ...constants import APM_MODULES_GITIGNORE_PATTERN, GITIGNORE_FILENAME
 from ...utils.console import _rich_info, _rich_warning
+
+
+def _newline(text: str) -> str:
+    """The file's own line ending (its first one), else the platform's (#5458)."""
+    end = text.find("\n")
+    if end < 0:
+        return os.linesep
+    return "\r\n" if end > 0 and text[end - 1] == "\r" else "\n"
 
 
 def update_gitignore_for_apm_modules(logger=None):
@@ -35,8 +44,9 @@ def update_gitignore_for_apm_modules(logger=None):
         from ...integration import write_seam
 
         # The full text, so the deploy journal knows the bytes it writes (#4863).
-        separator = "\n" if current_content and current_content[-1].strip() else ""
-        addition = f"{separator}\n# APM dependencies\n{apm_modules_pattern}\n"
+        nl = _newline(current_text)
+        separator = nl if current_content and current_content[-1].strip() else ""
+        addition = f"{separator}{nl}# APM dependencies{nl}{apm_modules_pattern}{nl}"
         write_seam.write_text(gitignore_path, current_text + addition, newline="")
 
         if logger:

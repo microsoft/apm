@@ -31,4 +31,4 @@ jobs:
       - run: uv sync --frozen --extra dev --quiet
       - name: RT3 cells
         shell: bash
-        run: uv run --frozen python -m pytest -p no:cacheprovider -p no:randomly -rA -v tests/unit/utils/test_rt3_windows_redteam.py -k gitignore
+        run: uv run --frozen python -m pytest -p no:cacheprovider -p no:randomly -rA -v tests/unit/utils/test_rt3_windows_redteam.py tests/unit/install/test_gitignore_line_endings.py -k 'gitignore or line_ending or platform_ending or mixed_file'
