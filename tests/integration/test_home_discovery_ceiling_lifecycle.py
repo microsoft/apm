@@ -7,6 +7,7 @@ CELL: OP=install SCOPE=project START=under-home STRAY=~/apm.yml|~/.claude
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -51,37 +52,72 @@ def _run(engine: tuple[str, ...], args: tuple[str, ...], cwd: Path, env: dict[st
 _APM_STATE = (
     ".apm/cache/",
     ".apm/locks/",
-    ".apm/deployment-receipts/",
     ".apm/.apm-lifecycle.lock",
     ".apm-local/",
     ".cache/",
 )
 
 
-def _home_tree(home: Path) -> dict[str, bytes]:
+def _home_tree(home: Path, skip: frozenset[str] = frozenset()) -> dict[str, bytes]:
     return {
-        path.relative_to(home).as_posix(): path.read_bytes()
+        rel: path.read_bytes()
         for path in sorted(home.rglob("*"))
-        if path.is_file() and not path.relative_to(home).as_posix().startswith(_APM_STATE)
+        if path.is_file()
+        and not (rel := path.relative_to(home).as_posix()).startswith(_APM_STATE)
+        and rel not in skip
+    }
+
+
+def _own_receipt(
+    home: Path, project: Path, environment: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> frozenset[str]:
+    """Relative path of the project's own deployment receipt, the one write a project install owns."""
+    from apm_cli.core.deployment_ledger import materialization_evidence_paths
+    from apm_cli.core.scope import InstallScope
+
+    monkeypatch.setenv("APM_HOME", environment["APM_HOME"])
+    receipt = materialization_evidence_paths(project, InstallScope.PROJECT)[0]
+    return frozenset({receipt.relative_to(home).as_posix()})
+
+
+def _outside(value: object, project: str) -> object:
+    """Drop every record keyed by a path inside *project* from parsed receipt JSON."""
+    if isinstance(value, dict):
+        return {
+            k: _outside(v, project)
+            for k, v in value.items()
+            if not (isinstance(k, str) and k.startswith(project))
+        }
+    if isinstance(value, list):
+        return [_outside(v, project) for v in value]
+    return value
+
+
+def _records_outside(home: Path, project: Path) -> dict[str, object]:
+    base = home / ".apm" / "deployment-receipts" / "config-files"
+    return {
+        path.name: _outside(json.loads(path.read_text(encoding="utf-8")), project.as_posix())
+        for path in sorted(base.glob("*.json"))
     }
 
 
 def test_a_project_install_under_home_ignores_a_stray_home_manifest(
-    tmp_path: Path, apm_engine_command: tuple[str, ...]
+    tmp_path: Path, apm_engine_command: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     isolated, environment, _ = _world(tmp_path)
     home_manifest = isolated.home / "apm.yml"
     home_manifest.write_text(STRAY_HOME_MANIFEST, encoding="utf-8")
     project = isolated.home / "work" / "newproj"
     (project / ".claude").mkdir(parents=True)
-    before = _home_tree(isolated.home)
+    own = _own_receipt(isolated.home, project, environment, monkeypatch)
+    before = _home_tree(isolated.home, own)
 
     result = _run(apm_engine_command, ("install", "../../src/pkgs/a"), project, environment)
 
     assert result.returncode == 0, _describe(result)
     assert (project / "apm.yml").is_file(), _describe(result)
     assert (project / ".claude" / "skills" / "a-skill").is_dir(), _describe(result)
-    after = _home_tree(isolated.home)
+    after = _home_tree(isolated.home, own)
     project_prefix = "work/newproj/"
     assert {k: v for k, v in after.items() if not k.startswith(project_prefix)} == {
         k: v for k, v in before.items() if not k.startswith(project_prefix)
@@ -105,7 +141,7 @@ def test_a_bare_install_in_an_empty_folder_under_home_reports_no_manifest(
 
 
 def test_a_project_install_after_a_global_install_leaves_home_alone(
-    tmp_path: Path, apm_engine_command: tuple[str, ...]
+    tmp_path: Path, apm_engine_command: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     isolated, environment, package = _world(tmp_path)
     work = isolated.home / "work"
@@ -119,7 +155,10 @@ def test_a_project_install_after_a_global_install_leaves_home_alone(
     project = work / "newproj"
     (project / ".claude").mkdir(parents=True)
     user_state = isolated.home / ".apm"
-    before = _home_tree(isolated.home)
+    own = _own_receipt(isolated.home, project, environment, monkeypatch)
+    own_receipt = isolated.home / next(iter(own))
+    before = _home_tree(isolated.home, own)
+    records_before = _records_outside(isolated.home, project.resolve())
     user_files = (user_state / "apm.yml", user_state / "apm.lock.yaml")
     assert all(f.is_file() for f in user_files)
     user_before = [f.read_bytes() for f in user_files]
@@ -129,10 +168,12 @@ def test_a_project_install_after_a_global_install_leaves_home_alone(
     assert result.returncode == 0, _describe(result)
     assert (project / "apm.yml").is_file(), _describe(result)
     project_prefix = "work/newproj/"
-    after = _home_tree(isolated.home)
+    assert own_receipt.is_file(), _describe(result)
+    after = _home_tree(isolated.home, own)
     assert {k: v for k, v in after.items() if not k.startswith(project_prefix)} == {
         k: v for k, v in before.items() if not k.startswith(project_prefix)
     }, _describe(result)
+    assert _records_outside(isolated.home, project.resolve()) == records_before, _describe(result)
     assert [f.read_bytes() for f in user_files] == user_before, _describe(result)
 
 

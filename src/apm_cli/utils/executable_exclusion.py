@@ -86,7 +86,7 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
     except OSError:
         return False
     if chain is None:
-        return same_directory(directory, home)
+        return any(same_directory(directory, level) for level in (home, *home.parents))
     return (wanted.st_dev, wanted.st_ino) in chain
 
 
