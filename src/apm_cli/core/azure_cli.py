@@ -62,6 +62,12 @@ class AzureCliBearerError(Exception):
 _SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
+def shadow_line(provider: object) -> str:
+    """Return the indented shadow notice for an error context, or ''."""
+    note = getattr(provider, "shadow_notice", None)
+    return f"\n    {note}\n" if isinstance(note, str) and note else ""
+
+
 class AzureCliBearerProvider:
     """Acquires Entra ID bearer tokens for Azure DevOps via the az CLI.
 
@@ -102,6 +108,11 @@ class AzureCliBearerProvider:
             from apm_cli.utils.git_env import trusted_executable
 
             self._az_command = trusted_executable(az_command)
+        self.shadow_notice: str | None = None
+        if self._az_command is None:
+            from apm_cli.utils.executable_exclusion import not_found_message
+
+            self.shadow_notice = not_found_message("", az_command) or None
         # Cache stores (token, expires_at_epoch_seconds). expires_at is None
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring
@@ -161,7 +172,7 @@ class AzureCliBearerProvider:
             # a hypothetical clear_cache + chdir/PATH change in another thread).
             if not self.is_available():
                 raise AzureCliBearerError(
-                    "az CLI is not installed or not on PATH",
+                    self.shadow_notice or "az CLI is not installed or not on PATH",
                     kind="az_not_found",
                 )
 
