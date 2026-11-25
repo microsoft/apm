@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, os.getcwd())
 from tests.benchmarks.journeys import Context, open_world, prepare_fixture  # noqa: E402
 
-FIXTURES = os.environ.get("DIFF_FIXTURES", "tree-50,tree-10-mcp,tree-10-multi,monorepo-4").split(",")
+FIXTURES = os.environ.get("DIFF_FIXTURES", "tree-50,tree-10-mcp,tree-10-multi,monorepo-4,tree-10-multi-policy,tree-50-policy").split(",")
 SKIP = {"apm_modules", ".git"}
 SKIP_FILES = {".apm-local/installation"}  # per-install id, random by design
 import difflib
