@@ -179,16 +179,21 @@ jobs:
         ORACLE_FIXTURE: ${{ matrix.fixture }}
         VENV_APM_REL: ${{ needs.request.outputs.venv_apm }}
         ORACLE_MODE: ${{ matrix.mode }}
+        BASE_SHA: ${{ needs.request.outputs.base }}
       run: |
         set +e
-        if [[ "$ORACLE_MODE" == lintprof ]]; then
+        if [[ "$ORACLE_MODE" == lintrow ]]; then
+          git -C "$GITHUB_WORKSPACE/harness" fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$BASE_SHA"
+          git -C "$GITHUB_WORKSPACE/harness" worktree add --quiet --detach "$GITHUB_WORKSPACE/base" FETCH_HEAD
+          BASE_ROOT="$GITHUB_WORKSPACE/base" NEW_ROOT="$GITHUB_WORKSPACE/new" PAIRS=3 python3 .github/probe/lint_row.py 2>&1 | tee oracle.log | tail -60
+        elif [[ "$ORACLE_MODE" == lintprof ]]; then
           LINT_ROOT="$GITHUB_WORKSPACE/new" "$GITHUB_WORKSPACE/new/$(dirname "$VENV_APM_REL")/python" .github/probe/lint_profile.py 2>&1 | tee oracle.log | tail -120
         elif [[ "$ORACLE_MODE" == census-* ]]; then
           CENSUS_JOURNEY="${ORACLE_MODE#census-}" uv run --frozen python .github/probe/write_census.py 2>&1 | tee oracle.log | tail -60
         else
           uv run --frozen python .github/probe/mutation_oracle.py 2>&1 | tee oracle.log | grep -E "^ORACLE" | grep -v "^ORACLE same" | tail -300
         fi
-        { echo "### Oracle $ORACLE_FIXTURE $ORACLE_MODE @ $NEW"; echo '```'; grep -E "^ORACLE (FINDING|positive|RESULT|ROW)|counts|baseline|NO BASELINE|reconverge" oracle.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        { echo "### Oracle $ORACLE_FIXTURE $ORACLE_MODE @ $NEW"; echo '```'; grep -E "^ORACLE (FINDING|positive|RESULT|ROW)|^LINTROW|counts|baseline|NO BASELINE|reconverge" oracle.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
     - if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
