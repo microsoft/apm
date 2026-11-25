@@ -672,7 +672,7 @@ def _journal(token: str) -> Iterator[None]:
     """APM writes inside an install whose deploy journal is *token*."""
     from apm_cli.integration import write_seam
 
-    def recorder(path, contents, expected=None) -> None:
+    def recorder(path, contents, expected=None, size=None) -> None:
         return None
 
     write_seam.listen(recorder, journal=token)

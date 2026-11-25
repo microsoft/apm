@@ -627,14 +627,15 @@ def test_a_staging_file_a_user_edits_after_the_kill_is_kept_and_reported(
     _abandoned(chain)
     staged = [p for p in chain.project.rglob("apm-atomic-*") if "pkg-new-skill" in p.parts]
     assert len(staged) == 1, "the kill left no single staging file in the new skill"
-    staged[0].write_text("my notes, written after the crash\n", encoding="utf-8")
+    edited = staged[0].read_text(encoding="utf-8") + "my notes, written after the crash\n"
+    staged[0].write_text(edited, encoding="utf-8")
 
     result = chain.run("install", *_SCAN.args)
 
     assert result.returncode == 0, _evidence(result)
     assert "it changed after the interrupted install" in _text(result), _evidence(result)
     assert _text(result).isascii(), _evidence(result)
-    assert staged[0].read_text(encoding="utf-8") == "my notes, written after the crash\n"
+    assert staged[0].read_text(encoding="utf-8") == edited
 
 
 def test_a_shared_config_without_its_baseline_is_kept_and_reported(

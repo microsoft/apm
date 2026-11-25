@@ -572,7 +572,7 @@ def test_a_user_edit_to_a_json_config_killed_before_its_seal_is_kept(
     config.parent.mkdir(parents=True)
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     # Killed after the write and before its post-write seal: no after-listener.
@@ -611,7 +611,7 @@ def test_a_user_edit_to_hook_settings_killed_before_their_seal_is_kept(
     ledger = {".claude/settings.json": compute_file_hash(settings)}
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     # Killed after the settings write and before its post-write seal.
@@ -640,7 +640,7 @@ def test_a_line_ending_only_edit_after_the_kill_is_kept(
     project.mkdir()
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write if sealed else None)
@@ -676,7 +676,7 @@ def test_each_seam_writer_expects_the_exact_bytes_it_leaves(tmp_path: Path, writ
     target = tmp_path / "f.txt"
     seen: list[str | None] = []
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         seen.append(expected)
 
     write_seam.listen(record)
@@ -699,7 +699,7 @@ def test_a_kill_before_a_repeated_write_starts_restores_the_sealed_bytes(
     project.mkdir()
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write)
@@ -901,7 +901,7 @@ def test_a_mode_set_through_the_seam_is_part_of_what_apm_wrote(
     project.mkdir()
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write)
@@ -1403,7 +1403,7 @@ def _kill_partway_through_rmtree(
         (Path(path) / "SKILL.md").unlink()
         raise _Killed
 
-    def record(path: Path, contents: bool, expected: str | None) -> None:
+    def record(path: Path, contents: bool, expected: str | None, size: int | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write)
@@ -2582,7 +2582,9 @@ def _shared_dir_install(apm_home: Path, project: Path, packages: int) -> Path:
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     shared = project / ".github" / "prompts"
 
-    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+    def record(
+        path: Path, contents: bool, expected: str | None = None, size: int | None = None
+    ) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write)
@@ -2649,7 +2651,9 @@ def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
     shared = project / ".github" / "prompts"
 
-    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+    def record(
+        path: Path, contents: bool, expected: str | None = None, size: int | None = None
+    ) -> None:
         journal.record(path, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write)
@@ -2715,7 +2719,9 @@ def _two_journal_bound_writes(apm_home: Path, project: Path, path: Path) -> Path
 
     journal = DeployJournal(apm_home / "install-snapshots", root=project)
 
-    def record(target: Path, contents: bool, expected: str | None = None) -> None:
+    def record(
+        target: Path, contents: bool, expected: str | None = None, size: int | None = None
+    ) -> None:
         journal.record(target, contents=contents, expected=expected)
 
     write_seam.listen(record, journal.after_write, journal=journal.token)
