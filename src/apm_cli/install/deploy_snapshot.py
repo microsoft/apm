@@ -172,7 +172,7 @@ class DeployJournal:
                     return base, candidate.relative_to(anchor).as_posix()
         return "root", str(path)
 
-    def _persist(self, unit: _Unit, expected: str | None = None) -> None:
+    def _persist(self, unit: _Unit, expected: str | None = None, size: int | None = None) -> None:
         """Write *unit* to the manifest before the install changes its path."""
         if self.root is None:
             return
@@ -191,6 +191,8 @@ class DeployJournal:
         }
         # The unit line also opens the first write: what it will leave there.
         line["expected"] = expected
+        if size is not None:
+            line["size"] = size
         if unit.copy is not None:
             line["mode"] = _modes.recorded_mode(unit.copy, unit.kind)  # never the copy's later bits
         if unit.kind == "file" and unit.copy is not None:
@@ -199,13 +201,21 @@ class DeployJournal:
             line["files"] = _tree_hashes(unit.copy)
         self._append_line(line)
 
-    def record(self, path: Path, *, contents: bool = True, expected: str | None = None) -> None:
+    def record(
+        self,
+        path: Path,
+        *,
+        contents: bool = True,
+        expected: str | None = None,
+        size: int | None = None,
+    ) -> None:
         """Keep the prior state of *path* the first time it is touched.
 
         With ``contents=False`` (a directory about to be created) only an absent path is recorded:
         creating an existing directory changes nothing. *expected* is the content hash the write
         will leave (``"absent"``, ``"dir"``, or ``None`` when the writer cannot know it); a write
-        killed before its seal is restored only over those bytes.
+        killed before its seal is restored only over those bytes. *size* is their byte length when
+        the writer knows it (#5411).
         """
         path = Path(os.path.abspath(path))
         with self._lock:
@@ -213,7 +223,7 @@ class DeployJournal:
                 return
             if self._covered(path):
                 # A later write to a journaled path: APM is about to change it.
-                self._event("pending", path, expected)
+                self._event("pending", path, expected, size)
                 return
             exists = os.path.lexists(path)
             if exists and not contents:
@@ -231,7 +241,7 @@ class DeployJournal:
                 else:
                     shutil.copy2(path, copy)
                     unit = _Unit(path, "file", copy, None, ancestors)
-            self._persist(unit, expected)
+            self._persist(unit, expected, size)
             self._recorded[path] = len(self._units)
             self._units.append(unit)
 
@@ -244,7 +254,9 @@ class DeployJournal:
                 return index, "" if rel == "." else rel
         return None
 
-    def _event(self, event: str, path: Path, expected: str | None = None) -> None:
+    def _event(
+        self, event: str, path: Path, expected: str | None = None, size: int | None = None
+    ) -> None:
         """Append a write event for *path*: ``pending`` before, ``sealed`` after."""
         if self.root is None or self.store is None:
             return
@@ -257,6 +269,8 @@ class DeployJournal:
             line["state"] = _state(path) if not sub else _entry(path)
         else:
             line["expected"] = expected
+            if size is not None:
+                line["size"] = size
         self._append_line(line)
 
     def after_write(self, path: Path) -> None:
@@ -477,7 +491,12 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
                 if type(index) is int and isinstance(sub, str)
                 else None
             )
-            state = ("pending", _pending(line)[1], last[2] if isinstance(last, tuple) else last)
+            state = (
+                "pending",
+                _pending(line)[1],
+                last[2] if isinstance(last, tuple) else last,
+                _pending(line)[3],
+            )
         if (
             type(index) is not int
             or not 0 <= index < len(units)
@@ -491,12 +510,15 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
     return units, events, commit
 
 
-def _pending(line: dict[str, Any]) -> tuple[str, str | None, Any]:
-    """A write APM began: ``("pending", <expected hash or None>, <last seal or None>)``."""
+def _pending(line: dict[str, Any]) -> tuple[str, str | None, Any, int | None]:
+    """A write APM began: ``("pending", <expected hash>, <last seal>, <expected size>)``."""
     expected = line.get("expected")
     if expected is not None and not isinstance(expected, str):
         raise ValueError("journal manifest holds a malformed expected hash")
-    return ("pending", expected, None)
+    size = line.get("size")
+    if size is not None and (type(size) is not int or size < 0):
+        raise ValueError("journal manifest holds a malformed expected size")
+    return ("pending", expected, None, size)
 
 
 _MARKS = frozenset({"pending", "sealed", "commit"})

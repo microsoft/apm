@@ -945,7 +945,9 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/write_seam.py",
-            "    record_before_write(destination, follow=True, expected=_file_hash(source))\n"
+            "    record_before_write(\n"
+            "        destination, follow=True, expected=_file_hash(source), size=_file_size(source)\n"
+            "    )\n"
             "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
             "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
             id="seam-writer-skips-record",
