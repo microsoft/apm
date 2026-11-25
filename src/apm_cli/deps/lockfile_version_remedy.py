@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import shlex
 from pathlib import Path
 
 _VERSION = re.compile(r"Unsupported lockfile version (.+?);")
@@ -47,7 +46,7 @@ def _with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
         # Under `apm install --root` a bare `apm install` would act on the source repo.
         deploy_dir = path.resolve().parent
         regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.resolve())
-        regen = regen.with_command(f"apm install --root {shlex.quote(str(deploy_dir))}")
+        regen = regen.with_command(f"apm install --root {deploy_dir}")
     else:
         regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
         if is_user_scope_root(path.parent):
