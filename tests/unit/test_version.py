@@ -64,14 +64,14 @@ class TestGetVersionImportlibMetadata:
             calls.append(name)
             return "2.7.1"
 
-        with patch.object(version_mod, "__BUILD_VERSION__", None):
-            with patch("sys.frozen", False, create=True):
-                with patch("importlib.metadata.version", first):
-                    assert [get_version() for _ in range(3)] == ["3.1.4"] * 3
-                assert calls == ["apm-cli"]
-                with patch("importlib.metadata.version", second):
-                    assert get_version() == "2.7.1"
-                assert calls == ["apm-cli", "apm-cli"]
+        assert version_mod.__BUILD_VERSION__ is None
+        with patch("sys.frozen", False, create=True):
+            with patch("importlib.metadata.version", first):
+                assert [get_version() for _ in range(3)] == ["3.1.4"] * 3
+            assert calls == ["apm-cli"]
+            with patch("importlib.metadata.version", second):
+                assert get_version() == "2.7.1"
+            assert calls == ["apm-cli", "apm-cli"]
 
     def test_importlib_metadata_legacy_pre38_path(self) -> None:
         """Line 34: Python < 3.8 falls back to importlib_metadata backport."""
