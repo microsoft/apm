@@ -1443,7 +1443,9 @@ class BaseIntegrator:
             #   Generic patterns like ``**/*.instructions.md`` would
             #   otherwise traverse every file in the repo even when
             #   the user only has a handful of primitives under .apm/.
-            if resolve_path(install_path) == resolve_path(home_root):
+            # Resolved once per call: both checks below ask the same question.
+            at_home = resolve_path(install_path) == resolve_path(home_root)
+            if at_home:
                 home_apm_root = install_path / ".apm"
                 scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
                 narrowed_local = False
@@ -1472,7 +1474,7 @@ class BaseIntegrator:
             # .apm/ and .github/. Skip only when scan_root was narrowed
             # to ~/.apm/ (user-scope $HOME) so we do not let asset links
             # escape the .apm/ boundary on $HOME packages.
-            if resolve_path(install_path) != resolve_path(home_root) and install_path.is_dir():
+            if not at_home and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
                     self.link_resolver.deployment_package_root = Path(
