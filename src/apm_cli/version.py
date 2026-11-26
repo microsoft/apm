@@ -10,6 +10,8 @@ from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 __BUILD_VERSION__ = None
 __BUILD_SHA__ = None
 
+_METADATA_VERSIONS: dict = {}
+
 
 def get_version() -> str:
     """
@@ -35,7 +37,13 @@ def get_version() -> str:
             else:
                 from importlib_metadata import PackageNotFoundError, version
 
-            return version("apm-cli")
+            # One distribution scan per process: a lockfile read stamps and checks
+            # this version every time (#5491). Keyed on the lookup itself, so a
+            # replaced ``importlib.metadata.version`` is asked again.
+            cached = _METADATA_VERSIONS.get(version)
+            if cached is None:
+                cached = _METADATA_VERSIONS[version] = version("apm-cli")
+            return cached
         except (ImportError, PackageNotFoundError):
             pass
 

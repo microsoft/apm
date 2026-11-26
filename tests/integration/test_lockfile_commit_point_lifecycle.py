@@ -334,8 +334,17 @@ def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install
     reported = audit.stdout + audit.stderr
     if change == "new-package":
         assert "./packages/delta: not found in lockfile" in reported, evidence(audit)
-    else:
-        assert "hash-drift: .github/agents/alpha.agent.md" in reported, evidence(audit)
+        # #5454: the next command restores the pre-install apm.yml and names the
+        # command that adds the package again, instead of locking the new package.
+        restored = world.install()
+        assert restored.returncode == 0, evidence(restored)
+        output = " ".join((restored.stdout + restored.stderr).split())
+        assert f"Run 'apm install {args[0]}' to add it again" in output, evidence(restored)
+        assert world.lockfile_bytes() == lock
+        assert not deployed.exists(), evidence(restored)
+        world.assert_converges()
+        return
+    assert "hash-drift: .github/agents/alpha.agent.md" in reported, evidence(audit)
 
     world.assert_converges()
     assert world.lockfile_bytes() != lock
