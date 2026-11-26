@@ -1409,12 +1409,19 @@ class BaseIntegrator:
             return False
 
     def init_link_resolver(
-        self, package_info, project_root: Path, *, target=None, source_plan=None
+        self,
+        package_info,
+        project_root: Path,
+        *,
+        target=None,
+        source_plan=None,
+        skill_pairing=None,
     ) -> None:
         """Initialise and register the link resolver for a package.
 
-        With *target* and *source_plan*, links to files a promoted skill of
-        the package deploys for *target* point at the deployed copy (#5523).
+        With *target* and *source_plan* (and the effective *skill_pairing*),
+        links to files a promoted skill of the package deploys for *target*
+        point at the deployed copy (#5523).
         """
         from apm_cli.utils.realpath import resolve_path
 
@@ -1478,7 +1485,7 @@ class BaseIntegrator:
                         from apm_cli.integration.skill_preflight import planned_skill_files
 
                         self.link_resolver.deployed_link_targets = planned_skill_files(
-                            package_info, target, project_root, source_plan
+                            package_info, target, project_root, source_plan, skill_pairing
                         )
         except Exception:
             self.link_resolver = None

@@ -437,3 +437,16 @@ def test_planned_skill_files_is_empty_for_unselected_skill_or_unknown_plan(tmp_p
 
     assert {path.parent.name for path in planned} == {"other"}
     assert planned_skill_files(info, target, project, None) == {}
+
+
+def test_planned_skill_files_honours_the_effective_pairing_for_the_target(tmp_path: Path):
+    """The caller's effective pairing, not the raw dependency one, narrows the plan."""
+    from apm_cli.models.dependency.subsets import SkillTargetSelection, SubsetPairing
+
+    info = _package(tmp_path)
+    project = tmp_path / "project"
+    pairing = SkillTargetSelection((SubsetPairing(("review",), ("claude",)),))
+
+    plan = _plan(info)
+    assert planned_skill_files(info, KNOWN_TARGETS["copilot"], project, plan, pairing) == {}
+    assert planned_skill_files(info, KNOWN_TARGETS["claude"], project, plan, pairing)
