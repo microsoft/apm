@@ -45,9 +45,11 @@ _VERSION = "0.2.1"
 _TAG = "v0.2.1"
 _CATALOG_REMOTE = f"https://{_HOST}/team/atlas-marketplace"
 _PLUGIN_REMOTE = f"https://{_HOST}/team/okf"
-_PACKAGE = "danielmeppiel/precedent"
-_ATLAS_PACKAGE = "sergio-sisternes-epam/atlas"
-_BASE_PACKAGE = "acme/base"
+# Every package lives on the hermetic host: a positional github.com package is
+# probed through the GitHub API, which ignores the test's url.insteadOf rewrite.
+_PACKAGE = f"{_HOST}/danielmeppiel/precedent"
+_ATLAS_PACKAGE = f"{_HOST}/sergio-sisternes-epam/atlas"
+_BASE_PACKAGE = f"{_HOST}/acme/base"
 _CATALOG_PATH = ".claude-plugin/marketplace.json"
 _FLAGS = ("--target", "codex", "--parallel-downloads", "0")
 _LEGACY_PIN = {f"{_ALIAS}/{_PLUGIN}/{_VERSION}": _TAG}
@@ -111,7 +113,9 @@ class _World:
         # precedent -> atlas (git) -> okf@atlas, as in the report.
         atlas = self._package(repos, "atlas", {"name": _PLUGIN, "marketplace": _ALIAS})
         repos.tag(atlas, "v0.13.1", repos.commit(atlas, message="atlas"))
-        precedent = self._package(repos, "precedent", {"git": _ATLAS_PACKAGE, "ref": "v0.13.1"})
+        precedent = self._package(
+            repos, "precedent", {"git": f"https://{_ATLAS_PACKAGE}", "ref": "v0.13.1"}
+        )
         repos.commit(precedent, message="precedent")
         # The reporter's project already had dependencies, so an apm.lock.yaml.
         base = self._package(repos, "base", None)
@@ -121,9 +125,9 @@ class _World:
             (
                 (okf, _PLUGIN_REMOTE),
                 (catalog, _CATALOG_REMOTE),
-                (atlas, f"https://github.com/{_ATLAS_PACKAGE}.git"),
-                (precedent, f"https://github.com/{_PACKAGE}.git"),
-                (base, f"https://github.com/{_BASE_PACKAGE}.git"),
+                (atlas, f"https://{_ATLAS_PACKAGE}"),
+                (precedent, f"https://{_PACKAGE}"),
+                (base, f"https://{_BASE_PACKAGE}"),
             )
         )
         self.apm_home = isolated.config_root
