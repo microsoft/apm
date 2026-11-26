@@ -867,10 +867,11 @@ def build_download_ref(
         elif not is_full_revision_pin(locked.resolved_commit):
             raise ValueError("remote source has no immutable locked commit")
 
-    if update_refs and is_full_revision_pin(dep_ref.fetch_commit):
-        # The update pinned this package's same-repository children to this
-        # commit while resolving (#5525); the package comes from it too.
-        return _dataclass_replace(dep_ref.source_reference, reference=dep_ref.fetch_commit)
+    fetch_commit = getattr(dep_ref, "fetch_commit", None)
+    if isinstance(fetch_commit, str) and is_full_revision_pin(fetch_commit):
+        # Resolution (update or --refresh) pinned this package's same-repository
+        # children to this commit (#5525); the package comes from it too.
+        return _dataclass_replace(dep_ref.source_reference, reference=fetch_commit)
 
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())

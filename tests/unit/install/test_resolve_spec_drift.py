@@ -208,8 +208,10 @@ def test_update_fetches_a_package_at_the_commit_its_same_repo_children_got() -> 
         is_virtual=True,
         fetch_commit=commit,
     )
-    updated = build_download_ref(dep, None, update_refs=True, ref_changed=False)
-    assert updated.reference == commit
+    for update_refs in (True, False):  # apm update, and install --refresh
+        updated = build_download_ref(dep, None, update_refs=update_refs, ref_changed=False)
+        assert updated.reference == commit
     assert dep.reference is None
-    # Outside an update the lock pin (or the selector) decides as before.
+    # Without a resolution-time pin the lock pin (or the selector) decides as before.
+    dep.fetch_commit = None
     assert build_download_ref(dep, None, update_refs=False, ref_changed=False).reference is None
