@@ -1053,8 +1053,8 @@ def _ref_commit_lookup(
                 lookup.repo_url, **_package_remote_access(lookup, auth_resolver)
             ):
                 listed[remote_ref.name] = remote_ref.sha.lower()
-        if ref.startswith("refs/tags/"):
-            return listed.get(ref)
+        if ref.startswith("refs/"):
+            return listed.get(ref) if ref.startswith("refs/tags/") else None
         if f"refs/heads/{ref}" in listed:
             return None
         return listed.get(f"refs/tags/{ref}")

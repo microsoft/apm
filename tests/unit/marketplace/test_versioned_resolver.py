@@ -401,6 +401,7 @@ def test_ref_commit_lookup_peels_tags_names_shas_and_ignores_branches():
         RemoteRef(name="refs/heads/main", sha="2" * 40),
         RemoteRef(name="refs/heads/release", sha="4" * 40),
         RemoteRef(name="refs/tags/release", sha=commit, peeled_sha=commit),
+        RemoteRef(name="refs/tags/refs/heads/main", sha=commit, peeled_sha=commit),
     ]
     with patch(
         "apm_cli.marketplace.version_resolver.list_package_refs", return_value=refs
@@ -413,6 +414,7 @@ def test_ref_commit_lookup_peels_tags_names_shas_and_ignores_branches():
         assert commit_of("main") is None
         assert commit_of("release") is None, "a name that is a branch and a tag is ambiguous"
         assert commit_of("refs/tags/release") == commit.lower()
+        assert commit_of("refs/heads/main") is None, "a qualified branch never reads a tag"
         assert commit_of("3" * 40) == "3" * 40
     assert listing.call_count == 1
     assert listing.call_args.args == ("acme/okf",)
