@@ -108,10 +108,13 @@ def planned_skill_files(
         return SkillIntegrator._target_skills_root(profile, project_root)
 
     skills_root = root_of(target)
-    # Group targets by shared skills root, as skill deployment does.
-    sharing = SkillIntegrator._skill_root_target_names(skill_targets or (target,), root_of).get(
-        skills_root.resolve(), (target.name,)
-    )
+    sharing: tuple[str, ...] = (target.name,)
+    if skill_pairing is not None and skill_targets:
+        # Group targets by shared skills root, as skill deployment does. Only a
+        # per-target pairing differs across them, so skip the resolves otherwise.
+        sharing = SkillIntegrator._skill_root_target_names(skill_targets, root_of).get(
+            skills_root.resolve(), sharing
+        )
     # The effective pairing deployment receives, not the raw dependency one.
     name_filter = SkillIntegrator._paired_name_filter(
         source_plan.selected_skill_names, skill_pairing, sharing
