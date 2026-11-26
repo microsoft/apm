@@ -53,3 +53,17 @@ class TestDeployedFileLinks:
             scratch / ".codex" / "agents" / "reviewer.toml",
         )
         assert result == "[demo](../../.agents/skills/demo/SKILL.md)"
+
+    def test_context_file_inside_deployed_skill_links_to_deployed_copy(self, tmp_path):
+        project, agent, resolver = self._world(tmp_path)
+        context = agent.parents[1] / "skills" / "demo" / "design.context.md"
+        context.write_text("x", encoding="utf-8")
+        resolver.deployed_link_targets[context.resolve()] = (
+            project / ".agents" / "skills" / "demo" / "design.context.md"
+        )
+        result = resolver.resolve_links_for_installation(
+            "[design](../skills/demo/design.context.md)",
+            agent,
+            project / ".github" / "agents" / "reviewer.agent.md",
+        )
+        assert result == "[design](../../.agents/skills/demo/design.context.md)"
