@@ -851,9 +851,9 @@ def build_download_ref(
         A :class:`DependencyReference` suitable for
         ``GitHubPackageDownloader.download_package``.
     """
-    if require_locked:
-        from apm_cli.deps.revision_pins import is_full_revision_pin
+    from apm_cli.deps.revision_pins import is_full_revision_pin
 
+    if require_locked:
         locked = (
             existing_lockfile.get_dependency(dep_ref.get_unique_key())
             if existing_lockfile is not None
@@ -866,6 +866,12 @@ def build_download_ref(
                 raise ValueError("registry source has no complete locked version, URL and hash")
         elif not is_full_revision_pin(locked.resolved_commit):
             raise ValueError("remote source has no immutable locked commit")
+
+    fetch_commit = getattr(dep_ref, "fetch_commit", None)
+    if isinstance(fetch_commit, str) and is_full_revision_pin(fetch_commit):
+        # Resolution (update or --refresh) pinned this package's same-repository
+        # children to this commit (#5525); the package comes from it too.
+        return _dataclass_replace(dep_ref.source_reference, reference=fetch_commit)
 
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())

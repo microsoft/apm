@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.deps.egress_route import EgressSurface, is_proxy_only
+from apm_cli.deps.revision_pins import is_full_revision_pin
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.outcome import integration_changed_files
 from apm_cli.install.phases._skip_logic import _compute_skip_download
@@ -190,6 +191,14 @@ def _resolve_download_strategy(
                 and not ref_changed
                 and not update_refs
             )
+        fetch_commit = getattr(dep_ref, "fetch_commit", None)
+        if isinstance(fetch_commit, str) and is_full_revision_pin(fetch_commit):
+            # #5525: its same-repo children were pinned to fetch_commit; reuse only that.
+            copy_check = bool(locked_dep) and locked_dep.resolved_commit == fetch_commit
+            if not copy_check:
+                # A moved commit is a changed ref (vetoes cache shortcuts, as branch_ref_drift).
+                ref_changed = True
+                ctx.expected_hash_change_deps.add(dep_key)
         if copy_check:
             # The canonical copy-validity owner decides (#3884): the resolver
             # gate and the parallel pre-download skip ask the same question.

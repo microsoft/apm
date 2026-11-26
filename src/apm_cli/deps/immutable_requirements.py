@@ -94,6 +94,8 @@ class ImmutableRequirements:
             or dep.artifactory_prefix
             or not dep.reference
             or dep.ref_kind == "semver"
+            # A commit inherited from the parent follows the parent's own requirement.
+            or dep.pinned_by_parent
         ):
             return
         parts = []

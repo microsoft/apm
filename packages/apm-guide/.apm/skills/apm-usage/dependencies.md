@@ -70,7 +70,8 @@ already trusts the layout.
 
 Remote-cloned packages may declare a relative `path:` only when it resolves
 inside the same authenticated remote repo root. APM expands that path to the
-parent's remote host/repo/ref and fetches the sibling from the same origin.
+parent's remote host/repo and fetches the sibling from the same origin at the
+commit the parent resolved at; the lockfile pins it to that commit.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
 
