@@ -31,3 +31,17 @@ def test_a_fifo_replacing_a_locked_file_is_unmanaged(tmp_path: Path, deployed: s
 
     assert not result.passed
     assert any(".claude/commands/run.md" in line for line in result.details)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+@pytest.mark.parametrize("named", [".claude/settings.local.json", ".claude/pipe"])
+def test_a_fifo_the_policy_names_is_unmanaged(tmp_path: Path, named: str) -> None:
+    """A special file named as a directories entry is reported, never skipped (#5472)."""
+    (tmp_path / ".claude").mkdir()
+    os.mkfifo(tmp_path / named)
+    policy = UnmanagedFilesPolicy(action="deny", directories=[named])
+
+    result = _check_unmanaged_files(tmp_path, None, policy)
+
+    assert not result.passed
+    assert result.details[0].startswith(f"{named} -- not tracked"), result.details

@@ -1,0 +1,28 @@
+{
+  "issue": 5472,
+  "fixed_in": "Unreleased",
+  "summary": "unmanaged_files.action: deny refused an install because of .claude/settings.local.json, the per-user file Claude Code writes itself; that file is now skipped by default with one info line unless the policy names it, while a user-authored file elsewhere under .claude/ is still refused.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_policy_promises.py::test_unmanaged_files_deny_skips_harness_owned_local_files",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_harness_local_settings_only_at_their_exact_path",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_governs_harness_local_settings_the_policy_names",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_governs_respelled_harness_local_names",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_skips_only_the_link_path_of_a_symlinked_harness_local_file",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_deny_never_relabels_a_path_through_a_symlinked_dir_as_exempt",
+    "tests/unit/policy/test_unmanaged_special_files.py::test_a_fifo_the_policy_names_is_unmanaged",
+    "tests/lifecycle/scenarios/test_policy_promises.py::test_unmanaged_files_warn_enforcement_audit_keeps_the_harness_local_skip_line",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_absolute_entry_inside_the_project_is_governed_as_relative",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_naming_a_path_through_a_symlinked_dir_never_governs_the_root_local_file",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_entry_outside_the_project_is_refused_by_name",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_a_governance_dir_linked_out_of_the_project_is_refused",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_outside_entry_is_refused_while_the_other_entries_are_scanned",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_an_absolute_entry_through_a_symlinked_dir_governs_the_file_it_walks",
+    "tests/unit/policy/test_policy_checks_io.py::TestUnmanagedFiles::test_projected_writes_follow_the_subtree_a_symlinked_entry_walks"
+  ]
+}

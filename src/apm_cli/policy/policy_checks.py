@@ -8,7 +8,6 @@ They are always run in addition to the baseline checks in ``ci_checks``.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +21,7 @@ from ..core.remediation import (
     REQUIRED_PACKAGE_UNLOCKED,
     UNMANAGED_FILE_TRACK,
 )
+from . import unmanaged_scan
 from .allowlist_remedy import with_allowlist_next_step as _advise
 from .models import (
     CheckResult,
@@ -1114,19 +1114,6 @@ def _check_scripts_policy(
     )
 
 
-_DEFAULT_GOVERNANCE_DIRS = [
-    ".github/agents",
-    ".github/instructions",
-    ".github/hooks",
-    ".cursor/rules",
-    ".claude",
-    ".opencode",
-    ".kiro",
-]
-
-
-_MAX_UNMANAGED_SCAN_FILES = 10_000
-
 # Appended once to a non-empty unmanaged-files report so a flagged file is
 # self-resolving: the reader learns how to track it or how to suppress it.
 _UNMANAGED_NEXT_ACTION = (
@@ -1168,21 +1155,6 @@ def _classify_primitive_type(rel_path: str) -> str | None:
     return None
 
 
-def _symlink_escapes_workspace(path: Path, project_root: Path) -> bool:
-    """Return True if *path* is a symlink resolving outside *project_root*.
-
-    Guards the traversal so a symlink pointing out of the workspace is never
-    followed (no traversal bomb); broken or looping links also count as
-    escaping and are skipped.
-    """
-    try:
-        resolved = path.resolve()
-        resolved.relative_to(project_root.resolve())
-        return False
-    except (OSError, RuntimeError, ValueError):
-        return True
-
-
 def _check_unmanaged_files(
     project_root: Path,
     lock: LockFile | None,
@@ -1216,7 +1188,6 @@ def _check_unmanaged_files(
             message="Unmanaged files check disabled (action: ignore)",
         )
 
-    dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
     exclude = policy.exclude or ()
 
     deployed: set[str] = set(verified_apm_hook_files(project_root, lock)) if lock else set()
@@ -1231,91 +1202,71 @@ def _check_unmanaged_files(
 
     dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    details: list[str] = []
-    unmanaged_count = 0
-    files_scanned = 0
-    cap_hit = False
-    flagged: set[str] = set()
-    for gov_dir in dirs:
-        dir_path = project_root / gov_dir
-        if not dir_path.exists() or not dir_path.is_dir():
-            continue
-        # os.walk(followlinks=False) never recurses INTO a directory symlink, so
-        # a symlinked dir resolving outside the workspace is never traversed
-        # (the house pattern from security/gate.py). File symlinks still appear
-        # in the listing and are guarded individually below.
-        for dirpath, _subdirs, filenames in os.walk(dir_path, followlinks=False):
-            for fname in filenames:
-                file_path = Path(dirpath) / fname
-                # File-symlink guard: never follow a link out of the workspace.
-                if file_path.is_symlink() and _symlink_escapes_workspace(file_path, project_root):
-                    continue
-                if file_path.is_dir():  # a FIFO or other special file is counted
-                    continue
-                files_scanned += 1
-                if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
-                    cap_hit = True
-                    break
-                rel = file_path.relative_to(project_root).as_posix()
-                if (rel in deployed or rel.startswith(dir_prefix_tuple)) and file_path.is_file():
-                    continue
-                if first_matching_pattern(rel, exclude) is not None:
-                    continue
-                primitive_type = _classify_primitive_type(rel)
-                deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
-                details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
-                flagged.add(rel)
-                unmanaged_count += 1
-            if cap_hit:
-                break
-        if cap_hit:
-            break
-
-    for rel in _unclaimed_projected_writes(
-        projected_writes, dirs, exclude, deployed, dir_prefix_tuple, flagged
-    ):
-        deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
-        details.append(_format_unmanaged_detail(rel, _classify_primitive_type(rel), deny_hit))
-        unmanaged_count += 1
-
-    if cap_hit:
+    scan = unmanaged_scan.scan_governed_files(project_root, policy.directories)
+    if scan.capped:
         return CheckResult(
             name="unmanaged-files",
             passed=True,
             message=(
-                f"Scan capped at {_MAX_UNMANAGED_SCAN_FILES:,} files "
+                f"Scan capped at {unmanaged_scan.MAX_UNMANAGED_SCAN_FILES:,} files "
                 "-- skipping unmanaged-files check"
             ),
             details=[
-                f"Governance directories contain > {_MAX_UNMANAGED_SCAN_FILES:,} files; "
+                f"Governance directories contain > {unmanaged_scan.MAX_UNMANAGED_SCAN_FILES:,} files; "
                 "consider adding exclude patterns in the unmanaged_files policy"
             ],
         )
 
-    if not details:
+    details: list[str] = []
+    flagged: set[str] = set(scan.exempt)
+    for rel, file_path in scan.files:
+        if (rel in deployed or rel.startswith(dir_prefix_tuple)) and file_path.is_file():
+            continue
+        if first_matching_pattern(rel, exclude) is not None:
+            continue
+        flagged.add(rel)
+        primitive_type = _classify_primitive_type(rel)
+        deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+        details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
+    for rel in _unclaimed_projected_writes(
+        projected_writes, scan.roots, exclude, deployed, dir_prefix_tuple, flagged
+    ):
+        deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+        details.append(_format_unmanaged_detail(rel, _classify_primitive_type(rel), deny_hit))
+    unmanaged_count = len(details)
+    notes = tuple(scan.notes)
+
+    if not details and not scan.refused:
         return CheckResult(
             name="unmanaged-files",
             passed=True,
             message="No unmanaged files in governance directories",
+            notes=notes,
         )
 
-    # One report carries a single next-action hint after the per-file lines.
-    details.append(_UNMANAGED_NEXT_ACTION)
+    # One report carries a single next-action hint after the per-file lines;
+    # a refused entry (outside the project) leads and names its own fix.
+    if details:
+        details.append(_UNMANAGED_NEXT_ACTION)
+    details[:0] = scan.refused
+    refusal = scan.refused[0] if scan.refused and not unmanaged_count else None
 
     if policy.effective_action == "warn":
         return CheckResult(
             name="unmanaged-files",
             passed=True,
-            message=f"{unmanaged_count} unmanaged file(s) found (warn)",
+            message=refusal or f"{unmanaged_count} unmanaged file(s) found (warn)",
             details=details,
+            notes=notes,
         )
 
     # action == "deny"
     return CheckResult(
         name="unmanaged-files",
         passed=False,
-        message=f"{unmanaged_count} unmanaged file(s) in governance directories",
+        message=refusal or f"{unmanaged_count} unmanaged file(s) in governance directories",
         details=details,
+        notes=notes,
     )
 
 

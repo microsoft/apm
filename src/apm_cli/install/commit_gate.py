@@ -877,12 +877,17 @@ def _report_install_policy_checks(
 ) -> None:
     """Report failed *checks* through the install policy reporter; refuse under ``block``.
 
+    Every check's informational ``notes`` print first, whatever the verdict.
+
     The reporter names the policy field and the fix. A ``--dry-run``
     previews the verdict and never stops.
     """
     from apm_cli.policy.install_preflight import emit_check_violations, render_dry_run_verdicts
     from apm_cli.policy.models import CIAuditResult
 
+    if logger is not None:
+        for note in (note for check in checks for note in check.notes):
+            logger.info(note)
     failed = [check for check in checks if not check.passed]
     if not failed:
         return

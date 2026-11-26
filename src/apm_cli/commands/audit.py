@@ -36,6 +36,7 @@ from ..utils.console import (
     _get_console,
     _rich_echo,
     _rich_error,
+    _rich_info,
     _rich_success,
     _rich_warning,
     ascii_safe,
@@ -571,6 +572,8 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     console = _get_console()
     for check in ci_result.checks:
         _render_coverage(check.coverage, CommandLogger("audit"))
+        for note in check.notes:
+            _rich_info(printable_ascii_text(note), symbol="info")
 
     if console:
         try:
@@ -909,6 +912,7 @@ def _audit_ci_gate(
                             + (" (enforcement: warn)" if not check.passed else ""),
                             details=check.details,
                             warned=not check.passed,
+                            notes=check.notes,
                         )
                     )
 
