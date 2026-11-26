@@ -402,9 +402,9 @@ A committed install records each plugin version's catalog ref under
 version). If the catalog later points that version at another commit, install
 refuses (exit 1) and names both refs; `apm update`, or
 `apm install <package> --accept-ref-change` for a plugin a new package brings,
-accepts the new ref. A ref naming the same commit as the pin (a tag and the
-SHA it peels to) is accepted and the pin moves to that commit; if the commit
-cannot be read, install still refuses. A raw
+accepts the new ref. A catalog SHA that the pinned tag peels to is the same
+commit: it is accepted and the pin moves to the SHA; if the commit cannot be
+read, install still refuses. A raw
 ref override (`version: main`) never checks or records a pin, and a failed or
 `--dry-run` install records nothing. Pins are scoped to the catalog (origin
 and path), not the marketplace name: re-adding a name for another catalog
