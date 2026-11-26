@@ -22,6 +22,7 @@
     "tests/unit/deps/test_same_repo_pin.py::test_the_inherited_marker_survives_nested_same_repo_children",
     "tests/unit/install/test_resolve_spec_drift.py::test_update_fetches_a_package_at_the_commit_its_same_repo_children_got",
     "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_refresh_moves_a_cached_plugin_with_its_files",
-    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_keeps_the_plugin_on_its_files_commit_after_a_branch_reset"
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_keeps_the_plugin_on_its_files_commit_after_a_branch_reset",
+    "tests/unit/install/test_resolve_spec_drift.py::test_a_cached_tag_copy_is_not_reused_once_resolution_moved_its_commit"
   ]
 }

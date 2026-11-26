@@ -215,3 +215,43 @@ def test_update_fetches_a_package_at_the_commit_its_same_repo_children_got() -> 
     # Without a resolution-time pin the lock pin (or the selector) decides as before.
     dep.fetch_commit = None
     assert build_download_ref(dep, None, update_refs=False, ref_changed=False).reference is None
+
+
+def test_a_cached_tag_copy_is_not_reused_once_resolution_moved_its_commit(tmp_path) -> None:
+    """#5525: a stale tagged copy must not pass the tag-cache shortcut."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.context import InstallContext
+    from apm_cli.install.phases.integrate import _resolve_download_strategy
+    from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+    locked, moved = "a" * 40, "b" * 40
+    dep = DependencyReference(
+        repo_url="acme/agents-marketplace",
+        host="gitlab.com",
+        reference="v1",
+        virtual_path="plugins/guild",
+        is_virtual=True,
+        fetch_commit=moved,
+    )
+    lock = LockFile()
+    row = LockedDependency.from_dependency_ref(dep, locked, 1, None)
+    lock.add_dependency(row)
+    (tmp_path / "apm.yml").write_text("name: app\n")
+    ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path)
+    ctx.existing_lockfile = lock
+    ctx.update_refs = False
+    ctx.logger = None
+    ctx.downloader = MagicMock()
+    ctx.downloader.resolve_git_reference.return_value = ResolvedReference(
+        "v1", GitReferenceType.TAG, moved, "v1"
+    )
+    install_path = tmp_path / "apm_modules" / "acme" / "agents-marketplace" / "plugins" / "guild"
+    install_path.mkdir(parents=True)
+
+    _resolved, skip_download, _locked, ref_changed = _resolve_download_strategy(
+        ctx, dep, install_path
+    )
+    assert (skip_download, ref_changed) == (False, True)
+    assert dep.get_unique_key() in ctx.expected_hash_change_deps
