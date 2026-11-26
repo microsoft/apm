@@ -306,8 +306,7 @@ def _resolve_package_references(
         # If input has no slash and is not a local path, check if it is a
         # marketplace ref (NAME@MARKETPLACE).  If so, resolve it to a
         # canonical owner/repo[#ref] string before entering the standard
-        # parse path.  Anything that doesn't match is rejected as an
-        # invalid format.
+        # parse path.  Anything that doesn't match is rejected as an invalid format.
         marketplace_provenance = None
         marketplace_dep_ref = None
         if "/" not in package and not DependencyReference.is_local_path(package):
@@ -1115,6 +1114,11 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.option(
+    "--accept-ref-change",
+    is_flag=True,
+    help="Accept marketplace plugins whose ref changed since it was pinned (a possible ref swap).",
+)
+@click.option(
     "--root",
     "root",
     type=click.Path(file_okay=False, resolve_path=True),
@@ -1167,6 +1171,7 @@ def install(  # noqa: PLR0913
     legacy_skill_paths,
     alias,
     trust_bin,
+    accept_ref_change,
     root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
@@ -1373,8 +1378,7 @@ def install(  # noqa: PLR0913
                     f"{either_sentence(REGISTRY_PACKAGE_INSTALL, BUNDLE_REPACK_PLUGIN)}"
                 )
         # IM8: --as is only meaningful for local-bundle installs.  If we get
-        # here, no local bundle was detected, so reject --as instead of
-        # silently ignoring it.
+        # here, no local bundle was detected, so reject --as instead of silently ignoring it.
         if alias:
             raise click.UsageError(
                 "--as requires a local bundle path (directory, .zip, or .tar.gz "
@@ -1520,6 +1524,7 @@ def install(  # noqa: PLR0913
             validation=None,
             logger=logger,
             acquire_lock=not dry_run,
+            accept_ref_changes=accept_ref_change,
         )
 
         if not apm_yml_exists and packages:

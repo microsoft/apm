@@ -70,6 +70,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "registration; the bound flow is executed by test_marketplace_hosted_catalog_auth_lifecycle",
     "marketplace-credential-rebind": _CONFIRM,
     "marketplace-ref-swap-accept": "test_marketplace_ref_swap_lifecycle asserts the printed next step; full sentence in test_remediation_gate9_call_sites",
+    "marketplace-ref-swap-accept-install": "installed-CLI remedy executed by "
+    "test_a_different_commit_is_refused_and_the_printed_install_accepts_it (#5526)",
 }
 
 
