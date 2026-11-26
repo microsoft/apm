@@ -22,6 +22,7 @@ from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
 from scripts.architecture_linter.checks.contracts_legacy import LEGACY_CHECKS
+from scripts.architecture_linter.checks.contracts_same_repo_pin import same_repo_pin_findings
 from scripts.architecture_linter.checks.contracts_strip_charset import (
     check_strip_charset_literals,
 )
@@ -551,8 +552,6 @@ def check_taxonomy_classification(provider: FactsProvider) -> tuple[Violation, .
 
 
 _IDENTITY_OWNER = "src/apm_cli/models/dependency/identity.py"
-
-
 _MATERIALIZATION_OWNER = "src/apm_cli/models/dependency/materialization.py"
 
 
@@ -560,8 +559,6 @@ _REFERENCE_OWNER = "src/apm_cli/models/dependency/reference.py"
 
 
 _RESOLVE_PHASE = "src/apm_cli/install/phases/resolve.py"
-
-
 _DOWNLOAD_PHASE = "src/apm_cli/install/phases/download.py"
 
 
@@ -698,6 +695,7 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Nested root package directories must be rejected via nested_materialization_pairs",
             )
         )
+    findings.extend([] if errors else same_repo_pin_findings(resolver, rule_id))
     # #3696: distinct packages sharing one host-blind directory are rejected by
     # the materialization owner before the resolver fetches or stages them.
     replacement_path = "src/apm_cli/models/dependency/replacement.py"

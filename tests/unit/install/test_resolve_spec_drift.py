@@ -196,3 +196,20 @@ class TestRefreshFlagWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_update_fetches_a_package_at_the_commit_its_same_repo_children_got() -> None:
+    """#5525: the resolver's update-time pin is the package's own fetch commit."""
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    dep = DependencyReference(
+        repo_url="acme/agents-marketplace",
+        host="gitlab.com",
+        virtual_path="plugins/guild",
+        is_virtual=True,
+        fetch_commit=commit,
+    )
+    updated = build_download_ref(dep, None, update_refs=True, ref_changed=False)
+    assert updated.reference == commit
+    assert dep.reference is None
+    # Outside an update the lock pin (or the selector) decides as before.
+    assert build_download_ref(dep, None, update_refs=False, ref_changed=False).reference is None

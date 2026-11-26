@@ -234,32 +234,41 @@ def test_update_moves_the_files_with_the_plugin(tmp_path: Path) -> None:
     assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v2")
 
 
+def _move_main_on_first_fetch(world: _World, *, before: bool) -> tuple[Path, Path]:
+    """Route git through a wrapper that moves the origin's main once.
+
+    The move happens on the client's first ``fetch`` or ``clone``: just
+    *before* it runs, or right after it. Returns ``(staged, moved)``: write
+    the target commit to *staged*; *moved* exists once the move happened.
+    """
+    staged = world.root / "staged-head"
+    moved = world.root / "moved"
+    real_git = shutil.which("git")
+    assert real_git
+    move = (
+        f'  if [ ! -e "{moved}" ]; then\n'
+        f'    touch "{moved}"\n'
+        f'    "{real_git}" --git-dir="{world.origin}" update-ref refs/heads/main '
+        f'"$(cat "{staged}")"\n'
+        "  fi;;\n"
+    )
+    hook = f'case " $* " in *" fetch "*|*" clone "*)\n{move}esac\n'
+    run = f'"{real_git}" "$@"\nstatus=$?\n'
+    wrapper_dir = world.root / "bin"
+    wrapper_dir.mkdir()
+    wrapper = wrapper_dir / "git"
+    body = hook + run if before else run + hook
+    wrapper.write_text(f"#!/bin/sh\n{body}exit $status\n", encoding="ascii")
+    wrapper.chmod(0o755)
+    world.env["PATH"] = f"{wrapper_dir}{os.pathsep}{world.env.get('PATH', '')}"
+    return staged, moved
+
+
 def test_files_come_from_the_plugin_commit_when_the_branch_moves(tmp_path: Path) -> None:
     # The client's first fetch or clone is the plugin's; right after it the
     # origin's main advances, before any file is fetched.
-    staged = tmp_path / "staged-head"
-    moved = tmp_path / "moved"
-    origin = tmp_path / "marketplace.git"
-    real_git = shutil.which("git")
-    assert real_git
-    wrapper_dir = tmp_path / "bin"
-    wrapper_dir.mkdir()
-    wrapper = wrapper_dir / "git"
-    wrapper.write_text(
-        "#!/bin/sh\n"
-        f'"{real_git}" "$@"\nstatus=$?\n'
-        'case " $* " in *" fetch "*|*" clone "*)\n'
-        f'  if [ ! -e "{moved}" ]; then\n'
-        f'    touch "{moved}"\n'
-        f'    "{real_git}" --git-dir="{origin}" update-ref refs/heads/main "$(cat "{staged}")"\n'
-        "  fi;;\n"
-        "esac\n"
-        "exit $status\n",
-        encoding="ascii",
-    )
-    wrapper.chmod(0o755)
     world = _world(tmp_path)
-    world.env["PATH"] = f"{wrapper_dir}{os.pathsep}{world.env.get('PATH', '')}"
+    staged, moved = _move_main_on_first_fetch(world, before=False)
     plugin_commit = world.head()
     staged.write_text(world.publish("v2"), encoding="ascii")
     _git("--git-dir", str(world.origin), "update-ref", "refs/heads/main", plugin_commit)
@@ -271,6 +280,27 @@ def test_files_come_from_the_plugin_commit_when_the_branch_moves(tmp_path: Path)
     _assert_no_cache_pin(result)
     _assert_pinned_to(world, plugin_commit)
     assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v1")
+
+
+def test_update_fetches_the_plugin_at_the_commit_its_files_got(tmp_path: Path) -> None:
+    # Under update the cached plugin's ref is re-resolved (the update's first
+    # clone) while its files are expanded; main moves right after that, before
+    # the plugin itself is fetched.
+    world = _world(tmp_path)
+    assert world.run("apm install").returncode == 0
+    resolved = world.publish("v2")
+    later = world.publish("v3")
+    _git("--git-dir", str(world.origin), "update-ref", "refs/heads/main", resolved)
+    staged, moved = _move_main_on_first_fetch(world, before=False)
+    staged.write_text(later, encoding="ascii")
+
+    result = world.run("apm update --yes")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert moved.exists(), "the update never fetched through git"
+    assert world.head() == later
+    _assert_no_cache_pin(result)
+    _assert_pinned_to(world, resolved)
+    assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v2")
 
 
 def test_lock_written_without_file_commits_heals_on_install(tmp_path: Path) -> None:

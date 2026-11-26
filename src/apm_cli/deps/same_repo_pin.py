@@ -28,6 +28,7 @@ def inherit_remote_parent_fields(
     virtual_path: str | None,
     reference: str | None,
     is_virtual: bool,
+    pinned_by_parent: bool = False,
 ) -> DependencyReference:
     """Return *child_dep* with remote identity inherited from *parent_dep*."""
     return replace(
@@ -52,6 +53,8 @@ def inherit_remote_parent_fields(
         is_parent_repo_inheritance=False,
         is_local=False,
         local_path=None,
+        pinned_by_parent=pinned_by_parent,
+        fetch_commit=None,
     )
 
 
@@ -70,7 +73,7 @@ def same_repo_child_reference(
 
     In order: the commit the parent was fetched at in this run; under an
     update that selects the parent (*refresh* given), the commit its selector
-    resolves to now, recorded on the parent so its own fetch reuses it; else
+    resolves to now, recorded on the parent so its own fetch uses it; else
     the parent lock row's commit while the parent's selector (a ref, or a
     semver range) is unchanged.
     Otherwise the parent's selector, so the child stays unpinned.
@@ -87,7 +90,9 @@ def same_repo_child_reference(
             return parent_dep.reference
         commit = _full_commit(resolved)
         if commit:
+            # The parent's own update fetch uses this commit too (drift.build_download_ref).
             parent_dep.resolved_reference = resolved
+            parent_dep.fetch_commit = commit
         return commit or parent_dep.reference
     locked = (
         existing_lockfile.get_dependency(parent_dep.get_unique_key())
