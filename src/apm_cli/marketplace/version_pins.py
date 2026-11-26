@@ -677,7 +677,8 @@ def enforce_ref_pin(
     """
     with _stage_lock:
         stage = _active_stage
-    accept_change = accept_change or (stage is not None and stage.accept_changes)
+    by_install_flag = not accept_change and stage is not None and stage.accept_changes
+    accept_change = accept_change or by_install_flag
     repair = False
     conflicting_pins: dict[str, str] | None = None
     try:
@@ -711,6 +712,9 @@ def enforce_ref_pin(
         previous_ref=previous_ref,
         conflicting_pins=conflicting_pins,
     )
+    if conflicting_pins and by_install_flag:
+        # ``apm update`` lists repaired pins in its plan; an install names them here.
+        return ", ".join(f"{alias}={pinned}" for alias, pinned in sorted(conflicting_pins.items()))
     return previous_ref
 
 
