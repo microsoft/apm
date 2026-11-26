@@ -1053,6 +1053,10 @@ def _ref_commit_lookup(
             if is_refused(EgressSurface.SOURCE_ENUMERATION):
                 return None  # PROXY_REGISTRY_ONLY: no direct listing; the pin refuses
             lookup = package_remote()
+            from ..policy.install_preflight import identity_policy_refuses
+
+            if identity_policy_refuses(lookup):
+                return None  # never contact a policy-denied source; the pin refuses
             for remote_ref in list_package_refs(
                 lookup.repo_url, **_package_remote_access(lookup, auth_resolver)
             ):

@@ -468,3 +468,19 @@ def test_an_install_accepting_ref_changes_warns_once_per_accepted_plugin(tmp_pat
         "Plugin alpha@test-mkt ref changed: was 'v1', now 'v2'. Accepted by --accept-ref-change.",
         "Plugin beta@test-mkt ref changed: was 'v8', now 'v9'. Accepted by --accept-ref-change.",
     ]
+
+
+def test_ref_commit_lookup_never_contacts_a_policy_denied_source():
+    """An org policy that denies the package identity refuses before any listing."""
+    from apm_cli.marketplace.resolver import _ref_commit_lookup
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    with (
+        patch("apm_cli.policy.install_preflight.identity_policy_denial", return_value="denied"),
+        patch("apm_cli.marketplace.version_resolver.list_package_refs") as listing,
+    ):
+        commit_of = _ref_commit_lookup(
+            lambda: DependencyReference.parse("acme/okf"), auth_resolver=None
+        )
+        assert commit_of("v0.2.1") is None
+    listing.assert_not_called()
