@@ -418,3 +418,18 @@ def test_ref_commit_lookup_peels_tags_names_shas_and_ignores_branches():
         assert commit_of("3" * 40) == "3" * 40
     assert listing.call_count == 1
     assert listing.call_args.args == ("acme/okf",)
+
+
+def test_ref_commit_lookup_lists_nothing_when_registry_only(monkeypatch):
+    """PROXY_REGISTRY_ONLY refuses source listing: a tag names no commit, the pin refuses."""
+    from apm_cli.marketplace.resolver import _ref_commit_lookup
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+    with patch("apm_cli.marketplace.version_resolver.list_package_refs") as listing:
+        commit_of = _ref_commit_lookup(
+            lambda: DependencyReference.parse("acme/okf"), auth_resolver=None
+        )
+        assert commit_of("v0.2.1") is None
+        assert commit_of("5" * 40) == "5" * 40
+    listing.assert_not_called()

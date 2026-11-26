@@ -1048,6 +1048,10 @@ def _ref_commit_lookup(
         if is_full_commit_sha(ref):
             return ref.lower()
         if not listed:
+            from ..deps.egress_route import EgressSurface, is_refused
+
+            if is_refused(EgressSurface.SOURCE_ENUMERATION):
+                return None  # PROXY_REGISTRY_ONLY: no direct listing; the pin refuses
             lookup = package_remote()
             for remote_ref in list_package_refs(
                 lookup.repo_url, **_package_remote_access(lookup, auth_resolver)
