@@ -397,8 +397,8 @@ def test_a_tag_pin_and_the_sha_it_peels_to_migrate_the_pin_to_the_commit(tmp_pat
 
     assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": _TAG_COMMIT}
     out = " ".join(capsys.readouterr().out.split())
-    assert out.count("same commit") == 1, out
-    assert f"recorded ref 'v0.2.1' is the same commit as '{_TAG_COMMIT}'" in out
+    assert out.count("pin moved") == 1, out
+    assert "okf@atlas: pin moved from tag 'v0.2.1' to commit 5246f7b (same code), recorded." in out
     assert lookup.calls.count("v0.2.1") == 1, "the second resolution reused the match"
 
 

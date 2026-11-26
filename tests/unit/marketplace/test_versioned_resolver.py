@@ -433,3 +433,38 @@ def test_ref_commit_lookup_lists_nothing_when_registry_only(monkeypatch):
         assert commit_of("v0.2.1") is None
         assert commit_of("5" * 40) == "5" * 40
     listing.assert_not_called()
+
+
+def test_an_install_accepting_ref_changes_warns_once_per_accepted_plugin(tmp_path):
+    """``--accept-ref-change`` is blanket, so each accepted pin prints its own line."""
+    from apm_cli.marketplace.version_pins import open_ref_pin_stage, save_ref_pins
+
+    plugins = (
+        _make_plugin(name="alpha", repo="acme-org/alpha", source_ref="v2"),
+        _make_plugin(name="beta", repo="acme-org/beta", source_ref="v9"),
+    )
+    manifest = MarketplaceManifest(name="test-mkt", plugins=plugins, plugin_root="")
+    save_ref_pins({"test-mkt/alpha": "v1", "test-mkt/beta": "v8"}, pins_dir=str(tmp_path))
+    captured: list[str] = []
+    stage = open_ref_pin_stage(accept_changes=True)
+    try:
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name", return_value=_make_source()
+            ),
+            patch("apm_cli.marketplace.resolver.fetch_or_cache", return_value=manifest),
+            patch(
+                "apm_cli.marketplace.version_pins._pins_path",
+                return_value=str(tmp_path / "version-pins.json"),
+            ),
+            patch("apm_cli.marketplace.source_identity.catalog_pin_identity", return_value=""),
+        ):
+            for plugin in plugins:
+                resolve_marketplace_plugin(plugin.name, "test-mkt", warning_handler=captured.append)
+    finally:
+        stage.discard()
+    changed = [line for line in captured if "ref changed" in line]
+    assert changed == [
+        "Plugin alpha@test-mkt ref changed: was 'v1', now 'v2'. Accepted by --accept-ref-change.",
+        "Plugin beta@test-mkt ref changed: was 'v8', now 'v9'. Accepted by --accept-ref-change.",
+    ]

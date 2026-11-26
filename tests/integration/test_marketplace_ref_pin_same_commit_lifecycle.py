@@ -187,10 +187,10 @@ def test_a_tag_pin_and_the_sha_it_peels_to_install_and_migrate_the_pin(
 
     text = _text(installed)
     assert "ref swap" not in text, _evidence(installed)
-    assert text.count("same commit") == 1, _evidence(installed)
+    assert text.count("pin moved from tag") == 1, _evidence(installed)
     assert (
-        f"[i] Plugin {_PLUGIN}@{_ALIAS}: recorded ref '{_TAG}' is the same commit as "
-        f"'{world.released}'; accepted, and the install records it as the pin." in text
+        f"[i] {_PLUGIN}@{_ALIAS}: pin moved from tag '{_TAG}' to commit "
+        f"{world.released[:7]} (same code), recorded." in text
     ), _evidence(installed)
     assert world.pinned() == {_PIN_KEY: world.released}
     assert world.locked_commit() == world.released
@@ -200,7 +200,7 @@ def test_a_tag_pin_and_the_sha_it_peels_to_install_and_migrate_the_pin(
     # I2: the converged install changes no bytes and says nothing about the pin.
     before = world.snapshot()
     again = world.apm("install", *_FLAGS)
-    assert "same commit" not in _text(again), _evidence(again)
+    assert "pin moved" not in _text(again), _evidence(again)
     assert world.snapshot() == before, "I2: a converged install changed durable state"
 
 
