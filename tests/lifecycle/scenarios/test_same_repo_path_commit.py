@@ -38,6 +38,7 @@ pytestmark = [
 REMOTE = "https://gitlab.com/acme/agents-marketplace"
 LOOSE = "https://gitlab.com/acme/loose-prompts"
 PLUGIN = "plugins/guild"
+OTHER = "plugins/other"
 PROMPT = f"{PLUGIN}/prompts/review.prompt.md"
 AGENT = f"{PLUGIN}/agents/reviewer.agent.md"
 DEPLOYED_PROMPT = ".github/prompts/review.prompt.md"
@@ -126,6 +127,11 @@ def _world(tmp_path: Path, *, loose: bool = False):
             f"{PLUGIN}/apm.yml": plugin_manifest,
             PROMPT: _prompt("v1"),
             AGENT: "---\ndescription: reviewer\n---\n\nYou review.\n",
+            # A second plugin that lists the first plugin's prompt.
+            f"{OTHER}/apm.yml": (
+                "name: acme-other\nversion: 1.0.0\ndependencies:\n  apm:\n"
+                "    - ../guild/prompts/review.prompt.md\n"
+            ),
         },
     )
     rewrites = {f"url.{origin.as_uri()}.insteadOf": (f"{REMOTE}.git", REMOTE)}
@@ -280,12 +286,39 @@ def test_lock_written_without_file_commits_heals_on_install(tmp_path: Path) -> N
             row.pop("resolved_ref", None)
     lock_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
+    # --frozen never rewrites the lock; the old rows stay installable.
+    frozen = world.run("apm install --frozen")
+    assert frozen.returncode == 0, frozen.stdout + frozen.stderr
+
     result = world.run("apm install")
     assert result.returncode == 0, result.stdout + result.stderr
     _assert_no_cache_pin(result)
     _assert_pinned_to(world, head)
     audit = world.run("apm audit --ci")
     assert audit.returncode == 0, audit.stdout + audit.stderr
+
+
+def test_two_plugins_sharing_a_file_at_different_commits_install(tmp_path: Path) -> None:
+    # The second plugin resolves at a newer commit than the locked first one;
+    # an inherited commit is not a user pin, so the shared file is no conflict.
+    world = _world(tmp_path)
+    first = world.head()
+    assert world.run("apm install").returncode == 0
+    second = world.publish("v2")
+    manifest = yaml.safe_load((world.project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append({"git": f"{REMOTE}.git", "path": OTHER})
+    (world.project / "apm.yml").write_text(yaml.safe_dump(manifest, sort_keys=False), "utf-8")
+
+    result = world.run("apm install")
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_no_cache_pin(result)
+    rows = world.rows()
+    assert rows[f"acme/agents-marketplace/{PLUGIN}"]["resolved_commit"] == first
+    assert rows[f"acme/agents-marketplace/{OTHER}"]["resolved_commit"] == second
+    # One shared row; its commit names the bytes deployed from it.
+    shared = rows[f"acme/agents-marketplace/{PROMPT}"]["resolved_commit"]
+    label = {first: "v1", second: "v2"}[shared]
+    assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt(label)
 
 
 def test_a_file_with_no_known_commit_still_warns(tmp_path: Path) -> None:

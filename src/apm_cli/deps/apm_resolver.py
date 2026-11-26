@@ -540,20 +540,19 @@ class APMDependencyResolver:
         resolved = ensure_path_within(parent_source / local_path, repo_root)
         virtual_path = resolved.relative_to(repo_root).as_posix()
         if virtual_path in ("", "."):
-            return inherit_remote_parent_fields(
+            virtual_path = None
+        else:
+            validate_path_segments(virtual_path, context="same-repo path")
+        reference = self._same_repo_child_reference(parent_dep)
+        return replace(
+            inherit_remote_parent_fields(
                 parent_dep,
                 child_dep,
-                virtual_path=None,
-                reference=self._same_repo_child_reference(parent_dep),
-                is_virtual=False,
-            )
-        validate_path_segments(virtual_path, context="same-repo path")
-        return inherit_remote_parent_fields(
-            parent_dep,
-            child_dep,
-            virtual_path=virtual_path,
-            reference=self._same_repo_child_reference(parent_dep),
-            is_virtual=True,
+                virtual_path=virtual_path,
+                reference=reference,
+                is_virtual=virtual_path is not None,
+            ),
+            pinned_by_parent=reference != parent_dep.reference,
         )
 
     def _reject_remote_parent_local_path(

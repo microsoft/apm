@@ -733,6 +733,8 @@ version: 1.0.0
             )
             self.assertIsNotNone(child)
             self.assertEqual(child.dependency_ref.reference, commit)
+            # An inherited commit is not a pin the user declared (immutable checks skip it).
+            self.assertTrue(child.dependency_ref.pinned_by_parent)
             self.assertEqual(fetched, [None, commit])
 
     def test_remote_parent_path_escape_outside_repo_root_is_rejected(self):
