@@ -87,3 +87,22 @@ def test_planned_skill_files_honours_the_effective_pairing_for_the_target(tmp_pa
     claude = planned_skill_files(info, KNOWN_TARGETS["claude"], project, plan, pairing)
     assert claude
     assert all(path.is_file() for path in claude)
+
+
+def test_planned_skill_files_unions_pairings_of_targets_sharing_a_skills_root(tmp_path: Path):
+    """Deployment fills a shared root with every sharing target's skills (#5529 follow-up)."""
+    from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+    info = _package(tmp_path)
+    project = tmp_path / "project"
+    copilot, codex = KNOWN_TARGETS["copilot"], KNOWN_TARGETS["codex"]
+    assert copilot.skills_rel_root == codex.skills_rel_root
+    pairing = merge_edge_pairings([(["other"], ["copilot"]), (["review"], ["codex"])])
+    plan = _plan(info)
+
+    alone = planned_skill_files(info, copilot, project, plan, pairing)
+    shared = planned_skill_files(info, copilot, project, plan, pairing, [copilot, codex])
+
+    assert alone == {}
+    assert {destination.parent.name for destination in shared.values()} == {"review"}
+    assert all(source.is_file() for source in shared)

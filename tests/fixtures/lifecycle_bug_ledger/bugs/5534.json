@@ -1,0 +1,15 @@
+{
+  "issue": 5534,
+  "fixed_in": "Unreleased",
+  "summary": "With distinct per-target skill pairings whose targets share one skills root (Copilot pairs other-skill, Codex pairs demo-skill, both under .agents/skills), every agent now links the deployed demo-skill instead of the Copilot agent linking gitignored apm_modules/, because the link plan groups targets by shared root exactly as skill deployment does.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_sibling_skill_agent_link_lifecycle.py::test_agent_link_to_sibling_skill_resolves_on_a_fresh_clone",
+    "tests/unit/integration/test_planned_skill_files.py::test_planned_skill_files_unions_pairings_of_targets_sharing_a_skills_root"
+  ]
+}
