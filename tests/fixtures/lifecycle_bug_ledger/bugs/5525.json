@@ -1,0 +1,20 @@
+{
+  "issue": 5525,
+  "fixed_in": "Unreleased",
+  "summary": "A remote plugin's self-listed prompt and agent files were fetched by branch name and, on hosts without a commits API, locked without resolved_commit, so every install warned cache-pin per file; each file is now fetched at the commit its plugin resolved at and locks that commit.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_self_listed_files_lock_the_plugin_commit",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_moves_the_files_with_the_plugin",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_files_come_from_the_plugin_commit_when_the_branch_moves",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_lock_written_without_file_commits_heals_on_install",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_a_file_with_no_known_commit_still_warns",
+    "tests/unit/deps/test_same_repo_pin.py::test_the_commit_the_parent_was_fetched_at_wins",
+    "tests/unit/deps/test_apm_resolver.py::TestRemoteParentLocalPathFailClosed::test_remote_parent_same_repo_file_is_fetched_at_the_parent_commit"
+  ]
+}
