@@ -116,22 +116,53 @@ def release_attested(held: Any) -> bool:
 
 
 def refuse_frozen_drift(project_root: Path) -> None:
-    """The frozen preflight owner itself (InstallService.enforce_frozen), live."""
+    """The frozen preflight owner itself (InstallService.enforce_frozen), live.
+
+    Its notices are taped, not printed: the render replays them at the full run's
+    print point (``replay_frozen_notices``), so one judgment serves both (#5491).
+    """
     from apm_cli.core.scope import InstallScope, manifest_file
     from apm_cli.install.diff_apply import Decline
     from apm_cli.install.errors import FrozenInstallError
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
+    from apm_cli.integration.mcp_config_view import PreflightNoticeTape
     from apm_cli.models.apm_package import APMPackage
 
+    _FROZEN_NOTICES.pop(str(project_root), None)
     manifest = APMPackage.from_apm_yml(manifest_file(project_root))
+    tape = PreflightNoticeTape()
     try:
         request = InstallRequest.frozen_preflight(
-            manifest, scope=InstallScope.PROJECT, speculative=True
+            manifest, scope=InstallScope.PROJECT, logger=tape, speculative=True
         )
         InstallService.enforce_frozen(request, allow_pending_mcp=True)  # a bare install
     except FrozenInstallError:
         raise Decline("frozen preflight") from None  # the full run renders the refusal
+    _FROZEN_NOTICES[str(project_root)] = tape.calls
+
+
+_FROZEN_NOTICES: dict[str, list[tuple[str, str]]] = {}
+
+
+def take_frozen_notices(project_root: Path) -> list[tuple[str, str]] | None:
+    """This run's taped frozen preflight notices (consumed), or None."""
+    return _FROZEN_NOTICES.pop(str(project_root), None)
+
+
+def replay_frozen_notices(calls: list[tuple[str, str]], logger: Any) -> None:
+    """Print taped frozen preflight notices on *logger*, in order.
+
+    A taped trust notice goes through its owner's dedupe now, as the preflight's
+    own print would have (mcp_config_view._progress_trust_once).
+    """
+    from apm_cli.integration import mcp_config_view
+
+    for name, message in calls:
+        if name == "trust_once":
+            mcp_config_view._progress_trust_once(logger, message)
+        else:
+            getattr(logger, name)(message)
 
 
 # Every frozen-only owner, classified for a frozen hit served by an attestation

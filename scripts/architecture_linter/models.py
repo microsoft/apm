@@ -231,3 +231,28 @@ class RunReport:
     group_results: tuple[GroupResult, ...]
     metrics: RunMetrics
     exit_code: int
+
+
+@dataclass(frozen=True)
+class PartialRun:
+    """One process's share of a run, before :func:`runner.merge_partial_runs`.
+
+    A single-process run is exactly one partial covering every group; the
+    parallel driver merges one partial per worker. ``startup_failures`` are
+    computed identically by every partial (inventory, catalog, registry and
+    selection checks), while violations, rule failures, guard hits and
+    read/parse failures belong to the groups this partial executed.
+    """
+
+    groups: tuple[str, ...]
+    rule_selection: bool
+    inventory_ok: bool
+    inventory_digest: str
+    startup_failures: tuple[Failure, ...]
+    violations: tuple[Violation, ...]
+    rule_failures: tuple[Failure, ...]
+    io_failures: tuple[Failure, ...]
+    group_results: tuple[GroupResult, ...]
+    guard_hits: tuple[tuple[str, int], ...]
+    registered_guard_ids: tuple[str, ...] | None
+    metrics: RunMetrics

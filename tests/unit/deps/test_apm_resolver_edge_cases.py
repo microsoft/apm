@@ -1018,14 +1018,20 @@ class TestPortableAnchorIdentity:
         identity = APMDependencyResolver._portable_anchor_identity(anchored, base)
         assert identity == "child/grandchild"
 
-    def test_out_of_project_dep_falls_back_to_absolute_posix(self, tmp_path: Path) -> None:
+    def test_out_of_project_dep_without_repo_is_relative_below_home_and_root(
+        self, tmp_path: Path
+    ) -> None:
+        """#5418 no-repo amendment: tmp_path is neither /, a drive root, nor HOME or above.
+
+        HOME or above, and the filesystem root, keep the absolute identity:
+        ``TestRepositoryRelativeAnchorIdentity`` in test_apm_resolver_helpers.py
+        holds those cells.
+        """
         base = tmp_path / "proj"
         base.mkdir()
         outside = tmp_path / "elsewhere" / "pkg"
         identity = APMDependencyResolver._portable_anchor_identity(outside, base)
-        # Out-of-project local deps cannot be committed portably; a stable
-        # absolute POSIX identity is the honest fallback, not a fabricated one.
-        assert identity == outside.resolve().as_posix()
+        assert identity == "../elsewhere/pkg"
 
     def test_unknown_base_falls_back_to_absolute_posix(self, tmp_path: Path) -> None:
         anchored = tmp_path / "child"

@@ -148,6 +148,32 @@ def not_found_message(default: str, *names: str) -> str:
     return next((_last_shadow[n] for n in names if n in _last_shadow), default)
 
 
+def is_home_or_above(directory: Path, home: Path) -> bool:
+    """Whether resolved *directory* is resolved *home* or one of its ancestors, by identity.
+
+    The one HOME bound (#5470): such a directory is never a project, so a
+    ``.git`` or manifest there (a dotfiles repo, a stray marker) is skipped,
+    and a #5418 lockfile identity never climbs to it. A spelling that differs
+    only in case or Unicode normalization is the same directory where the
+    volume folds: ``samefile`` decides, so a case-sensitive volume never
+    merges two directories.
+    """
+    if directory == home or directory in home.parents:
+        return True
+    from apm_cli.utils.paths import spelling_key
+
+    key = spelling_key(str(directory))
+    for candidate in (home, *home.parents):
+        if spelling_key(str(candidate)) != key:
+            continue
+        try:
+            if os.path.samefile(directory, candidate):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def executable_exclusion_root() -> Path | None:
     """Return the project root containing the cwd, or None to exclude nothing.
 

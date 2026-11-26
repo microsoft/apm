@@ -23,6 +23,7 @@ from apm_cli.codex_plugins.client import (
     CodexRpc,
     NativeUserConfig,
 )
+from apm_cli.codex_plugins.ledger import ledger_path_for
 from apm_cli.codex_plugins.snapshot import NativeSnapshot, prepare_snapshot, repair_generation
 from apm_cli.core.plugin_manifest import is_safe_codex_plugin_name
 from apm_cli.core.remediation import (
@@ -49,11 +50,6 @@ def marketplace_name(modules_dir: Path, dependency_key: str) -> str:
     """Namespace an owned marketplace by APM home and canonical dependency identity."""
     identity = f"{modules_dir.resolve().as_posix()}\0{dependency_key}".encode()
     return "apm-" + hashlib.sha256(identity).hexdigest()[:24]
-
-
-def ledger_path_for(modules_dir: Path) -> Path:
-    """Keep ownership outside the disposable package materialization directory."""
-    return modules_dir.parent / ".codex-native" / "ownership.json"
 
 
 def _safe_owned_path(path: Path, root: Path) -> Path:

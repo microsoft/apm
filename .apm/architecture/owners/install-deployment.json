@@ -174,7 +174,8 @@
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
         "src/apm_cli/integration/write_seam.py",
-        "src/apm_cli/policy/depth_check.py"
+        "src/apm_cli/policy/depth_check.py",
+        "src/apm_cli/policy/unmanaged_scan.py"
       ],
       "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight", "install-deployment-uninstall-preflight-consent-kept-link-route", "install-deployment-uninstall-preflight-hook-sync-consent-route", "install-deployment-uninstall-preflight-hook-sync-route"]
     },
@@ -189,7 +190,11 @@
       "id": "dependency-selection",
       "decision": "Effective skill and target selection deployed for one dependency by install preflight, install deploy, audit replay and uninstall survivor re-integration (including hook reconcile), and the skill subset the lockfile records",
       "owner": "install/package_resolution.py (effective_dependency_selection, delegating the CLI --skill overlay to effective_deploy_skill_subset); skill_subset is a required keyword of integrate_package_primitives, prepare_package_deployment and DeployableSourcePlan.create; every resolve_effective_package_targets call takes its dependency target subset from the owner",
-      "selectors": ["src/apm_cli/install/package_resolution.py"],
+      "selectors": [
+        "src/apm_cli/install/package_resolution.py",
+        "src/apm_cli/install/reference_support.py",
+        "src/apm_cli/install/scoped_resolver.py"
+      ],
       "guards": ["install-deployment-effective-selection"]
     },
     {

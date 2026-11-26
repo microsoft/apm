@@ -115,7 +115,9 @@ def _policy_checks_pass(project_root: Path, fetch: Any) -> bool:
     from apm_cli.policy.policy_checks import run_policy_checks
 
     result = run_policy_checks(project_root, policy, fail_fast=True)
-    return all(check.passed for check in result.checks)
+    # A check with notes (e.g. a skipped harness local file, #5472) needs the
+    # full pipeline, which prints them; the fast paths have no line for them.
+    return all(check.passed and not check.notes for check in result.checks)
 
 
 def up_to_date(project_root: Path) -> bool:

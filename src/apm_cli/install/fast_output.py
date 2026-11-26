@@ -122,7 +122,7 @@ def render(
     logger = InstallLogger(verbose=False, dry_run=False, partial=False)
     logger.resolution_start(to_install_count=0, lockfile_count=0, update_count=0)
     if frozen_disposition.replay:
-        _frozen_preflight(project_root, manifest, logger)
+        _frozen_preflight(project_root, manifest, logger, wrote=bodies is not None)
     locked = [d for d in lock.get_all_dependencies() if d.get_unique_key() != "."]
     for dep in locked:
         if dep.get_unique_key() in fetched:
@@ -165,12 +165,20 @@ def render(
     return services
 
 
-def _frozen_preflight(project_root: Path, manifest: Any, logger: Any) -> None:
+def _frozen_preflight(project_root: Path, manifest: Any, logger: Any, *, wrote: bool) -> None:
     """The full frozen run's preflight at its point (InstallService.run), with its notices.
 
-    The fast path already passed it before committing; with byte-identical inputs it
-    passes again and prints what the full run prints there (direct MCP trust).
+    The fast path already passed it before committing and taped its notices
+    (verdict_attest.refuse_frozen_drift). With nothing written since, the inputs
+    are byte-identical, so the tape is the answer and prints here (#5491); a run
+    that wrote files or package copies judges again.
     """
+    from apm_cli.install import verdict_attest
+
+    taped = verdict_attest.take_frozen_notices(project_root)
+    if taped is not None and not wrote:
+        verdict_attest.replay_frozen_notices(taped, logger)
+        return
     from apm_cli.core.scope import InstallScope
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService

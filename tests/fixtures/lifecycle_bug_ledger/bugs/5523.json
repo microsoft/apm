@@ -1,0 +1,16 @@
+{
+  "issue": 5523,
+  "fixed_in": "Unreleased",
+  "summary": "An agent that links to a sibling skill its own install deploys (for example ../skills/demo-skill/SKILL.md) now links to the committed deployed skill under the target's skills root (.agents/skills/demo-skill/SKILL.md) instead of gitignored apm_modules/, so a fresh clone has no broken agent links; links to files no primitive deploys keep the apm_modules path.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_sibling_skill_agent_link_lifecycle.py::test_agent_link_to_sibling_skill_resolves_on_a_fresh_clone",
+    "tests/unit/compilation/test_link_resolver_deployed_targets.py::TestDeployedFileLinks::test_deployed_sibling_skill_links_to_deployed_copy",
+    "tests/unit/integration/test_planned_skill_files.py::test_planned_skill_files_maps_selected_skill_files_to_target_destination"
+  ]
+}

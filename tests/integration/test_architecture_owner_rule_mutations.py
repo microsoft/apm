@@ -900,8 +900,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
     [
         pytest.param(
             "src/apm_cli/integration/cleanup.py",
-            "            write_seam.unlink(stale_target)\n",
-            "            stale_target.unlink()\n",
+            "        write_seam.unlink(target)\n",
+            "        target.unlink()\n",
             id="raw-path-unlink",
         ),
         pytest.param(
@@ -920,8 +920,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/cleanup.py",
-            "            write_seam.unlink(stale_target)\n",
-            '            stale_target.open("w").close()\n',
+            "        write_seam.unlink(target)\n",
+            '        target.open("w").close()\n',
             id="raw-path-open-for-write",
         ),
         pytest.param(
@@ -982,8 +982,8 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/cleanup.py",
-            "            write_seam.unlink(stale_target)\n",
-            "            with write_seam.private_scratch():\n                write_seam.unlink(stale_target)\n",
+            "        write_seam.unlink(target)\n",
+            "        with write_seam.private_scratch():\n            write_seam.unlink(target)\n",
             id="scratch-outside-the-locked-render",
         ),
         pytest.param(
@@ -3355,8 +3355,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-trust-fingerprint",
         rule_id="install-deployment-trust-fingerprint",
         path="src/apm_cli/integration/mcp_config_view.py",
-        old="from collections.abc import Callable, Mapping\n",
-        new="import hashlib\nfrom collections.abc import Callable, Mapping\n",
+        old="from collections.abc import Callable, Iterable, Mapping\n",
+        new="import hashlib\nfrom collections.abc import Callable, Iterable, Mapping\n",
         intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(
@@ -4441,7 +4441,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="transport-platform-held-directory-release",
         rule_id="transport-platform-held-directory-release",
-        path="src/apm_cli/commands/uninstall/local_reanchor.py",
+        path="src/apm_cli/core/deployment_reanchor.py",
         old="            release_held(current)\n            current.rename(target)\n",
         new="            current.rename(target)\n",
         intent="A re-anchor move renames a package directory path resolution may still hold.",

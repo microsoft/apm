@@ -49,6 +49,15 @@ def rename(path, target):
     return original_rename(path, target)
 shutil.rmtree = remove
 Path.rename = rename
+
+import apm_cli.utils.file_ops as file_ops
+original_sleep = file_ops._retry_sleep
+def noted_sleep(seconds):
+    marker = os.environ.get("APM_TEST_RETRY_MARKER")
+    if marker:
+        Path(marker).write_text("retried", encoding="utf-8")
+    original_sleep(seconds)
+file_ops._retry_sleep = noted_sleep
 cli()
 """
 
@@ -411,3 +420,113 @@ def test_user_edited_target_refusal_retains_ownership_after_package_deletion(
     assert final.lockfile_bytes is None
     assert final.deployment_records == ()
     assert not target.exists()
+
+
+_HOLD_SHARE_READ = 0x1
+
+
+class _HeldFile:
+    """Hold a file open without delete sharing, as an editor or scanner does (Windows)."""
+
+    def __init__(self, path: Path) -> None:
+        import ctypes
+
+        self._kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel.CreateFileW.restype = ctypes.c_void_p
+        self._kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        self._handle = self._kernel.CreateFileW(
+            str(path), 0x80000000, _HOLD_SHARE_READ, None, 3, 0x80, None
+        )
+        assert self._handle not in (None, ctypes.c_void_p(-1).value), "could not hold the file"
+
+    def release(self) -> None:
+        if self._handle is not None:
+            self._kernel.CloseHandle(self._handle)
+            self._handle = None
+
+
+def _installed_skill_world(tmp_path: Path) -> tuple[ApmLifecycleRunner, dict, Path, Path]:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "held", base_env=os.environ)
+    env = _child_env(isolated)
+    factory = LocalPackageFactory(isolated.work_root)
+    package = factory.create("held-package")
+    factory.add_skill(package, "held-skill", _skill_text("held-skill", "Held skill"))
+    consumer = factory.create("consumer", targets=("copilot",))
+    factory.add_relative_dependency(consumer, package)
+    runner = ApmLifecycleRunner((sys.executable, "-c", _ENTRYPOINT))
+    installed = runner.run(
+        ("install", "--no-policy", "--parallel-downloads", "0"),
+        scenario_id="held-file-install",
+        cwd=consumer.root,
+        env=env,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    deployed = next((consumer.root / ".agents" / "skills").rglob("SKILL.md"))
+    return runner, env, consumer.root, deployed
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing violations")
+def test_uninstall_waits_out_a_briefly_held_deployed_file(tmp_path: Path) -> None:
+    """A file released inside the retry window no longer fails the uninstall (#5441)."""
+    import threading
+    import time
+
+    runner, env, root, deployed = _installed_skill_world(tmp_path)
+    marker = root.parent / "retry-marker"
+    held = _HeldFile(deployed)
+
+    def release_once_retrying() -> None:
+        deadline = time.monotonic() + 60
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        held.release()
+
+    releaser = threading.Thread(target=release_once_retrying)
+    releaser.start()
+    try:
+        result = runner.run(
+            ("uninstall", "_local/held-package"),
+            scenario_id="held-file-uninstall-released",
+            cwd=root,
+            env={**env, "APM_TEST_RETRY_MARKER": str(marker)},
+        )
+    finally:
+        marker.touch()
+        releaser.join()
+        held.release()
+    assert marker.read_text(encoding="utf-8") == "retried", "uninstall never hit the sharing retry"
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not deployed.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing violations")
+def test_uninstall_of_a_still_held_file_fails_closed_then_recovers(tmp_path: Path) -> None:
+    """A handle held past the window keeps today's outcome; a rerun after release removes it."""
+    runner, env, root, deployed = _installed_skill_world(tmp_path)
+    before = LifecycleStateSnapshot.capture(root, targets=("copilot",))
+    held = _HeldFile(deployed)
+    try:
+        failed = runner.run(
+            ("uninstall", "_local/held-package"),
+            scenario_id="held-file-uninstall-blocked",
+            cwd=root,
+            env={**env, "APM_TEST_RETRY_MARKER": str(root.parent / "blocked-marker")},
+        )
+    finally:
+        held.release()
+    assert (root.parent / "blocked-marker").exists(), "the held file was never retried"
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert "Uninstall complete" not in failed.stdout + failed.stderr
+    assert deployed.exists()
+    after = LifecycleStateSnapshot.capture(root, targets=("copilot",))
+    assert after.manifest_bytes == before.manifest_bytes
+    assert after.lockfile_bytes == before.lockfile_bytes
+
+    recovered = runner.run(
+        ("uninstall", "_local/held-package"),
+        scenario_id="held-file-uninstall-retry",
+        cwd=root,
+        env=env,
+    )
+    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+    assert not deployed.exists()

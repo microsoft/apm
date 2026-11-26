@@ -143,6 +143,9 @@ class CheckResult:
     # ``message`` does not already carry its remedy: text output prints it after
     # the details and SARIF appends it once, to the check's last result (#4570).
     next_step: str = ""
+    # Informational lines text output prints whatever the verdict (#5472).
+    # Not serialized: structured formats keep stdout machine-readable.
+    notes: tuple[str, ...] = ()
 
     def violation_subjects(self) -> tuple[PolicySubject, ...]:
         """Return one :class:`PolicySubject` per violation to report.

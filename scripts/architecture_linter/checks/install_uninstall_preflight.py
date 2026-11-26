@@ -51,11 +51,15 @@ _ROUTES = (
     # The read-only hook decision and the sync share one consent link rule (#5139).
     (_CLEANUP, "hook_sync_unlinks", "_consent_keeps_link"),
     (_CLEANUP, "consent_kept_link", "_consent_keeps_link"),
-    (_CLEANUP, "remove_stale_deployed_files", "_managed_link_unlinkable"),
+    # The first pass and every retry share one gate sequence (#5441).
+    (_CLEANUP, "remove_stale_deployed_files", "_stale_content_outcome"),
+    (_CLEANUP, "_stale_content_outcome", "_managed_link_unlinkable"),
+    (_CLEANUP, "_stale_content_outcome", "consent_kept_link"),
     (_HOOKS, "sync_integration", "managed_hook_prefixes"),
     (_CLEANUP, "final_link_handled", "_stale_gate_passes"),
     (_CLEANUP, "final_link_handled", "_stale_target_absent"),
-    (_CLEANUP, "remove_stale_deployed_files", "_stale_gate_passes"),
+    (_CLEANUP, "remove_stale_deployed_files", "_stale_path_outcome"),
+    (_CLEANUP, "_stale_path_outcome", "_stale_gate_passes"),
     (_CLEANUP, "remove_stale_deployed_files", "_stale_target_absent"),
     (_REMEDY, "_uninstall_policy_resolves", "resolve_trust_policy"),
     (_CLI, "_preflight_uninstall_writes", "_refuse_unvalidated_paths"),

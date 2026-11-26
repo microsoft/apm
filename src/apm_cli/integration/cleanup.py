@@ -46,8 +46,10 @@ import io
 import os
 import posixpath
 import shlex
+import stat
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,6 +63,7 @@ from apm_cli.core.remediation import (
 )
 from apm_cli.integration import write_seam
 from apm_cli.security.gate import is_python_bytecode_cache_path
+from apm_cli.utils.file_ops import retry_on_sharing_violation
 from apm_cli.utils.paths import SpellingAliasIndex
 
 from .base_integrator import BaseIntegrator
@@ -1296,20 +1299,8 @@ def _remove_proven_members(
     complete = True
     for member_rel, member in proven:
         if not (_member_still_safe(skill_dir, member) and path_gate(member_rel, False)):
-            if (
-                _member_parents_safe(skill_dir, member)
-                and path_gate(member_rel, True)
-                and evidence.consent_kept_link(member_rel, member)
-            ):
-                # A final link whose every ancestor is safe is consent retention (#4815).
-                _keep_consent_link(result, diagnostics, member_rel, dep_key)
-                complete = False
-                continue
-            result.reject(member_rel, REJECTED_REPLACED)
-            diagnostics.warn(
-                f"Skipped removing {member_rel}: it was replaced or moved since APM "
-                "checked it. Inspect it and delete it manually if no longer needed.",
-                package=dep_key,
+            _record_unsafe_member(
+                skill_dir, member_rel, member, evidence, result, diagnostics, dep_key, path_gate
             )
             complete = False
             continue
@@ -1318,10 +1309,24 @@ def _remove_proven_members(
             _keep_without_evidence(result, diagnostics, member_rel, verdict, dep_key)
             complete = False
             continue
+
+        def recheck(member_rel=member_rel, member=member) -> Callable[[], None] | None:
+            if not (_member_still_safe(skill_dir, member) and path_gate(member_rel, False)):
+                return lambda: _record_unsafe_member(
+                    skill_dir, member_rel, member, evidence, result, diagnostics, dep_key, path_gate
+                )
+            changed = evidence.verdict(member_rel, member)
+            if changed == AUTHORIZED:
+                return None
+            return lambda: _keep_without_evidence(result, diagnostics, member_rel, changed, dep_key)
+
         try:
-            write_seam.unlink(member)
+            _unlink_rechecked(member, recheck)
             result.deleted.append(member_rel)
             result.deleted_targets.append(member)
+        except _GateChanged as changed:
+            changed.record()
+            complete = False
         except OSError as exc:
             complete = False
             result.failed.append(member_rel)
@@ -1330,6 +1335,62 @@ def _remove_proven_members(
                 package=dep_key,
             )
     return complete
+
+
+def _record_unsafe_member(
+    skill_dir: Path,
+    member_rel: str,
+    member: Path,
+    evidence: DeploymentEvidence,
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+    path_gate: Callable[[str, bool], bool],
+) -> None:
+    """Record the kept/rejected outcome of a member that failed the safety gate."""
+    if (
+        _member_parents_safe(skill_dir, member)
+        and path_gate(member_rel, True)
+        and evidence.consent_kept_link(member_rel, member)
+    ):
+        # A final link whose every ancestor is safe is consent retention (#4815).
+        _keep_consent_link(result, diagnostics, member_rel, dep_key)
+        return
+    result.reject(member_rel, REJECTED_REPLACED)
+    diagnostics.warn(
+        f"Skipped removing {member_rel}: it was replaced or moved since APM "
+        "checked it. Inspect it and delete it manually if no longer needed.",
+        package=dep_key,
+    )
+
+
+class _GateChanged(Exception):
+    """A deletion gate failed on a retry; ``record`` writes the kept/rejected outcome."""
+
+    def __init__(self, record: Callable[[], None]) -> None:
+        super().__init__("deletion gate changed during retry")
+        self.record = record
+
+
+def _unlink_rechecked(target: Path, recheck: Callable[[], Callable[[], None] | None]) -> None:
+    """Unlink *target*, re-running the deletion gates before every retry (#5441).
+
+    A held file may be rewritten while the retry waits, so the same gates that
+    authorized the first attempt must authorize each later one. *recheck*
+    returns None while they pass, else the callable recording the outcome.
+    """
+    attempts = 0
+
+    def attempt() -> None:
+        nonlocal attempts
+        if attempts:
+            record = recheck()
+            if record is not None:
+                raise _GateChanged(record)
+        attempts += 1
+        write_seam.unlink(target)
+
+    retry_on_sharing_violation(attempt, "unlink")
 
 
 def _member_still_safe(skill_dir: Path, member: Path) -> bool:
@@ -1558,6 +1619,7 @@ def remove_stale_deployed_files(
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
     _cowork_root_resolved: bool = False
     _cowork_root_cached: Path | None = None
+    _cowork_root_real: Path | None = None
     _cowork_orphans_skipped: int = 0
     _cowork_resolve_errors: int = 0
 
@@ -1589,12 +1651,13 @@ def remove_stale_deployed_files(
             # Resolve the cowork:// URI to a real filesystem path.
             try:
                 if not _cowork_root_resolved:
-                    from .copilot_cowork_paths import (
-                        resolve_copilot_cowork_skills_dir,
-                    )
+                    from ..utils.path_security import resolve_path
+                    from .copilot_cowork_paths import resolve_copilot_cowork_skills_dir
 
                     _cowork_root_cached = resolve_copilot_cowork_skills_dir()
                     _cowork_root_resolved = True
+                    # Pinned once: a root relinked outward mid-backoff must not re-resolve.
+                    _cowork_root_real = _cowork_root_cached and resolve_path(_cowork_root_cached)
                 if _cowork_root_cached is None:
                     # OneDrive unavailable -- retain lockfile entry so a
                     # later install with a configured root can clean up.
@@ -1605,6 +1668,9 @@ def remove_stale_deployed_files(
 
                 # Never follow a final symlink to the file it points at.
                 stale_target = cowork_locator(stale_path, _cowork_root_cached)
+                path_check = partial(
+                    _cowork_path_outcome, stale_path, _cowork_root_cached, result, _cowork_root_real
+                )
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -1614,24 +1680,19 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not _stale_gate_passes(
-                stale_path,
-                project_root,
-                targets=targets,
-                user_scope=user_scope,
-                allow_final_symlink=allow_final_symlink,
-            ):
-                if not allow_final_symlink and _consent_kept_final_link(
-                    stale_path, project_root, evidence, targets=targets, user_scope=user_scope
-                ):
-                    _keep_consent_link(result, diagnostics, stale_path, dep_key)
-                    continue
-                if _consent_kept_noncanonical(
-                    stale_path, project_root, evidence, targets=targets, user_scope=user_scope
-                ):
-                    _keep_noncanonical(result, diagnostics, stale_path, dep_key)
-                    continue
-                result.reject(stale_path, REJECTED_UNSAFE_PATH)
+            path_gate_args = {
+                "result": result,
+                "diagnostics": diagnostics,
+                "dep_key": dep_key,
+                "evidence": evidence,
+                "targets": targets,
+                "user_scope": user_scope,
+                "allow_final_symlink": allow_final_symlink,
+            }
+            path_check = partial(_stale_path_outcome, stale_path, project_root, **path_gate_args)
+            recorded_failure = _stale_path_outcome(stale_path, project_root, **path_gate_args)
+            if recorded_failure is not None:
+                recorded_failure()
                 continue
             stale_target = project_root / stale_path
 
@@ -1684,34 +1745,35 @@ def remove_stale_deployed_files(
         # or byte equality with the locked render proves APM deployed these
         # bytes; a lockfile hash alone never authorizes deletion. Fails
         # CLOSED: edited, unproven or unreadable files are kept with a warning.
-        if evidence.consent_kept_link(stale_path, stale_target):
-            _keep_consent_link(result, diagnostics, stale_path, dep_key)
+        content_gate_args = {
+            "result": result,
+            "diagnostics": diagnostics,
+            "dep_key": dep_key,
+            "evidence": evidence,
+            "recorded_hashes": recorded_hashes,
+            "allow_final_symlink": allow_final_symlink,
+        }
+        recorded_failure = _stale_content_outcome(stale_path, stale_target, **content_gate_args)
+        if recorded_failure is not None:
+            recorded_failure()
             continue
-        # Unlinking a managed final symlink removes no file content, so it
-        # keeps its own rule (callers opt in via allow_final_symlink).
-        if allow_final_symlink and stale_target.is_symlink():
-            if not _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
-                result.skipped_user_edit.append(stale_path)
-                diagnostics.warn(
-                    (
-                        f"Skipped removing {stale_path}: the deployed file was "
-                        "replaced by a symlink. Inspect the link and delete it "
-                        "manually if no longer needed."
-                    ),
-                    package=dep_key,
-                )
-                continue
-        else:
-            verdict = evidence.verdict(stale_path, stale_target)
-            if verdict != AUTHORIZED:
-                _keep_without_evidence(result, diagnostics, stale_path, verdict, dep_key)
-                continue
 
         # All gates passed -- safe to delete.
+        def recheck(
+            path_check=path_check,
+            stale_path=stale_path,
+            stale_target=stale_target,
+            gate_args=content_gate_args,
+        ):
+            # The same path then content gates, in the same order, as the first pass.
+            return path_check() or _stale_content_outcome(stale_path, stale_target, **gate_args)
+
         try:
-            write_seam.unlink(stale_target)
+            _unlink_rechecked(stale_target, recheck)
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
+        except _GateChanged as changed:
+            changed.record()
         except Exception as exc:
             result.failed.append(stale_path)
             if failed_path_retained:
@@ -1828,6 +1890,119 @@ def remove_synced_files(
     )
     diagnostics.render_summary()
     return result
+
+
+def _cowork_gate_passes(stale_path: str, cowork_root: Path, resolved_root: Path) -> bool:
+    """Whether a cowork entry still resolves inside its (originally resolved) cowork root."""
+    from ..utils.path_security import ensure_path_within_resolved
+    from .copilot_cowork_paths import cowork_locator
+
+    try:
+        locator = cowork_locator(stale_path, cowork_root, reject_linked_ancestors=True)
+        ensure_path_within_resolved(locator.parent, resolved_root)
+    except Exception:
+        return False
+    return True
+
+
+def _cowork_path_outcome(
+    stale_path: str, cowork_root: Path, result: CleanupResult, resolved_root: Path
+) -> Callable[[], None] | None:
+    """The cowork path gate; None while it passes, else the outcome recorder."""
+    if _cowork_gate_passes(stale_path, cowork_root, resolved_root):
+        return None
+    return lambda: result.reject(stale_path, REJECTED_UNSAFE_PATH)
+
+
+def _stale_path_outcome(
+    stale_path: str,
+    project_root: Path,
+    *,
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+    evidence: DeploymentEvidence,
+    targets,
+    user_scope: bool,
+    allow_final_symlink: bool,
+) -> Callable[[], None] | None:
+    """The path gate with its consent keeps; None while it passes, else the outcome recorder.
+
+    The first pass and every retry run this one gate (#5441).
+    """
+    if _stale_gate_passes(
+        stale_path,
+        project_root,
+        targets=targets,
+        user_scope=user_scope,
+        allow_final_symlink=allow_final_symlink,
+    ):
+        return None
+    if not allow_final_symlink and _consent_kept_final_link(
+        stale_path, project_root, evidence, targets=targets, user_scope=user_scope
+    ):
+        return lambda: _keep_consent_link(result, diagnostics, stale_path, dep_key)
+    if _consent_kept_noncanonical(
+        stale_path, project_root, evidence, targets=targets, user_scope=user_scope
+    ):
+        return lambda: _keep_noncanonical(result, diagnostics, stale_path, dep_key)
+    return lambda: result.reject(stale_path, REJECTED_UNSAFE_PATH)
+
+
+def _stale_content_outcome(
+    stale_path: str,
+    stale_target: Path,
+    *,
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+    evidence: DeploymentEvidence,
+    recorded_hashes: Mapping[str, str],
+    allow_final_symlink: bool,
+) -> Callable[[], None] | None:
+    """The consent, managed-link and evidence gates, in that order.
+
+    Returns None while they pass, else the outcome recorder. The first pass
+    and every retry run this one sequence so they cannot drift (#5441).
+    """
+    if evidence.consent_kept_link(stale_path, stale_target):
+        return lambda: _keep_consent_link(result, diagnostics, stale_path, dep_key)
+    # Unlinking a managed final symlink removes no file content, so it
+    # keeps its own rule (callers opt in via allow_final_symlink).
+    if allow_final_symlink and stale_target.is_symlink():
+        if _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
+            return None
+        return lambda: _keep_replaced_by_link(result, diagnostics, stale_path, dep_key)
+    # A hash of a link is its target's and of a non-file the empty hash: never proof.
+    try:
+        mode = os.lstat(stale_target).st_mode
+    except FileNotFoundError:
+        mode = stat.S_IFREG
+    except OSError:
+        mode = None
+    if mode is not None and stat.S_ISLNK(mode):
+        return lambda: _keep_replaced_by_link(result, diagnostics, stale_path, dep_key)
+    verdict = evidence.verdict(stale_path, stale_target)
+    if verdict == AUTHORIZED and (mode is None or not stat.S_ISREG(mode)):
+        verdict = UNREADABLE
+    if verdict == AUTHORIZED:
+        return None
+    return lambda: _keep_without_evidence(result, diagnostics, stale_path, verdict, dep_key)
+
+
+def _keep_replaced_by_link(
+    result: CleanupResult, diagnostics, stale_path: str, dep_key: str
+) -> None:
+    """Keep a deployed file that was replaced by a managed symlink and name it."""
+    result.skipped_user_edit.append(stale_path)
+    diagnostics.warn(
+        (
+            f"Skipped removing {stale_path}: the deployed file was "
+            "replaced by a symlink. Inspect the link and delete it "
+            "manually if no longer needed."
+        ),
+        package=dep_key,
+    )
 
 
 def _stale_gate_passes(

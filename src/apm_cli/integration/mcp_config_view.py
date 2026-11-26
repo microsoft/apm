@@ -7,7 +7,7 @@ projection and the symmetric comparison with the stored lockfile baseline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -517,7 +517,34 @@ def forget_trust_notices_since(shown: frozenset[str]) -> None:
     _TRUST_NOTICES_SHOWN.intersection_update(shown)
 
 
+class PreflightNoticeTape:
+    """Records each output call of the frozen preflight, in order (#5491).
+
+    Only the view's output methods exist (_McpViewLogger), so any other use
+    raises and the fast path declines. A once-per-command trust notice is taped
+    as such: its replay (install/verdict_attest.replay_frozen_notices) applies
+    the dedupe at the print point. Matched by exact type, never by attribute,
+    so a permissive silent logger still marks a notice shown.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def progress(self, message: str) -> None:
+        self.calls.append(("progress", message))
+
+    def warning(self, message: str) -> None:
+        self.calls.append(("warning", message))
+
+    def verbose_detail(self, message: str) -> None:
+        self.calls.append(("verbose_detail", message))
+
+
 def _progress_trust_once(logger: Any, message: str) -> None:
+    inner = logger._logger if type(logger) is _ParkedNoticeSilenced else logger
+    if type(inner) is PreflightNoticeTape:
+        inner.calls.append(("trust_once", message))
+        return
     if message in _TRUST_NOTICES_SHOWN:
         return
     _TRUST_NOTICES_SHOWN.add(message)
@@ -604,6 +631,39 @@ def _declaration_fingerprint(dependency: LockedDependency, declaration: MCPDepen
         "declaration": declaration.to_dict(),
     }
     return evidence_fingerprint(payload)
+
+
+def rebind_rekeyed_omissions(
+    lockfile: LockFile, rekeyed: Iterable[tuple[LockedDependency, LockedDependency, Path]]
+) -> None:
+    """Carry omission evidence across a local identity re-key (#5418), or leave it unbound.
+
+    Each item is (row under its legacy key, the same row re-keyed, its package
+    directory). A server's ``declaration`` moves to the fingerprint under the
+    new key only when the stored value equals, byte for byte, the fingerprint
+    recomputed under the legacy key from the package's current declaration.
+    Any other value stays as stored, so it no longer verifies and the
+    selection must be repeated: intent is never trusted silently.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
+    omissions = lockfile.mcp_omissions
+    if not omissions:
+        return
+    for legacy, current, package_dir in rekeyed:
+        try:
+            manifest = load_yaml(manifest_file(package_dir))
+            declarations = (
+                _authored_mcp_declarations(manifest) if isinstance(manifest, dict) else {}
+            )
+        except (OSError, ValueError, UnicodeError, yaml.YAMLError):
+            continue
+        for name, declaration in declarations.items():
+            evidence = omissions.get(name)
+            if not isinstance(evidence, dict):
+                continue
+            if evidence.get("declaration") == _declaration_fingerprint(legacy, declaration):
+                evidence["declaration"] = _declaration_fingerprint(current, declaration)
 
 
 def _authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDependency]:

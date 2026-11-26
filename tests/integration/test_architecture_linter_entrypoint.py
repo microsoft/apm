@@ -448,10 +448,12 @@ def test_cli_has_no_rule_selection_flag(flag: str) -> None:
 
 
 def test_cli_accepts_only_root_and_metrics_json() -> None:
-    """The full, exact CLI argument surface is `--root` and `--metrics-json`."""
+    """The documented CLI surface is `--root` and `--metrics-json`; the
+    worker flags are internal and default to off."""
     minimal = cli._parse_args(["--root", "."])
     assert minimal.root == Path(".")
     assert minimal.metrics_json is None
+    assert (minimal.workers, minimal.groups, minimal.report_json) == (None, None, None)
 
     with_metrics = cli._parse_args(["--root", ".", "--metrics-json", "out.json"])
     assert with_metrics.metrics_json == Path("out.json")

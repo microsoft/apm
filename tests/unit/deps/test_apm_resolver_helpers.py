@@ -10,7 +10,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
-from apm_cli.deps.local_identity import root_local_dirs, transitive_local_identity
+from apm_cli.deps.local_identity import (
+    portable_anchor_identity,
+    root_local_dirs,
+    transitive_local_identity,
+)
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
 from apm_cli.models.apm_package import DependencyReference
@@ -515,7 +519,8 @@ class TestOneAnchoredDirectoryIsOneDependency:
 
         edge = self._edge(project, "ext", {})
 
-        assert edge.anchored_local_path == (outside / "Ext").resolve().as_posix()
+        # No repository, and tmp_path is below / and HOME's ancestors: ../ (#5418).
+        assert edge.anchored_local_path == "../outside/Ext"
         assert not listed, listed
 
     @pytest.mark.parametrize(
@@ -712,3 +717,354 @@ def test_production_reaches_a_shared_leaf_in_either_dev_order(
     assert dev_flags["./packages/lib"] is False, dev_flags
     assert dev_flags["local:packages/leaf"] is False, dev_flags
     assert dev_flags["./packages/a"] is True, dev_flags
+
+
+class TestLegacyAbsoluteLocalIdentity:
+    """#5418: a lock row keyed by a monorepo sibling's absolute path is the same
+    owner as its portable ``../`` identity: read-only on the read path, re-keyed
+    in place on the write path.
+    """
+
+    @staticmethod
+    def _layout(root: Path) -> tuple[Path, Path, Path]:
+        app = root / "R" / "apps" / "app"
+        lib = root / "R" / "packages" / "lib-b"
+        outside = root / "outside" / "lib-x"
+        for path in (app, lib, outside):
+            path.mkdir(parents=True)
+        (root / "R" / ".git").mkdir()
+        return app, lib, outside
+
+    @staticmethod
+    def _row(anchor: str, parent: str = "../../packages/lib-a") -> LockedDependency:
+        return LockedDependency(
+            repo_url=f"_local/{Path(anchor).name}",
+            source="local",
+            local_path=f"../{Path(anchor).name}",
+            declaring_parent=parent,
+            anchored_local_path=anchor,
+        )
+
+    @staticmethod
+    def _ref(anchor: str) -> DependencyReference:
+        from dataclasses import replace
+
+        return replace(
+            DependencyReference.parse("../lib-b"),
+            declaring_parent="../../packages/lib-a",
+            anchored_local_path=anchor,
+        )
+
+    def test_read_path_finds_the_absolute_row_by_directory(self, tmp_path: Path) -> None:
+        from apm_cli.deps.local_identity import locked_spelling
+
+        app, lib, outside = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        locked = {f"local:{legacy}": self._row(legacy)}
+        ref = self._ref("../../packages/lib-b")
+
+        assert locked_spelling(ref, locked, app, directory=lib).anchored_local_path == legacy
+        assert locked_spelling(ref, locked, app, directory=outside) is ref
+        assert locked_spelling(ref, locked, app) is ref
+
+    def test_read_path_never_opens_a_dotdot_identity(self, tmp_path: Path, monkeypatch) -> None:
+        from apm_cli.deps import local_identity
+
+        app, lib, _ = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        locked = {
+            f"local:{legacy}": self._row(legacy),
+            "local:../../packages/other": self._row("../../packages/other"),
+        }
+        opened: list[str] = []
+        real = os.path.samefile
+
+        def spy(first, second):
+            opened.extend((os.fspath(first), os.fspath(second)))
+            return real(first, second)
+
+        monkeypatch.setattr(local_identity.os.path, "samefile", spy)
+        local_identity.locked_spelling(
+            self._ref("../../packages/lib-b"), locked, app, directory=lib
+        )
+
+        assert opened
+        assert not [path for path in opened if ".." in Path(path).parts], opened
+
+    def test_write_path_renames_only_in_repository_rows_that_exist(self, tmp_path: Path) -> None:
+        from apm_cli.deps.local_identity import legacy_local_renames
+
+        app, lib, outside = self._layout(tmp_path)
+        inside, out = lib.resolve().as_posix(), outside.resolve().as_posix()
+        gone = (tmp_path / "R" / "packages" / "gone").as_posix()
+        locked = {f"local:{path}": self._row(path) for path in (inside, out, gone)}
+
+        assert legacy_local_renames(locked, app) == {f"local:{inside}": "../../packages/lib-b"}
+
+    def test_rekey_moves_rows_parents_owners_and_slot(self, tmp_path: Path) -> None:
+        from apm_cli.install.phases.lockfile_rekey import rekey_legacy_local_identities
+
+        app, lib, _ = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        lockfile = LockFile()
+        lockfile.dependencies[f"local:{legacy}"] = self._row(legacy)
+        child = self._row((lib.parent / "lib-c").as_posix(), parent=f"local:{legacy}")
+        lockfile.dependencies["local:outside-child"] = child
+        modules = app / "apm_modules"
+        slot = self._row(legacy).to_dependency_ref().get_install_path(modules)
+        slot.mkdir(parents=True)
+        (slot / "apm.yml").write_text("name: lib-b\n", encoding="ascii")
+
+        journaled: list = []
+        renames = rekey_legacy_local_identities(lockfile, app, modules, journal=journaled.extend)
+
+        new = "local:../../packages/lib-b"
+        assert renames == {f"local:{legacy}": new}
+        assert list(lockfile.dependencies) == [new, "local:outside-child"]
+        assert lockfile.dependencies[new].anchored_local_path == "../../packages/lib-b"
+        assert child.declaring_parent == new
+        moved = lockfile.dependencies[new].to_dependency_ref().get_install_path(modules)
+        assert (moved / "apm.yml").read_text(encoding="ascii") == "name: lib-b\n"
+        assert [(current, target) for current, target, _ in journaled] == [(slot, moved)]
+        # The emptied <hash> parent stays until the install commits, so a rollback can restore.
+        assert slot.parent.is_dir() and not any(slot.parent.iterdir())
+        assert rekey_legacy_local_identities(lockfile, app, modules) == {}
+
+    def test_rekey_onto_a_key_another_row_holds_refuses_with_the_fix(self, tmp_path: Path) -> None:
+        from apm_cli.install.phases.lockfile_rekey import rekey_legacy_local_identities
+
+        app, lib, _ = self._layout(tmp_path)
+        legacy = lib.resolve().as_posix()
+        lockfile = LockFile()
+        lockfile.dependencies[f"local:{legacy}"] = self._row(legacy)
+        lockfile.dependencies["local:../../packages/lib-b"] = self._row("../../packages/lib-b")
+        before = list(lockfile.dependencies)
+
+        with pytest.raises(RuntimeError) as refused:
+            rekey_legacy_local_identities(lockfile, app)
+
+        assert "Remove the duplicate entry from apm.yml, then run 'apm install'" in str(
+            refused.value
+        )
+        assert list(lockfile.dependencies) == before
+        assert lockfile.dependencies[f"local:{legacy}"].anchored_local_path == legacy
+
+
+class TestRepositoryRelativeAnchorIdentity:
+    """#5418: a monorepo sibling (outside the project root, inside its
+    repository) is recorded relative to the project root with ``../``, so two
+    clones at different paths write one identity. Anything outside the
+    repository keeps the resolved absolute identity.
+    """
+
+    @staticmethod
+    def _monorepo(root: Path, git: str = "dir") -> tuple[Path, Path]:
+        app = root / "apps" / "app"
+        lib = root / "packages" / "lib-a"
+        app.mkdir(parents=True)
+        lib.mkdir(parents=True)
+        if git == "dir":
+            (root / ".git").mkdir()
+        elif git == "file":
+            (root / ".git").write_text("gitdir: ../.git/worktrees/x\n", encoding="ascii")
+        return app, lib
+
+    @pytest.fixture(autouse=True)
+    def _home_elsewhere(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+
+    def test_inside_base_unchanged(self, tmp_path: Path) -> None:
+        app, _ = self._monorepo(tmp_path / "repo")
+        identity = portable_anchor_identity(app / "vendor" / "x", app)
+        assert identity == "vendor/x"
+
+    @pytest.mark.parametrize("git", ["dir", "file"])
+    def test_sibling_in_same_repository_is_dotdot_relative(self, tmp_path: Path, git: str) -> None:
+        app, lib = self._monorepo(tmp_path / "repo", git)
+        identity = portable_anchor_identity(lib, app)
+        assert identity == "../../packages/lib-a"
+
+    def test_two_clones_write_one_identity(self, tmp_path: Path) -> None:
+        app_a, lib_a = self._monorepo(tmp_path / "A")
+        app_b, lib_b = self._monorepo(tmp_path / "nested" / "B")
+        assert portable_anchor_identity(lib_a, app_a) == portable_anchor_identity(lib_b, app_b)
+
+    def test_sibling_across_submodule_boundary_stays_absolute(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        app, lib = self._monorepo(repo)
+        (repo / "packages" / ".git").write_text("gitdir: ../.git/modules/p\n", encoding="ascii")
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+        sub_app = repo / "packages" / "app"
+        sub_app.mkdir()
+        identity = portable_anchor_identity(repo / "apps", sub_app)
+        assert identity == (repo / "apps").resolve().as_posix()
+
+    def test_symlinked_sibling_is_keyed_by_its_target(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        app, lib = self._monorepo(repo)
+        link = repo / "linked"
+        try:
+            link.symlink_to(lib, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        assert portable_anchor_identity(link, app) == ("../../packages/lib-a")
+        outside = tmp_path / "outside-pkg"
+        outside.mkdir()
+        escape = repo / "escape"
+        escape.symlink_to(outside, target_is_directory=True)
+        assert portable_anchor_identity(escape, app) == (outside.resolve().as_posix())
+
+    def test_outside_repository_stays_absolute(self, tmp_path: Path) -> None:
+        app, _ = self._monorepo(tmp_path / "repo")
+        outside = tmp_path / "elsewhere" / "pkg"
+        outside.mkdir(parents=True)
+        identity = portable_anchor_identity(outside, app)
+        assert identity == outside.resolve().as_posix()
+
+    def test_no_repository_siblings_below_shared_roots_are_relative(self, tmp_path: Path) -> None:
+        """No repository: a common ancestor below /, drives and HOME keeps ``../`` (/tmp)."""
+        app, lib = self._monorepo(tmp_path / "plain", git="none")
+        assert portable_anchor_identity(lib, app) == "../../packages/lib-a"
+
+    @staticmethod
+    def _home(monkeypatch: pytest.MonkeyPatch, home: Path) -> Path:
+        home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        return home
+
+    def test_no_repository_siblings_under_a_home_subdirectory_are_relative(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = self._home(monkeypatch, tmp_path / "h")
+        app, lib = home / "work" / "app", home / "work" / "lib"
+        for path in (app, lib):
+            path.mkdir(parents=True)
+        assert portable_anchor_identity(lib, app) == "../lib"
+
+    def test_no_repository_siblings_directly_under_home_stay_absolute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = self._home(monkeypatch, tmp_path / "h")
+        app, lib = home / "app", home / "lib"
+        for path in (app, lib):
+            path.mkdir(parents=True)
+        assert portable_anchor_identity(lib, app) == lib.resolve().as_posix()
+
+    def test_no_repository_dependency_at_or_above_home_stays_absolute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Never ``../`` climbing to HOME or past it."""
+        home = self._home(monkeypatch, tmp_path / "top" / "h")
+        app = home / "work" / "app"
+        above = tmp_path / "top" / "lib"
+        for path in (app, above):
+            path.mkdir(parents=True)
+        assert portable_anchor_identity(home, app) == home.resolve().as_posix()
+        assert portable_anchor_identity(above, app) == above.resolve().as_posix()
+
+    def test_a_case_variant_home_spelling_is_home_where_the_volume_folds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N4: the HOME bound holds for ``~/Work`` spelled ``~/work`` on a folding volume."""
+        from apm_cli.utils.executable_exclusion import is_home_or_above as home_or_above
+        from apm_cli.utils.paths import spelling_key
+
+        home = self._home(monkeypatch, tmp_path / "Users" / "Me")
+        variant = tmp_path / "users" / "me"
+        app, lib = variant / "app", variant / "lib"
+        for path in (app, lib):
+            path.mkdir(parents=True)
+        real_samefile = os.path.samefile
+
+        def folding(first, second) -> bool:
+            if spelling_key(os.fspath(first)) == spelling_key(os.fspath(second)):
+                return True
+            return real_samefile(first, second)
+
+        monkeypatch.setattr(os.path, "samefile", folding)
+        assert home_or_above(variant, home.resolve())
+        assert home_or_above(tmp_path / "users", home.resolve())
+        assert portable_anchor_identity(lib, app) == lib.resolve().as_posix()
+        monkeypatch.setattr(os.path, "samefile", real_samefile)
+        # The real volume decides: NTFS and default APFS fold, ext4 does not.
+        probe = tmp_path / "Fold-Probe"
+        probe.write_text("x", encoding="ascii")
+        folded = tmp_path / "fold-probe"
+        volume_folds = folded.exists() and real_samefile(probe, folded)
+        assert home_or_above(variant, home.resolve()) is volume_folds
+        assert portable_anchor_identity(lib, app) == (
+            lib.resolve().as_posix() if volume_folds else "../lib"
+        )
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="a backslash separates on Windows")
+    def test_a_posix_backslash_name_keeps_its_own_sibling_identity(self, tmp_path: Path) -> None:
+        """Copilot #5485: ``a\\b`` is one POSIX name, never the path ``a/b``."""
+        app, _ = self._monorepo(tmp_path / "repo")
+        packages = tmp_path / "repo" / "packages"
+        (packages / "a\\b").mkdir()
+        (packages / "a" / "b").mkdir(parents=True)
+        assert portable_anchor_identity(packages / "a\\b", app) == "../../packages/a\\b"
+        assert portable_anchor_identity(packages / "a" / "b", app) == "../../packages/a/b"
+
+    def test_no_repository_project_and_a_package_in_another_repository_stay_absolute(
+        self, tmp_path: Path
+    ) -> None:
+        """Copilot #5485: the no-repo fallback never crosses into another repository."""
+        app, _ = self._monorepo(tmp_path / "plain", git="none")
+        other = tmp_path / "plain" / "other-checkout"
+        (other / ".git").mkdir(parents=True)
+        package = other / "pkg"
+        package.mkdir()
+        assert portable_anchor_identity(package, app) == package.resolve().as_posix()
+
+    def test_no_repository_filesystem_root_common_ancestor_stays_absolute(
+        self, tmp_path: Path
+    ) -> None:
+        app, _ = self._monorepo(tmp_path / "plain", git="none")
+        elsewhere = Path(tmp_path.anchor) / "apm-5418-elsewhere" / "lib"
+        assert portable_anchor_identity(elsewhere, app) == elsewhere.resolve().as_posix()
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="drive letters are Windows-only")
+    def test_no_repository_different_drive_stays_absolute(self, tmp_path: Path) -> None:
+        app, _ = self._monorepo(tmp_path / "plain", git="none")
+        other = Path("Z:/pkg") if tmp_path.drive.upper() != "Z:" else Path("Y:/pkg")
+        identity = portable_anchor_identity(other, app)
+        assert ":" in identity
+        assert not identity.startswith("..")
+
+    def test_dotfiles_home_repository_does_not_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "dotfiles-home"
+        app, lib = self._monorepo(home)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+
+    def test_repository_above_home_does_not_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app, lib = self._monorepo(tmp_path / "top")
+        home = tmp_path / "top" / "users" / "me"
+        home.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        identity = portable_anchor_identity(lib, app)
+        assert identity == lib.resolve().as_posix()
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="drive letters are Windows-only")
+    def test_different_drive_stays_absolute(self, tmp_path: Path) -> None:
+        from apm_cli.deps import local_identity
+
+        app, _ = self._monorepo(tmp_path / "repo")
+        other = Path("Z:/pkg") if tmp_path.drive.upper() != "Z:" else Path("Y:/pkg")
+        with patch.object(local_identity, "repository_root", return_value=tmp_path / "repo"):
+            identity = local_identity.portable_anchor_identity(other, app)
+        assert ":" in identity
+        assert not identity.startswith("..")

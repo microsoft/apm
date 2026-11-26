@@ -1408,8 +1408,21 @@ class BaseIntegrator:
         except (OSError, RuntimeError):
             return False
 
-    def init_link_resolver(self, package_info, project_root: Path) -> None:
-        """Initialise and register the link resolver for a package."""
+    def init_link_resolver(
+        self,
+        package_info,
+        project_root: Path,
+        *,
+        target=None,
+        source_plan=None,
+        skill_pairing=None,
+    ) -> None:
+        """Initialise and register the link resolver for a package.
+
+        With *target* and *source_plan* (and the effective *skill_pairing*),
+        links to files a promoted skill of the package deploys for *target*
+        point at the deployed copy (#5523).
+        """
         from apm_cli.utils.realpath import resolve_path
 
         self.link_resolver = UnifiedLinkResolver(project_root)
@@ -1468,6 +1481,12 @@ class BaseIntegrator:
                     self.link_resolver.deployment_frame = getattr(
                         package_info, "deployment_frame", None
                     )
+                    if target is not None:
+                        from apm_cli.integration.skill_preflight import planned_skill_files
+
+                        self.link_resolver.deployed_link_targets = planned_skill_files(
+                            package_info, target, project_root, source_plan, skill_pairing
+                        )
         except Exception:
             self.link_resolver = None
 

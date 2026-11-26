@@ -104,10 +104,16 @@ def run(ctx: InstallContext) -> None:
         )
     except ClaudeNativePluginError:
         previous = _with_reconciled_services(ctx.existing_lockfile, committed)
-        if previous is not None and previous is ctx.existing_lockfile and original is not None:
+        if (
+            previous is not None
+            and previous is ctx.existing_lockfile
+            and original is not None
+            and not _rekeyed(ctx, original)
+        ):
             restore_lockfile_bytes(lock_path, original)
         elif previous is not None:
-            # The rollback is durable even though this install fails.
+            # The rollback is durable even though this install fails. A #5418
+            # re-key stays: receipts and apm_modules slots already follow it.
             previous.write(lock_path)
             flush_lockfile_writes()
         else:
@@ -123,6 +129,14 @@ def run(ctx: InstallContext) -> None:
     stamped = _record_declared(LockFile.read(lock_path), declared)
     if stamped is not None:
         stamped.write(lock_path)
+
+
+def _rekeyed(ctx: InstallContext, original: bytes) -> bool:
+    """Whether this install re-keyed legacy local keys the *original* lock records (#5418)."""
+    from apm_cli.install.phases.lockfile_rekey import legacy_local_keys
+
+    legacy = legacy_local_keys(original, ctx.source_root) or set()
+    return any(key not in ctx.existing_lockfile.dependencies for key in legacy)
 
 
 def _note_native_route(ctx: InstallContext) -> None:
