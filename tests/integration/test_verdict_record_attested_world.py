@@ -252,6 +252,22 @@ def test_a_frozen_install_answers_as_the_full_frozen_pipeline(world_install, sce
     assert (lock.read_bytes(), lock.stat().st_mtime_ns) == before, "--frozen rewrote the lock"
 
 
+@pytest.mark.parametrize(("args", "shown"), [((), 0), (("--frozen",), 1)])
+def test_a_full_run_prints_the_direct_mcp_trust_notice_as_main_does(
+    world_install, args, shown
+) -> None:
+    """W3d #5493 N1': only the frozen preflight's own tape defers the once-per-command
+    trust notice. A silent pre-pass (a permissive logger) still marks it shown, so a full
+    run prints it as main does: never on a plain no-op, once on --frozen."""
+    install, _project, _world = world_install
+    _assert_attested(install())
+
+    code, stdout, stderr = install(*args, fast="0")
+
+    assert code == 0, stdout + stderr
+    assert stdout.count("Trusting direct dependency MCP 'pkg-000-mcp'") == shown, stdout
+
+
 def test_the_speculative_frozen_preflight_never_migrates_personal_consent(
     world_install,
 ) -> None:
