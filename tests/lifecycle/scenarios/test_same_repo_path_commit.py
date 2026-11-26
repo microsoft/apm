@@ -33,6 +33,7 @@ from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
 pytestmark = [
     pytest.mark.e2e,
+    pytest.mark.lifecycle_smoke,
     pytest.mark.promise("P-INV-I1", "P-INV-I2", "P-INV-I3", "P-LAW-source.ref_cache_coherent"),
 ]
 
@@ -235,10 +236,13 @@ def test_update_moves_the_files_with_the_plugin(tmp_path: Path) -> None:
     assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v2")
 
 
-def _move_main_on_first_fetch(world: _World, *, before: bool) -> tuple[Path, Path]:
+def _move_main_on_first_fetch(
+    world: _World, *, before: bool, match: str = '*" fetch "*|*" clone "*'
+) -> tuple[Path, Path]:
     """Route git through a wrapper that moves the origin's main once.
 
-    The move happens on the client's first ``fetch`` or ``clone``: just
+    The move happens on the client's first git call whose arguments match the
+    shell ``case`` pattern *match* (default: any ``fetch`` or ``clone``): just
     *before* it runs, or right after it. Returns ``(staged, moved)``: write
     the target commit to *staged*; *moved* exists once the move happened.
     """
@@ -253,7 +257,7 @@ def _move_main_on_first_fetch(world: _World, *, before: bool) -> tuple[Path, Pat
         f'"$(cat "{staged}")"\n'
         "  fi;;\n"
     )
-    hook = f'case " $* " in *" fetch "*|*" clone "*)\n{move}esac\n'
+    hook = f'case " $* " in {match})\n{move}esac\n'
     run = f'"{real_git}" "$@"\nstatus=$?\n'
     wrapper_dir = world.root / "bin"
     wrapper_dir.mkdir()
@@ -301,6 +305,44 @@ def test_update_fetches_the_plugin_at_the_commit_its_files_got(tmp_path: Path) -
     assert world.head() == later
     _assert_no_cache_pin(result)
     _assert_pinned_to(world, resolved)
+    assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v2")
+
+
+def test_refresh_moves_a_cached_plugin_with_its_files(tmp_path: Path) -> None:
+    # --refresh re-resolves every ref without an update plan; the cached
+    # plugin must not stay at the locked commit while its files move.
+    world = _world(tmp_path)
+    assert world.run("apm install").returncode == 0
+    new_head = world.publish("v2")
+
+    result = world.run("apm install --refresh")
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_no_cache_pin(result)
+    _assert_pinned_to(world, new_head)
+    assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v2")
+
+
+def test_update_keeps_the_plugin_on_its_files_commit_after_a_branch_reset(
+    tmp_path: Path,
+) -> None:
+    # The files are fetched at B; main then resets to the locked A (B stays on
+    # another branch) before the cached plugin is integrated.
+    world = _world(tmp_path)
+    locked = world.head()
+    assert world.run("apm install").returncode == 0
+    new_head = world.publish("v2")
+    _git("--git-dir", str(world.origin), "update-ref", "refs/heads/keep", new_head)
+    staged, moved = _move_main_on_first_fetch(
+        world, before=False, match='*" fetch "*"--filter=blob:none"*'
+    )
+    staged.write_text(locked, encoding="ascii")
+
+    result = world.run("apm update --yes")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert moved.exists(), "the files were never fetched through git"
+    assert world.head() == locked
+    _assert_no_cache_pin(result)
+    _assert_pinned_to(world, new_head)
     assert (world.project / DEPLOYED_PROMPT).read_text(encoding="ascii") == _prompt("v2")
 
 
