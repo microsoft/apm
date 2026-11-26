@@ -77,6 +77,7 @@ def planned_skill_files(
     project_root: Path,
     source_plan: DeployableSourcePlan | None,
     skill_pairing: SkillTargetSelection | None = None,
+    skill_targets: Sequence[TargetProfile] | None = None,
 ) -> dict[Path, Path]:
     """Map each source file a promoted skill deploys for *target* to its destination.
 
@@ -86,6 +87,8 @@ def planned_skill_files(
     ``.apm/skills/<name>`` mirror is keyed too: in-package links resolve there.
     Unknown plans, native skills and executables yield no entry (the caller
     keeps its fallback), so the map never names a file deployment skips.
+    *skill_targets* are the targets skill deployment receives: a skills root
+    shared by several of them deploys the union of their paired skills.
     """
     from apm_cli.integration.skill_bundle_routes import promoted_skill_name
     from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -98,14 +101,20 @@ def planned_skill_files(
     selection = selected_skill_sources(package_info)
     if selection.route not in ("bundle", "subskills"):
         return {}
+
+    def root_of(profile: TargetProfile) -> Path:
+        if selection.route == "bundle":
+            return project_root / profile.skills_rel_root
+        return SkillIntegrator._target_skills_root(profile, project_root)
+
+    skills_root = root_of(target)
+    # Group targets by shared skills root, as skill deployment does.
+    sharing = SkillIntegrator._skill_root_target_names(skill_targets or (target,), root_of).get(
+        skills_root.resolve(), (target.name,)
+    )
     # The effective pairing deployment receives, not the raw dependency one.
     name_filter = SkillIntegrator._paired_name_filter(
-        source_plan.selected_skill_names, skill_pairing, (target.name,)
-    )
-    skills_root = (
-        project_root / target.skills_rel_root
-        if selection.route == "bundle"
-        else SkillIntegrator._target_skills_root(target, project_root)
+        source_plan.selected_skill_names, skill_pairing, sharing
     )
     mirror_root = resolve_path(package_info.install_path) / ".apm" / "skills"
     is_plugin = package_info.package_type is PackageType.MARKETPLACE_PLUGIN

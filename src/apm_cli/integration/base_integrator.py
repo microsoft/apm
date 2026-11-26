@@ -1416,10 +1416,12 @@ class BaseIntegrator:
         target=None,
         source_plan=None,
         skill_pairing=None,
+        skill_targets=None,
     ) -> None:
         """Initialise and register the link resolver for a package.
 
-        With *target* and *source_plan* (and the effective *skill_pairing*),
+        With *target* and *source_plan* (and the effective *skill_pairing* and
+        *skill_targets* skill deployment receives),
         links to files a promoted skill of the package deploys for *target*
         point at the deployed copy (#5523).
         """
@@ -1485,7 +1487,12 @@ class BaseIntegrator:
                         from apm_cli.integration.skill_preflight import planned_skill_files
 
                         self.link_resolver.deployed_link_targets = planned_skill_files(
-                            package_info, target, project_root, source_plan, skill_pairing
+                            package_info,
+                            target,
+                            project_root,
+                            source_plan,
+                            skill_pairing,
+                            skill_targets,
                         )
         except Exception:
             self.link_resolver = None

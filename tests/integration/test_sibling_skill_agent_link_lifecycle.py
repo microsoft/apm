@@ -50,14 +50,23 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="ascii")
 
 
-def _reporter_world(root: Path, skills_selection: str) -> None:
+# Two parents select different skills per target; both targets share one
+# skills root, so it holds both skills (req-rs-018 pairing union).
+_PAIRED_PARENTS = {
+    "pa": ("other-skill", "copilot"),
+    "pb": ("demo-skill", "codex"),
+}
+
+
+def _reporter_world(root: Path, skills_selection: str | None) -> None:
     """The exact package and manifest from the #5523 report.
 
     A non-empty *skills_selection* adds a second skill and selects only it,
-    so the linked demo-skill is not deployed (the negative control).
+    so the linked demo-skill is not deployed (the negative control). ``None``
+    reaches the package through two parents with distinct per-target pairings.
     """
     pkg = root / "pkg"
-    skills = ("demo-skill", "other-skill") if skills_selection else ("demo-skill",)
+    skills = ("demo-skill", "other-skill") if skills_selection != "" else ("demo-skill",)
     declared = ", ".join(f'"skills/{skill}"' for skill in skills)
     _write(
         pkg / "plugin.json",
@@ -75,11 +84,21 @@ def _reporter_world(root: Path, skills_selection: str) -> None:
         "---\nname: demo-reviewer\ndescription: Demo agent.\n---\n"
         "See [demo-skill](../skills/demo-skill/SKILL.md).\n",
     )
-    _write(
-        root / "apm.yml",
-        "name: repro\nversion: 0.1.0\ntargets:\n  - copilot\n  - codex\n"
-        "dependencies:\n  apm:\n    - path: ./pkg\n" + skills_selection,
-    )
+    header = "name: repro\nversion: 0.1.0\ntargets:\n  - copilot\n  - codex\n"
+    if skills_selection is not None:
+        _write(
+            root / "apm.yml",
+            header + "dependencies:\n  apm:\n    - path: ./pkg\n" + skills_selection,
+        )
+        return
+    for parent, (skill, target) in _PAIRED_PARENTS.items():
+        _write(
+            root / parent / "apm.yml",
+            f"name: {parent}\nversion: 0.1.0\ndependencies:\n  apm:\n"
+            f"    - path: ../pkg\n      skills: [{skill}]\n      targets: [{target}]\n",
+        )
+    parents = "".join(f"    - path: ./{parent}\n" for parent in _PAIRED_PARENTS)
+    _write(root / "apm.yml", header + "dependencies:\n  apm:\n" + parents)
 
 
 def _skill_link(agent_text: str) -> str:
@@ -94,10 +113,16 @@ def _skill_link(agent_text: str) -> str:
     [
         pytest.param("", True, id="sibling-skill-deployed"),
         pytest.param("      skills: [other-skill]\n", False, id="sibling-skill-not-selected"),
+        # Copilot pairs other-skill, Codex pairs demo-skill: the shared root
+        # deploys demo-skill, so the Copilot agent links it too.
+        pytest.param(None, True, id="shared-root-distinct-target-pairings"),
     ],
 )
 def test_agent_link_to_sibling_skill_resolves_on_a_fresh_clone(
-    tmp_path: Path, apm_binary_path: Path, skills_selection: str, linked_skill_deployed: bool
+    tmp_path: Path,
+    apm_binary_path: Path,
+    skills_selection: str | None,
+    linked_skill_deployed: bool,
 ) -> None:
     isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
     env = isolated.subprocess_env()
