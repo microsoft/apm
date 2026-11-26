@@ -1088,6 +1088,11 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.option(
+    "--accept-ref-change",
+    is_flag=True,
+    help="Accept marketplace plugins whose ref changed since it was pinned (a possible ref swap).",
+)
+@click.option(
     "--root",
     "root",
     type=click.Path(file_okay=False, resolve_path=True),
@@ -1140,6 +1145,7 @@ def install(  # noqa: PLR0913
     legacy_skill_paths,
     alias,
     trust_bin,
+    accept_ref_change,
     root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
@@ -1492,6 +1498,7 @@ def install(  # noqa: PLR0913
             logger=logger,
             acquire_lock=not dry_run,
             journal_packages=packages,
+            accept_ref_changes=accept_ref_change,
             journal_options=retry_options(
                 user_scope=scope is InstallScope.USER,
                 dev=dev,

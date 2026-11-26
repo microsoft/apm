@@ -19,7 +19,7 @@ import re
 
 from ._shared import iter_semver_tags
 from .errors import NoMatchingVersionError
-from .ref_resolver import RefResolver
+from .ref_resolver import RefResolver, RemoteRef
 from .semver import satisfies_range
 from .tag_pattern import build_tag_regex, validate_tag_pattern
 
@@ -44,6 +44,49 @@ def is_version_constraint(spec: str) -> bool:
     tag names with prefixes (``v2.1.0``), or commit SHAs.
     """
     return bool(_SEMVER_RANGE_CHARS.search(spec) or _BARE_SEMVER.match(spec))
+
+
+def list_package_refs(
+    owner_repo: str,
+    *,
+    host: str | None = None,
+    token: str | None = None,
+    auth_scheme: str = "basic",
+    auth_resolver=None,
+    git_env: dict[str, str] | None = None,
+    port: int | None = None,
+    remote_url: str | None = None,
+    transport_scheme: str = "https",
+    ssh_user: str = "git",
+) -> list[RemoteRef]:
+    """List the tags and branches of a package remote, annotated tags peeled.
+
+    One ``git ls-remote`` through :class:`RefResolver` with the transport and
+    credentials the caller resolved for that remote.
+    """
+    resolver_kwargs = {
+        "host": host,
+        "token": token,
+        "auth_scheme": auth_scheme,
+    }
+    if git_env is not None:
+        resolver_kwargs["git_env"] = git_env
+    if port is not None:
+        resolver_kwargs["port"] = port
+    if transport_scheme != "https":
+        resolver_kwargs["transport_scheme"] = transport_scheme
+    if ssh_user != "git":
+        resolver_kwargs["ssh_user"] = ssh_user
+    if auth_resolver is not None:
+        resolver_kwargs.update(
+            auth_resolver=auth_resolver,
+            auth_target=host,
+        )
+    resolver = RefResolver(**resolver_kwargs)
+    try:
+        return resolver.list_remote_refs(owner_repo, remote_url=remote_url)
+    finally:
+        resolver.close()
 
 
 def resolve_version_constraint(
@@ -95,29 +138,18 @@ def resolve_version_constraint(
     pinned_pattern = tag_pattern.replace("{name}", plugin_name)
     tag_rx = build_tag_regex(pinned_pattern)
 
-    resolver_kwargs = {
-        "host": host,
-        "token": token,
-        "auth_scheme": auth_scheme,
-    }
-    if git_env is not None:
-        resolver_kwargs["git_env"] = git_env
-    if port is not None:
-        resolver_kwargs["port"] = port
-    if transport_scheme != "https":
-        resolver_kwargs["transport_scheme"] = transport_scheme
-    if ssh_user != "git":
-        resolver_kwargs["ssh_user"] = ssh_user
-    if auth_resolver is not None:
-        resolver_kwargs.update(
-            auth_resolver=auth_resolver,
-            auth_target=host,
-        )
-    resolver = RefResolver(**resolver_kwargs)
-    try:
-        refs = resolver.list_remote_refs(owner_repo, remote_url=remote_url)
-    finally:
-        resolver.close()
+    refs = list_package_refs(
+        owner_repo,
+        host=host,
+        token=token,
+        auth_scheme=auth_scheme,
+        auth_resolver=auth_resolver,
+        git_env=git_env,
+        port=port,
+        remote_url=remote_url,
+        transport_scheme=transport_scheme,
+        ssh_user=ssh_user,
+    )
 
     candidates: list[tuple] = []
     for sv, tag_name, sha in iter_semver_tags(refs, tag_rx):
