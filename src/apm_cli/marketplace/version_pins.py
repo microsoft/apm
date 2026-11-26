@@ -42,12 +42,16 @@ import json
 import logging
 import os
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.remediation import MARKETPLACE_REF_SWAP_ACCEPT
+from ..core.remediation import (
+    MARKETPLACE_REF_SWAP_ACCEPT,
+    MARKETPLACE_REF_SWAP_ACCEPT_INSTALL,
+    either_sentence,
+)
 from .errors import MarketplaceError
 
 logger = logging.getLogger(__name__)
@@ -86,7 +90,9 @@ class RefPinMismatchError(MarketplaceError):
         super().__init__(
             f"Plugin {plugin}@{marketplace} ref changed: was '{previous_ref}', now "
             f"'{current_ref}'. This may indicate a ref swap attack; refusing to install. "
-            f"{MARKETPLACE_REF_SWAP_ACCEPT.bind(key=key).sentence()}"
+            + either_sentence(
+                MARKETPLACE_REF_SWAP_ACCEPT.bind(key=key), MARKETPLACE_REF_SWAP_ACCEPT_INSTALL
+            )
         )
 
 
@@ -435,10 +441,23 @@ class StagedPinRepair:
 class RefPinStage:
     """Ref pins resolved during one install attempt, written only on commit."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, accept_changes: bool = False) -> None:
         self._pins: dict[tuple[str, str, str], tuple[str, str]] = {}
         self._repairs: dict[tuple[str, str, str], StagedPinRepair] = {}
+        self._same_commits: dict[tuple[str, str, str], str] = {}
         self._lock = threading.Lock()
+        # ``apm install --accept-ref-change``: this attempt accepts changed refs.
+        self.accept_changes = accept_changes
+
+    def same_commit(self, refs: tuple[str, str, str]) -> str | None:
+        """Return the commit a ``(key, recorded, current)`` pair was already matched to."""
+        with self._lock:
+            return self._same_commits.get(refs)
+
+    def remember_same_commit(self, refs: tuple[str, str, str], commit: str) -> None:
+        """Record that ``(key, recorded, current)`` select *commit* in this attempt."""
+        with self._lock:
+            self._same_commits[refs] = commit
 
     def add(
         self,
@@ -538,11 +557,15 @@ def committed_ref_pin_repairs() -> tuple[StagedPinRepair, ...]:
     return _committed_repairs
 
 
-def open_ref_pin_stage() -> RefPinStage:
-    """Open the stage that receives pins resolved by this install attempt."""
+def open_ref_pin_stage(*, accept_changes: bool = False) -> RefPinStage:
+    """Open the stage that receives pins resolved by this install attempt.
+
+    With *accept_changes* (``apm install --accept-ref-change``), a ref that
+    contradicts its recorded pin is accepted and recorded on commit.
+    """
     global _active_stage, _committed_repairs
     _committed_repairs = ()
-    stage = RefPinStage()
+    stage = RefPinStage(accept_changes=accept_changes)
     with _stage_lock:
         _active_stage = stage
     return stage
@@ -574,6 +597,59 @@ def stage_ref_pin(
         )
 
 
+def _same_commit(
+    previous_ref: str, ref: str, commit_of: Callable[[str], str | None] | None
+) -> str | None:
+    """Return the commit SHA *ref* names when the recorded ref selects it now, else ``None``.
+
+    Only a full commit SHA replaces a recorded ref: the download then fetches
+    exactly the commit checked here. A tag replacing a recorded SHA could
+    resolve differently at download time, so it is refused. ``None`` keeps
+    the refusal: a ref with no fixed commit, a lookup that fails (offline,
+    unreachable, no credentials) or two different commits.
+    """
+    from ..utils.github_host import is_full_commit_sha
+
+    if commit_of is None or not is_full_commit_sha(ref):
+        return None
+    try:
+        recorded, current = commit_of(previous_ref), commit_of(ref)
+    except Exception as exc:
+        logger.debug("Could not resolve marketplace ref %r to a commit: %s", previous_ref, exc)
+        return None
+    return recorded if recorded and recorded == current else None
+
+
+def _migrate_same_commit_pin(
+    marketplace_name: str,
+    plugin_name: str,
+    previous_ref: str,
+    ref: str,
+    key: str,
+    commit_of: Callable[[str], str | None] | None,
+) -> str | None:
+    """Return the commit a recorded ref and *ref* share, announcing a moved pin once (#5526)."""
+    with _stage_lock:
+        stage = _active_stage
+    refs = (key, previous_ref, ref)
+    commit = stage.same_commit(refs) if stage is not None else None
+    if commit is not None:
+        return commit
+    commit = _same_commit(previous_ref, ref, commit_of)
+    if commit is None:
+        return None
+    if stage is not None:
+        stage.remember_same_commit(refs, commit)
+    from ..utils.console import _rich_info
+
+    _rich_info(
+        f"{plugin_name}@{marketplace_name}: pin moved from tag '{previous_ref}' to commit "
+        f"{commit[:7]} (same code), recorded.",
+        symbol="info",
+    )
+    return commit
+
+
 def enforce_ref_pin(
     marketplace_name: str,
     plugin_name: str,
@@ -583,16 +659,26 @@ def enforce_ref_pin(
     *,
     accept_change: bool = False,
     catalog: str = "",
+    commit_of: Callable[[str], str | None] | None = None,
 ) -> str | None:
     """Refuse a ref that contradicts the recorded pin; otherwise stage it.
 
     A contradicting ref raises :class:`RefPinMismatchError` unless
-    *accept_change* is set, which only an explicit ``apm update`` of that
-    plugin does. A staged ref is written only when the install commits (#4400).
+    *accept_change* is set (an explicit ``apm update`` of that plugin) or the
+    install attempt accepts changes (``apm install --accept-ref-change``).
+    When *ref* is a full commit SHA and *commit_of* shows the recorded ref
+    selects that commit now (a tag peeled to the SHA a catalog adds), the pin
+    moves to the SHA instead (#5526); a commit that cannot be determined
+    still refuses.
+    A staged ref is written only when the install commits (#4400).
 
     Returns:
         The previously pinned ref when an accepted change replaces it, else ``None``.
     """
+    with _stage_lock:
+        stage = _active_stage
+    by_install_flag = not accept_change and stage is not None and stage.accept_changes
+    accept_change = accept_change or by_install_flag
     repair = False
     conflicting_pins: dict[str, str] | None = None
     try:
@@ -607,7 +693,13 @@ def enforce_ref_pin(
         repair = True
     if previous_ref is not None and not accept_change:
         key = _pin_key(marketplace_name, plugin_name, version, catalog)
-        raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
+        commit = _migrate_same_commit_pin(
+            marketplace_name, plugin_name, previous_ref, ref, key, commit_of
+        )
+        if commit is None:
+            raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
+        stage_ref_pin(marketplace_name, plugin_name, ref, version, catalog)
+        return None
     if previous_ref is not None and accept_change:
         repair = True
     stage_ref_pin(
@@ -620,6 +712,9 @@ def enforce_ref_pin(
         previous_ref=previous_ref,
         conflicting_pins=conflicting_pins,
     )
+    if conflicting_pins and by_install_flag:
+        # ``apm update`` lists repaired pins in its plan; an install names them here.
+        return ", ".join(f"{alias}={pinned}" for alias, pinned in sorted(conflicting_pins.items()))
     return previous_ref
 
 

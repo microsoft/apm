@@ -387,3 +387,65 @@ class TestWarningHandler:
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) >= 1
         assert "evil-mkt" in warnings[0].message
+
+
+def test_ref_commit_lookup_peels_tags_names_shas_and_ignores_branches():
+    """#5526: the pin owner compares commits; only tags and SHAs name one."""
+    from apm_cli.marketplace.ref_resolver import RemoteRef
+    from apm_cli.marketplace.resolver import _ref_commit_lookup
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    commit = "5246F7B193B58A32AC8A15FC76AEDF37C42B042C"
+    refs = [
+        RemoteRef(name="refs/tags/v0.2.1", sha=commit, peeled_sha=commit),
+        RemoteRef(name="refs/heads/main", sha="2" * 40),
+        RemoteRef(name="refs/heads/release", sha="4" * 40),
+        RemoteRef(name="refs/tags/release", sha=commit, peeled_sha=commit),
+        RemoteRef(name="refs/tags/refs/heads/main", sha=commit, peeled_sha=commit),
+    ]
+    with patch(
+        "apm_cli.marketplace.version_resolver.list_package_refs", return_value=refs
+    ) as listing:
+        commit_of = _ref_commit_lookup(
+            lambda: DependencyReference.parse("acme/okf"), auth_resolver=None
+        )
+        assert commit_of("v0.2.1") == commit.lower()
+        assert commit_of("refs/tags/v0.2.1") == commit.lower()
+        assert commit_of("main") is None
+        assert commit_of("release") is None, "a name that is a branch and a tag is ambiguous"
+        assert commit_of("refs/tags/release") == commit.lower()
+        assert commit_of("refs/heads/main") is None, "a qualified branch never reads a tag"
+        assert commit_of("3" * 40) == "3" * 40
+    assert listing.call_count == 1
+    assert listing.call_args.args == ("acme/okf",)
+
+
+def test_ref_commit_lookup_lists_nothing_when_registry_only(monkeypatch):
+    """PROXY_REGISTRY_ONLY refuses source listing: a tag names no commit, the pin refuses."""
+    from apm_cli.marketplace.resolver import _ref_commit_lookup
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+    with patch("apm_cli.marketplace.version_resolver.list_package_refs") as listing:
+        commit_of = _ref_commit_lookup(
+            lambda: DependencyReference.parse("acme/okf"), auth_resolver=None
+        )
+        assert commit_of("v0.2.1") is None
+        assert commit_of("5" * 40) == "5" * 40
+    listing.assert_not_called()
+
+
+def test_ref_commit_lookup_never_contacts_a_policy_denied_source():
+    """An org policy that denies the package identity refuses before any listing."""
+    from apm_cli.marketplace.resolver import _ref_commit_lookup
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    with (
+        patch("apm_cli.policy.install_preflight.identity_policy_denial", return_value="denied"),
+        patch("apm_cli.marketplace.version_resolver.list_package_refs") as listing,
+    ):
+        commit_of = _ref_commit_lookup(
+            lambda: DependencyReference.parse("acme/okf"), auth_resolver=None
+        )
+        assert commit_of("v0.2.1") is None
+    listing.assert_not_called()

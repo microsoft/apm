@@ -292,6 +292,62 @@ class TestCatalogScopedRefPins:
         assert "team/tool/1.0.0" not in persisted
         assert "other/tool/1.0.0" not in persisted
 
+    def test_an_install_accepting_ref_changes_names_the_conflicting_pins_it_replaces(self):
+        """``--accept-ref-change`` never replaces conflicting legacy pins silently."""
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
+
+        self._write({"team/tool/1.0.0": "v1", "other/tool/1.0.0": "v2"})
+        source_other = MarketplaceSource(name="other", owner="a", repo="catalog")
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        registry_mod.add_marketplace(source_other)
+
+        stage = open_ref_pin_stage(accept_changes=True)
+        try:
+            catalog = catalog_pin_identity(source_other)
+            replaced = enforce_ref_pin("other", "tool", "v3", "1.0.0", catalog=catalog)
+            stage.commit()
+        finally:
+            stage.discard()
+        assert replaced == "other=v2, team=v1"
+        assert json.loads(self.pins.read_text()) == {f"{catalog}#tool/1.0.0": "v3"}
+
+    def test_an_install_accepting_ref_changes_warns_once_per_accepted_plugin(self):
+        """``--accept-ref-change`` is blanket, so each accepted pin prints its own line."""
+        from unittest.mock import patch
+
+        from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin
+        from apm_cli.marketplace.resolver import resolve_marketplace_plugin
+        from apm_cli.marketplace.version_pins import open_ref_pin_stage
+
+        plugins = tuple(
+            MarketplacePlugin(
+                name=name,
+                source={"type": "github", "repo": f"acme/{name}", "ref": ref},
+                source_marketplace="mkt",
+            )
+            for name, ref in (("alpha", "v2"), ("beta", "v9"))
+        )
+        registry_mod.add_marketplace(MarketplaceSource(name="mkt", owner="acme", repo="catalog"))
+        self._write({"mkt/alpha": "v1", "mkt/beta": "v8"})
+        captured: list[str] = []
+        stage = open_ref_pin_stage(accept_changes=True)
+        try:
+            with patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=MarketplaceManifest(name="mkt", plugins=plugins, plugin_root=""),
+            ):
+                for plugin in plugins:
+                    resolve_marketplace_plugin(plugin.name, "mkt", warning_handler=captured.append)
+            stage.commit()
+        finally:
+            stage.discard()
+        assert sorted(json.loads(self.pins.read_text()).values()) == ["v2", "v9"]
+        assert [line for line in captured if "ref changed" in line] == [
+            "Plugin alpha@mkt ref changed: was 'v1', now 'v2'. Accepted by --accept-ref-change.",
+            "Plugin beta@mkt ref changed: was 'v8', now 'v9'. Accepted by --accept-ref-change.",
+        ]
+
     def test_conflicting_legacy_pins_repair_when_resolved_ref_matches_installed_ref(self):
         from apm_cli.marketplace.source_identity import catalog_pin_identity
         from apm_cli.marketplace.version_pins import (

@@ -377,6 +377,7 @@ class InstallTransaction:
         recover_deploys: bool = True,
         journal_packages: Sequence[str] = (),
         journal_options: tuple[list[str], list[str]] = ([], []),
+        accept_ref_changes: bool = False,
     ) -> None:
         """Capture the manifest and create one resolution staging session.
 
@@ -384,6 +385,8 @@ class InstallTransaction:
         dry run, which never change deployed files, not even to replay a journal.
         *journal_packages* are the packages ``apm install <package>`` adds: the
         pre-install manifest is then kept on disk until the lockfile commits.
+        *accept_ref_changes* (``--accept-ref-change``) lets this attempt accept
+        marketplace plugin refs that contradict their recorded pins.
         """
         from apm_cli.cache.deploy_store import process_umask
 
@@ -409,7 +412,7 @@ class InstallTransaction:
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
             self._resolution = ResolutionStagingSession(apm_modules_dir)
             # Marketplace ref pins resolved by this attempt; written on commit only.
-            self._ref_pins = open_ref_pin_stage()
+            self._ref_pins = open_ref_pin_stage(accept_changes=accept_ref_changes)
             # Commit reachability verdicts of this attempt; written on commit only.
             self._verdicts = open_verdict_stage()
             if journal_packages:
