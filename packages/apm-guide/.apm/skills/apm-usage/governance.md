@@ -76,7 +76,7 @@ manifest:
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
-  exclude: []                           # path globs to suppress (known harness-managed files)
+  exclude: []                           # path globs to suppress (known harness-managed files); an MCP config an install would create (e.g. .kiro/settings/mcp.json) is counted, so exclude it or use warn
 
 registry_source:                        # experimental: requires `apm experimental enable registries`
   require: []                           # registry names that MUST be reachable in the merged registry map

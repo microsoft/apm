@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 _VERSION = re.compile(r"Unsupported lockfile version (.+?);")
+_UNPARSEABLE = "Invalid lockfile YAML:"
 
 
 def with_version_remedy(exc: Exception, path: Path) -> Exception:
@@ -19,6 +20,8 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
     from ..core.scope import is_user_scope_root
     from .lockfile import UnsupportedLockfileVersionError
 
+    if str(exc).startswith(_UNPARSEABLE):
+        return _with_regenerate_remedy(exc, path)
     if not isinstance(exc, UnsupportedLockfileVersionError) or getattr(exc, "remediations", ()):
         return exc
     match = _VERSION.search(str(exc))
@@ -30,5 +33,25 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
     error = type(exc)(f"{exc}. {remediation.either_sentence(regen, upgrade)}")
     error.version = version.strip("'")
     error.remediations = (regen, upgrade)
+    error.__cause__ = exc
+    return error
+
+
+def _with_regenerate_remedy(exc: Exception, path: Path) -> Exception:
+    """Return *exc* ending with how to regenerate *path*, whose YAML did not parse."""
+    from ..core import remediation
+    from ..core.scope import get_source_root_override, is_user_scope_root
+
+    if get_source_root_override() is not None:
+        # Under `apm install --root` a bare `apm install` would act on the source repo.
+        deploy_dir = path.resolve().parent
+        regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.resolve())
+        shown = f'"{deploy_dir}"' if any(c.isspace() for c in str(deploy_dir)) else deploy_dir
+        regen = regen.with_command(f"apm install --root {shown}")
+    else:
+        regen = remediation.LOCKFILE_UNREADABLE.bind(lockfile=path.name)
+        if is_user_scope_root(path.parent):
+            regen = regen.with_command("apm install -g")
+    error = type(exc)(f"{exc}\n{regen.sentence()}")
     error.__cause__ = exc
     return error

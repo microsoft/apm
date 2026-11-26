@@ -149,6 +149,9 @@ def refuse_non_branch_ref(ref: str, where: str) -> None:
         )
 
 
+ABBREVIATED_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,39}$")
+
+
 def exact_branch_or_tag_sha(records: Iterable[tuple[str, str]], ref: str, where: str) -> str:
     """Return the commit *ref* names among ``git ls-remote`` ``(sha, refname)`` records.
 
@@ -174,6 +177,11 @@ def exact_branch_or_tag_sha(records: Iterable[tuple[str, str]], ref: str, where:
             "Spell it in full as refs/heads/<name> or refs/tags/<name>."
         )
     if not matches:
+        if ABBREVIATED_SHA_RE.match(ref):
+            raise RuntimeError(
+                f"Could not resolve ref '{ref}' for {where}: this host cannot expand an "
+                "abbreviated commit SHA. Use the full 40-character SHA, or a branch or tag."
+            )
         raise RuntimeError(
             f"Could not resolve ref '{ref}' for {where}: it is not a branch or tag "
             "of the origin. Use a branch, a tag, or a commit SHA reachable from one."

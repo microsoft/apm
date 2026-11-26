@@ -327,6 +327,8 @@ def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission
     transitive server ``mcp.allow`` does not list; with ``enforcement: block``
     the install stops before any write, as the direct mcp-allowlist check does.
     """
+    from apm_cli.security.trust import TRUST_TRANSITIVE_FIX
+
     refused = policy_transitive_refusals(view)
     policy = admission.org_policy()
     if not refused or getattr(policy, "enforcement", None) != "block":
@@ -334,7 +336,7 @@ def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission
     raise PolicyViolationError(
         "Install blocked by org policy: mcp.trust_transitive is false and mcp.allow does "
         f"not list transitive MCP server(s) {', '.join(refused)}. Ask the policy owner to "
-        "add them to mcp.allow or set mcp.trust_transitive: true."
+        f"{TRUST_TRANSITIVE_FIX}."
     )
 
 

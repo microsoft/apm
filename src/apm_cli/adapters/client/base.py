@@ -579,6 +579,10 @@ class MCPClientAdapter(ABC):
         """Get the path to the MCP configuration file."""
         pass
 
+    def peek_config_path(self):
+        """The MCP configuration file path, resolved without touching the filesystem."""
+        return self.get_config_path()
+
     @abstractmethod
     def update_config(self, config_updates) -> bool | None:
         """Update the MCP configuration.

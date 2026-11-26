@@ -231,13 +231,15 @@ def test_user_file_absolute_and_home_relative_lifecycle(
     scenario.run("install", "--global", *_INSTALL)
     assert _assert_state(root, deployment, source, reference, directory, user=True) == first
     source.write_bytes(_content("edited"))
+    # Update refreshes a changed local file the way install does (#5463).
     scenario.run("update", "--global", "--yes", "--target", "copilot")
-    assert (deployment / directory / source.name).read_bytes() == _content()
-    assert load_yaml(root / "apm.lock.yaml") == first
+    assert (deployment / directory / source.name).read_bytes() == _content("edited")
+    edited = _assert_state(root, deployment, source, reference, directory, user=True)
+    assert edited != first
     scenario.run("install", "--global", *_INSTALL)
-    _assert_state(root, deployment, source, reference, directory, user=True)
+    assert _assert_state(root, deployment, source, reference, directory, user=True) == edited
     scenario.run("update", "--global", "--yes", "--target", "copilot")
-    _assert_state(root, deployment, source, reference, directory, user=True)
+    assert _assert_state(root, deployment, source, reference, directory, user=True) == edited
     assert (root / "apm.yml").read_bytes() == manifest
     _assert_audit_read_only(scenario, user=True)
     scenario.run("uninstall", "--global", f"_local/{source.name}")

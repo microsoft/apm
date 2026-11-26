@@ -207,6 +207,8 @@ Rules over MCP server references, including transitive ones declared by deep dep
 
 Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 
+The check also counts the MCP server config files an install would create or edit in a governed directory, such as `.kiro/settings/mcp.json`: they carry server ownership records, not lockfile rows, so under `deny` the install refuses before writing them. Add the file to `unmanaged_files.exclude`, or set `action: warn`, to keep installing. Installs that pass today can be refused after upgrading.
+
 | Field         | Type           | Default  | Notes                                                                            |
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift: under `enforcement: block`, `apm install` refuses when a governed directory would hold a file no lockfile row claims. `--mcp` and a local bundle refuse before writing anything; an install that deploys packages or local `.apm/` content restores every file it deployed and its lockfile; `--dry-run` previews it; `apm audit --ci` fails the same state. Known limit: this verdict needs the deployed files, so an install killed between deploy and restore leaves them unrecorded. |

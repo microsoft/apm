@@ -80,9 +80,10 @@ from apm_cli.install.manifest_helpers import (
     _merge_packages_into_yml,
     _prepare_dry_run_manifest_path,
     _prepare_user_scope_for_install,
-    _report_bootstrap_manifest,
+    bootstrap_install_manifest,
     preflight_bootstrap_targets,
 )
+from apm_cli.install.manifest_journal import retry_options
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
@@ -90,7 +91,6 @@ from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.outcome import frozen_verified_line
 from apm_cli.install.package_resolution import (
-    GIT_PARENT_USER_SCOPE_ERROR,
     apply_cli_skill_pin,
     borrow_cross_section_declarations,
     cli_skill_subset,
@@ -122,6 +122,7 @@ from apm_cli.install.phases.local_content import (
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
 from apm_cli.install.pipeline_entry import install_pipeline_options, pipeline_preview
+from apm_cli.install.reference_support import _reject, _scoped_lockfile
 from apm_cli.install.repository_access import probe_failure_reason
 
 # Re-export DI-seam helpers from the install services module so that test
@@ -193,8 +194,6 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
     _rich_success,
 )
 from ._helpers import (
-    _create_minimal_apm_yml,
-    _get_bootstrap_config,
     explicit_policy_option,
     trust_transitive_mcp_option,
 )
@@ -208,53 +207,22 @@ dict = builtins.dict
 APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
-    from ..deps.apm_resolver import APMDependencyResolver
     from ..deps.lockfile import (
         LockFile,
         LockfileSymlinkError,
         get_lockfile_path,
         migrate_lockfile_if_needed,
     )
+    from ..install.scoped_resolver import _ScopedInstallDependencyResolver
     from ..integration.mcp_integrator import (
         MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
     )
     from ..models.apm_package import APMPackage, DependencyReference
 
-    class _ScopedInstallDependencyResolver(APMDependencyResolver):
-        """Install-time resolver; blocks ``git: parent`` expansion at user scope."""
-
-        def __init__(self, *args, install_scope=None, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._install_scope = install_scope
-
-        def expand_parent_repo_decl(self, parent_dep, child_dep):
-            from ..core.scope import InstallScope
-
-            if self._install_scope is InstallScope.USER:
-                raise ValueError(GIT_PARENT_USER_SCOPE_ERROR)
-            return super().expand_parent_repo_decl(parent_dep, child_dep)
-
     APM_DEPS_AVAILABLE = True
 except ImportError as e:
     _APM_IMPORT_ERROR = str(e)
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
-
-
-def _reject(invalid_outcomes, logger, package, reason) -> None:
-    """Record *package* as invalid for *reason* and report it."""
-    invalid_outcomes.append((package, reason))
-    if logger:
-        logger.validation_fail(package, reason)
-
-
-def _scoped_lockfile(scope):
-    """Read the lockfile the scope's marketplace entries were locked in (#3959)."""
-    from ..core.scope import InstallScope, get_apm_dir
-    from ..deps.lockfile import resolve_lockfile_path_for_read
-
-    # Read-only: a legacy apm.lock not yet migrated still carries the origin.
-    apm_dir = get_apm_dir(scope or InstallScope.PROJECT)
-    return LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True))
 
 
 def _resolve_package_references(
@@ -808,7 +776,10 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     from ..install.commit_gate import judge_mcp_install_files
 
-    judge_mcp_install_files(scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run)
+    entry = (runtime, exclude, target_decision)
+    judge_mcp_install_files(
+        scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run, mcp_entry=entry
+    )
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -1512,35 +1483,40 @@ def install(  # noqa: PLR0913
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
         auth_resolver.set_logger(logger)
 
-        # Capture manifest state before this attempt can auto-create apm.yml.
-        apm_yml_exists = manifest_path.exists()
         transaction = InstallTransaction(
             manifest_path=manifest_path,
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
             acquire_lock=not dry_run,
+            journal_packages=packages,
+            journal_options=retry_options(
+                user_scope=scope is InstallScope.USER,
+                dev=dev,
+                skills=skill_names,
+                target=target,
+                root=root,
+            ),
         )
+        # Capture manifest state after a killed install's apm.yml was restored
+        # and before this attempt can auto-create apm.yml.
+        apm_yml_exists = manifest_path.exists()
 
         if not apm_yml_exists and packages:
             derived_project_name = (
-                Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
-            )
+                Path.cwd() if scope is InstallScope.PROJECT else Path.home()
+            ).name
             project_name = _resolve_bootstrap_project_name(derived_project_name)
-            if project_name != derived_project_name:
-                logger.verbose_detail(
-                    f'Using default project name "{project_name}" because '
-                    f"derived name {derived_project_name!a} is invalid"
-                )
-            config = _get_bootstrap_config(project_name) | (
-                {"targets": manifest_targets} if manifest_targets else {}
-            )
-            _create_minimal_apm_yml(config, target_path=manifest_path)
-            _report_bootstrap_manifest(
-                logger=logger,
+            bootstrap_install_manifest(
+                derived_project_name=derived_project_name,
+                project_name=project_name,
+                manifest_path=manifest_path,
                 manifest_display=manifest_display,
                 manifest_targets=manifest_targets,
+                target=target,
+                logger=logger,
                 dry_run=dry_run,
+                transaction=transaction,
             )
 
         if not apm_yml_exists and not packages:
@@ -1811,9 +1787,8 @@ def _install_apm_packages(ctx, outcome):
         from apm_cli.install.request import InstallRequest
 
         InstallService.enforce_frozen(
-            InstallRequest(
-                apm_package=apm_package,
-                frozen=True,
+            InstallRequest.frozen_preflight(
+                apm_package,
                 scope=ctx.scope,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
                 no_policy=ctx.no_policy,

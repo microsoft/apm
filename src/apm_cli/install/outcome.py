@@ -273,6 +273,27 @@ def direct_dependency_failed(ctx: InstallContext) -> bool:
     return bool(set(ctx.callback_failures) & direct_keys)
 
 
+def selected_dependency_failed(ctx: InstallContext) -> bool:
+    """Whether a direct dependency, or one the selected graph reaches, failed (#5463)."""
+    selected = {dep.get_unique_key() for dep in ctx.deps_to_install}
+    return direct_dependency_failed(ctx) or bool(set(ctx.callback_failures) & selected)
+
+
+def raise_selected_dependency_failure(ctx: InstallContext) -> NoReturn:
+    """Fail before the update plan with each stored resolution diagnostic (#5463).
+
+    Drains transitive failures into the run's diagnostics as install does,
+    then renders them through install's barrier; each names its own fix.
+    """
+    ctx.diagnostics = ctx.diagnostics or getattr(ctx.logger, "diagnostics", None)
+    if ctx.diagnostics is not None:
+        for dep_display, fail_msg in ctx.transitive_failures:
+            ctx.diagnostics.error(fail_msg, package=dep_display)
+    raise_direct_dependency_failure(
+        ctx, "One or more dependencies failed to resolve; nothing was changed."
+    )
+
+
 def stop_before_integration(ctx: InstallContext, diagnostics: object) -> InstallResult:
     """End an install whose direct dependency failed, before anything integrates.
 
@@ -287,15 +308,18 @@ def stop_before_integration(ctx: InstallContext, diagnostics: object) -> Install
     raise_direct_dependency_failure(ctx)
 
 
-def raise_direct_dependency_failure(ctx: InstallContext) -> NoReturn:
+def raise_direct_dependency_failure(
+    ctx: InstallContext,
+    message: str = (
+        "One or more direct dependencies failed validation. Run with --verbose for details."
+    ),
+) -> NoReturn:
     """Render the diagnostic summary and fail the install on a direct dependency."""
     from .errors import DirectDependencyError
 
     if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
         ctx.diagnostics.render_summary()
-    raise DirectDependencyError(
-        "One or more direct dependencies failed validation. Run with --verbose for details."
-    )
+    raise DirectDependencyError(message)
 
 
 def local_bundle_update_next_step(names, file_count: int, scope) -> str:

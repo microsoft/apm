@@ -93,11 +93,23 @@ def _nearest_parents(walk, key: str) -> list[str]:
 
 def _declaring_edge(walk, key: str, nearest: list[str], renames=None) -> str:
     """The parent whose edge install records for *key*: the shared diamond rule (#5386)."""
-    from ...deps.local_identity import recorded_declaring_edge
+    from ...deps.local_identity import declared_dir, recorded_declaring_edge, same_stored_leaf
 
     edges = walk.declaring_edges.get(key, {})
     ranked = _ranked_parent(nearest, renames or {})
-    return recorded_declaring_edge(nearest[0], ranked, lambda p: (edges.get(p) or (None, None))[1])
+    dirs = getattr(walk, "local_dirs", None) or {}
+
+    def declared(parent: str) -> str | None:
+        return (edges.get(parent) or (None, None))[1]
+
+    def one_entry(first: str, chosen: str) -> bool:
+        if dirs.get(first) is None or dirs.get(chosen) is None:
+            return False
+        return same_stored_leaf(
+            declared_dir(dirs[first], declared(first)), declared_dir(dirs[chosen], declared(chosen))
+        )
+
+    return recorded_declaring_edge(nearest[0], ranked, declared, one_entry)
 
 
 def _root_identities(

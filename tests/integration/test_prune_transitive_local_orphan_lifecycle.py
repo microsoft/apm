@@ -375,6 +375,48 @@ def test_install_and_prune_keep_one_row_per_folded_directory(
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("z_spells_f", "a_spells_f"),
+    [
+        pytest.param("F-Pkg", "f-pkg", id="case-respelling"),
+        pytest.param(f"f{_NFC}", f"f{_NFD}", id="nfc-respelling"),
+    ],
+)
+def test_a_respelled_diamond_records_the_ranked_parents_edge(
+    tmp_path: Path, apm_binary_path: Path, z_spells_f: str, a_spells_f: str
+) -> None:
+    """#5457: parents at different directory depths spell the shared dir differently.
+
+    z (listed first) declares ``../../shared/<z spelling>`` and a declares
+    ``../shared/<a spelling>``; on a folding volume they are one node, ranked to a.
+    Its row takes a's edge, so ``declaring_parent`` names the ``resolved_by``
+    parent and ``install --frozen`` accepts the lock as written.
+    """
+    if not _fs_folds(z_spells_f, a_spells_f, tmp_path):
+        pytest.skip("this filesystem keeps both spellings distinct")
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "shared" / z_spells_f, "f")
+    _skill_package(vendor / "deep" / "z", "z", (f"../../shared/{z_spells_f}",))
+    _skill_package(vendor / "a", "a", (f"../shared/{a_spells_f}",))
+    _manifest(world, ["./vendor/deep/z", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    installed = lock_bytes(world.project)
+
+    frozen = world.apm("install", "--frozen", expect=None)
+
+    rows = _rows(world)
+    [f_row] = [row for row in rows.values() if row.get("name") == "f"]
+    parent = rows[f_row["resolved_by"]]
+    assert f_row["resolved_by"].endswith("/a"), f_row
+    assert f_row["declaring_parent"] == parent["local_path"], (f_row, parent)
+    assert f_row["local_path"] == f"../shared/{a_spells_f}", f_row
+    assert frozen.returncode == 0, _output(frozen)
+    assert lock_bytes(world.project) == installed
+
+
 def _lock_rows_named(world: ReplayWorld, name: str) -> list[str]:
     """Every lock row (not deduplicated by key) of the package *name*."""
     lock = load_yaml(world.project / "apm.lock.yaml")
