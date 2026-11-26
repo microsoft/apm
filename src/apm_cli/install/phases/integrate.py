@@ -193,11 +193,11 @@ def _resolve_download_strategy(
             )
         fetch_commit = getattr(dep_ref, "fetch_commit", None)
         if isinstance(fetch_commit, str) and is_full_revision_pin(fetch_commit):
-            # #5525: resolution already pinned this package's same-repository
-            # children to fetch_commit; reuse the copy only at that commit.
+            # #5525: its same-repo children were pinned to fetch_commit; reuse only that.
             copy_check = bool(locked_dep) and locked_dep.resolved_commit == fetch_commit
             if not copy_check:
-                # A moved commit legitimately changes content (as branch_ref_drift).
+                # A moved commit is a changed ref (vetoes cache shortcuts, as branch_ref_drift).
+                ref_changed = True
                 ctx.expected_hash_change_deps.add(dep_key)
         if copy_check:
             # The canonical copy-validity owner decides (#3884): the resolver
