@@ -87,8 +87,6 @@ def planned_skill_files(
     Unknown plans, native skills and executables yield no entry (the caller
     keeps its fallback), so the map never names a file deployment skips.
     """
-    import os
-
     from apm_cli.integration.skill_bundle_routes import promoted_skill_name
     from apm_cli.integration.skill_integrator import SkillIntegrator
     from apm_cli.integration.skill_support import _build_deployable_copy_ignore
@@ -112,6 +110,7 @@ def planned_skill_files(
     mirror_root = resolve_path(package_info.install_path) / ".apm" / "skills"
     is_plugin = package_info.package_type is PackageType.MARKETPLACE_PLUGIN
     ignore = _build_deployable_copy_ignore(skip_bin=True, source_plan=source_plan)
+    walker = BaseIntegrator()
     planned: dict[Path, Path] = {}
     for key, source in selection.children.items():
         if not (source / "SKILL.md").is_file():
@@ -121,15 +120,11 @@ def planned_skill_files(
         destination = skills_root / promoted_skill_name(source.name)
         source = source.resolve()
         aliases = (source, mirror_root / key) if is_plugin else (source,)
-        for directory, dirs, files in os.walk(source):
-            skipped = set(ignore(directory, [*dirs, *files]))
-            dirs[:] = [name for name in dirs if name not in skipped]
-            relative_dir = Path(directory).relative_to(source)
-            for name in files:
-                if name in skipped:
-                    continue
-                for alias in aliases:
-                    planned[alias / relative_dir / name] = destination / relative_dir / name
+        # The same admitted-member walk the skill copy performs.
+        for member in walker.admitted_source_members(source, ignore):
+            relative = member.relative_to(source)
+            for alias in aliases:
+                planned[alias / relative] = destination / relative
     return planned
 
 

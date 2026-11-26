@@ -340,9 +340,14 @@ class UnifiedLinkResolver:
         # Calculate relative path from target location to actual source file
         # The shared helper owns ../ handling and cross-drive refusal. Audit
         # replay renders in the live deployment coordinates install used (#4832).
-        return portable_link_relpath(
-            self._live_context_source(actual_file, ctx), self._live_target_location(ctx)
+        # A context file a skill of this install deploys links its deployed copy (#5523).
+        deployed = (ctx.deployed_link_targets or {}).get(actual_file.resolve())
+        source = (
+            self._live_deployed_path(deployed, ctx)
+            if deployed is not None
+            else self._live_context_source(actual_file, ctx)
         )
+        return portable_link_relpath(source, self._live_target_location(ctx))
 
     @staticmethod
     def _live_context_source(actual_file: Path, ctx: LinkResolutionContext) -> Path:
