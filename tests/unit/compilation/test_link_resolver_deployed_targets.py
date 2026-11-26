@@ -1,0 +1,55 @@
+"""Links to files the same install deploys name the deployed copy (#5523)."""
+
+from pathlib import Path
+
+import pytest
+
+from apm_cli.compilation.link_resolver import UnifiedLinkResolver
+
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I7")]
+
+
+class TestDeployedFileLinks:
+    """A link to a file the same install deploys names the deployed copy (#5523)."""
+
+    def _world(self, tmp_path: Path):
+        project = tmp_path / "project"
+        package = project / "apm_modules" / "_local" / "pkg"
+        agent = package / ".apm" / "agents" / "reviewer.agent.md"
+        skill = package / ".apm" / "skills" / "demo" / "SKILL.md"
+        notes = package / ".apm" / "notes.md"
+        for path in (agent, skill, notes):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x", encoding="utf-8")
+        resolver = UnifiedLinkResolver(project)
+        resolver.package_root = package
+        resolver.deployment_package_root = package
+        resolver.deployed_link_targets = {
+            skill.resolve(): project / ".agents" / "skills" / "demo" / "SKILL.md"
+        }
+        return project, agent, resolver
+
+    def test_deployed_sibling_skill_links_to_deployed_copy(self, tmp_path):
+        project, agent, resolver = self._world(tmp_path)
+        content = "See [demo](../skills/demo/SKILL.md#use) and [notes](../notes.md)."
+        result = resolver.resolve_links_for_installation(
+            content, agent, project / ".github" / "agents" / "reviewer.agent.md"
+        )
+        assert "[demo](../../.agents/skills/demo/SKILL.md#use)" in result
+        # Negative control: a file no primitive deploys keeps the apm_modules projection.
+        assert "[notes](../../apm_modules/_local/pkg/.apm/notes.md)" in result
+
+    def test_replay_renders_deployed_copy_in_live_frame(self, tmp_path):
+        project, agent, resolver = self._world(tmp_path)
+        scratch = tmp_path / "scratch"
+        resolver.deployment_frame = (scratch, project)
+        resolver.deployed_link_targets = {
+            path: scratch / ".agents" / "skills" / "demo" / "SKILL.md"
+            for path in resolver.deployed_link_targets
+        }
+        result = resolver.resolve_links_for_installation(
+            "[demo](../skills/demo/SKILL.md)",
+            agent,
+            scratch / ".codex" / "agents" / "reviewer.toml",
+        )
+        assert result == "[demo](../../.agents/skills/demo/SKILL.md)"

@@ -10,7 +10,7 @@
   ],
   "regression_tests": [
     "tests/integration/test_sibling_skill_agent_link_lifecycle.py::test_agent_link_to_sibling_skill_resolves_on_a_fresh_clone",
-    "tests/unit/compilation/test_link_resolver.py::TestDeployedFileLinks::test_deployed_sibling_skill_links_to_deployed_copy",
-    "tests/unit/integration/test_skill_preflight.py::test_planned_skill_files_maps_selected_skill_files_to_target_destination"
+    "tests/unit/compilation/test_link_resolver_deployed_targets.py::TestDeployedFileLinks::test_deployed_sibling_skill_links_to_deployed_copy",
+    "tests/unit/integration/test_planned_skill_files.py::test_planned_skill_files_maps_selected_skill_files_to_target_destination"
   ]
 }
