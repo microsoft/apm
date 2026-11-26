@@ -100,6 +100,7 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 from ._helpers import (
     UnknownPackageError,
     _find_apm_yml,
+    ensure_project_root_is_not_user_scope,
     explicit_policy_option,
     resolve_requested_packages,
     trust_transitive_mcp_option,
@@ -870,6 +871,7 @@ def update(
         project_root = manifest_path.parent
     else:
         scope = InstallScope.PROJECT
+        ensure_project_root_is_not_user_scope(Path.cwd(), command="update")
         manifest_path = _find_apm_yml()
         if manifest_path is None:
             # Back-compat shim (one-release): when run outside a project,

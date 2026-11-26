@@ -1,0 +1,6 @@
+name: home
+version: 1.0.0
+targets: [claude]
+dependencies:
+  apm:
+    - ./src/pkgs/a

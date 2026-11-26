@@ -39,6 +39,7 @@ from ...install.phases.finalize import hint_compile_after_removal, snapshot_comp
 from ...models.apm_package import APMPackage
 from ...models.dependency.selection import manifest_declarations_of
 from ...utils.path_security import PathTraversalError
+from .._helpers import ensure_project_root_is_not_user_scope
 from .engine import (
     IntegrationCleanupOutcome,
     LocalSurvivorRefreshError,
@@ -1337,6 +1338,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
     )
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
+    ensure_project_root_is_not_user_scope(Path.cwd(), user_scope=global_, command="uninstall")
 
     manifest_path = get_manifest_path(scope)
     apm_dir = require_current_cli(get_apm_dir(scope), command="apm uninstall")

@@ -50,6 +50,103 @@ class ProjectShadowedExecutableError(FileNotFoundError):
         )
 
 
+def same_directory(first: Path, second: Path) -> bool:
+    """Compare by identity, so a case-variant or symlinked spelling matches."""
+    if first == second:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+_RESOLVED_HOME: dict[str, Path] = {}
+_HOME_CHAIN: dict[Path, frozenset[tuple[int, int]]] = {}
+_LEVEL_VERDICTS: dict[tuple[Path, Path], bool] = {}
+
+
+def resolved_home() -> Path | None:
+    """Return the resolved home directory, or None when it cannot be determined.
+
+    Only a successful resolution is remembered: a transient failure must not
+    disable the HOME ceiling for the rest of the process.
+    """
+    try:
+        raw = str(Path.home())
+        cached = _RESOLVED_HOME.get(raw)
+        if cached is None:
+            cached = _RESOLVED_HOME[raw] = Path(raw).resolve()
+        return cached
+    except (OSError, RuntimeError):
+        return None
+
+
+def is_home(directory: Path) -> bool:
+    """Whether *directory* is the home directory (by identity, not spelling)."""
+    home = resolved_home()
+    return home is not None and same_directory(directory, home)
+
+
+def _home_chain_identities(home: Path) -> frozenset[tuple[int, int]] | None:
+    """(dev, ino) of *home* and each ancestor; cached only when every level stat'ed."""
+    cached = _HOME_CHAIN.get(home)
+    if cached is not None:
+        return cached
+    try:
+        identities = frozenset(
+            (info.st_dev, info.st_ino) for info in map(os.stat, (home, *home.parents))
+        )
+    except OSError:
+        return None
+    _HOME_CHAIN[home] = identities
+    return identities
+
+
+def is_home_or_above(directory: Path, home: Path | None) -> bool:
+    """Whether *directory* is *home* or one of its ancestors (``/``, ``/home``, ...).
+
+    The single HOME ceiling predicate: a marker there (a dotfiles repo, a stray
+    manifest) is not a project, and a #5418 lockfile identity never climbs to
+    it (#5470). Identity-based, so a case-variant or symlinked
+    spelling matches; HOME's chain and each directory verdict are stat'ed once per process.
+    A missing *home* (``resolved_home()`` returned None) disables the check.
+    """
+    if home is None:
+        return False
+    if directory == home or directory in home.parents:
+        return True
+    known = _LEVEL_VERDICTS.get((home, directory))
+    if known is None:
+        chain = _home_chain_identities(home)
+        try:
+            wanted = os.stat(directory)
+        except OSError:
+            # Fail closed: an unreadable directory spelled as a HOME level stays a ceiling.
+            levels = {os.path.normcase(str(level)) for level in (home, *home.parents)}
+            return os.path.normcase(str(directory)) in levels
+        if chain is None:
+            return any(same_directory(directory, level) for level in (home, *home.parents))
+        known = _LEVEL_VERDICTS[(home, directory)] = (wanted.st_dev, wanted.st_ino) in chain
+    return known or _folds_onto_home_level(directory, home)
+
+
+def _folds_onto_home_level(directory: Path, home: Path) -> bool:
+    """Whether *directory* differs from a HOME level only in case or Unicode form
+    on a volume that folds them (``samefile`` decides; #5470)."""
+    from apm_cli.utils.paths import spelling_key
+
+    key = spelling_key(str(directory))
+    for candidate in (home, *home.parents):
+        if spelling_key(str(candidate)) != key:
+            continue
+        try:
+            if os.path.samefile(directory, candidate):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def note_shadow(name: str, error: FileNotFoundError) -> None:
     """Remember why the last lookup of *name* missed; return None for the caller."""
     if isinstance(error, ProjectShadowedExecutableError):
@@ -68,32 +165,6 @@ def not_found_message(default: str, *names: str) -> str:
     return next((_last_shadow[n] for n in names if n in _last_shadow), default)
 
 
-def is_home_or_above(directory: Path, home: Path) -> bool:
-    """Whether resolved *directory* is resolved *home* or one of its ancestors, by identity.
-
-    The one HOME bound (#5470): such a directory is never a project, so a
-    ``.git`` or manifest there (a dotfiles repo, a stray marker) is skipped,
-    and a #5418 lockfile identity never climbs to it. A spelling that differs
-    only in case or Unicode normalization is the same directory where the
-    volume folds: ``samefile`` decides, so a case-sensitive volume never
-    merges two directories.
-    """
-    if directory == home or directory in home.parents:
-        return True
-    from apm_cli.utils.paths import spelling_key
-
-    key = spelling_key(str(directory))
-    for candidate in (home, *home.parents):
-        if spelling_key(str(candidate)) != key:
-            continue
-        try:
-            if os.path.samefile(directory, candidate):
-                return True
-        except OSError:
-            continue
-    return False
-
-
 def executable_exclusion_root() -> Path | None:
     """Return the project root containing the cwd, or None to exclude nothing.
 
@@ -105,7 +176,7 @@ def executable_exclusion_root() -> Path | None:
     from apm_cli.core.scope import manifest_file
 
     cwd = Path.cwd().resolve()
-    home = Path.home().resolve()
+    home = resolved_home()
     ancestors = (cwd, *cwd.parents)
     for has_marker in (lambda d: (d / ".git").exists(), lambda d: manifest_file(d).is_file()):
         for directory in ancestors:

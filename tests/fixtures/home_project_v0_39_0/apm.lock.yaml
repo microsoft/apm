@@ -1,0 +1,36 @@
+lockfile_version: '4'
+apm_version: 0.39.0
+manifest_targets:
+- claude
+dependencies:
+- repo_url: _local/a
+  name: a
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .claude/skills/a-skill
+  - .claude/skills/a-skill/SKILL.md
+  deployed_file_hashes:
+    .claude/skills/a-skill/SKILL.md: sha256:7943594af4f7871157a9a702eec32786e17a3aa5aed00bffcba8f3b629917130
+  source: local
+  local_path: ./src/pkgs/a
+  content_hash: sha256:34f551f03092edafb9a7afa99fb46f85a2a98fafc05f03a8c45f6e68a9abe23e
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/skills/a-skill
+  runtime: null
+  scope: project
+  owners:
+  - ./src/pkgs/a
+  active_owner: ./src/pkgs/a
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/a-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./src/pkgs/a
+  active_owner: ./src/pkgs/a
+  content_hash: sha256:7943594af4f7871157a9a702eec32786e17a3aa5aed00bffcba8f3b629917130

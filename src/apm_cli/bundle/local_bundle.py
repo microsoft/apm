@@ -338,11 +338,18 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
         raise
 
 
+def _is_bundle_dir(path: Path) -> bool:
+    """A ``plugin.json`` directory, unless it is an APM source package (apm.yml, no pack lock)."""
+    if not (path / "plugin.json").is_file():
+        return False
+    return not (manifest_file(path).is_file() and not _has_pack_manifest(path))
+
+
 def looks_like_local_bundle(path: Path) -> bool:
     """Cheap shape check for a local bundle path, without extracting archives."""
     path = Path(path)
     if path.is_dir():
-        return (path / "plugin.json").is_file()
+        return _is_bundle_dir(path)
     name = path.name.lower()
     return path.is_file() and name.endswith((".zip", ".tar.gz", ".tgz"))
 
@@ -367,9 +374,7 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         return None
 
     if path.is_dir():
-        if not (path / "plugin.json").is_file():
-            return None
-        if manifest_file(path).is_file() and not _has_pack_manifest(path):
+        if not _is_bundle_dir(path):
             return None
         return _build_info(
             path,

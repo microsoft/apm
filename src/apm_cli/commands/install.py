@@ -194,7 +194,9 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
     _rich_success,
 )
 from ._helpers import (
+    ensure_project_root_is_not_user_scope,
     explicit_policy_option,
+    setup_project_root_discovery,
     trust_transitive_mcp_option,
 )
 
@@ -1184,9 +1186,8 @@ def install(  # noqa: PLR0913
     # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
-    logger = dry_run_manifest_tmp = None
-    command_result: InstallResult | None = None
-    transaction: InstallTransaction | None = None
+    logger = dry_run_manifest_tmp = command_result = transaction = None
+    packages = setup_project_root_discovery(ctx, packages, enabled=not global_ and not root)
     from ..install.service import InstallService, resolve_frozen
 
     frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
@@ -1227,6 +1228,7 @@ def install(  # noqa: PLR0913
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _created_root = _root_redirect.__enter__()
     try:
+        ensure_project_root_is_not_user_scope(Path.cwd(), command="install", user_scope=global_)
         check_current_cli(
             _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
             command="apm install",

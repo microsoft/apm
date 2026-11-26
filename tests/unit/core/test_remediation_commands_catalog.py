@@ -120,6 +120,16 @@ COMPONENT_ONLY: dict[str, str] = {
     "lifecycle-scripts-untrusted": _OUTSIDE,
     "frozen-update-conflict": "usage refusal; the reported state is the flag combination, "
     "not project state",
+    "home-root-user-scope": "usage refusal at a home-directory project root; covered by "
+    "tests/integration/test_home_discovery_ceiling_lifecycle.py",
+    "home-root-user-scope-update": "warning at a home-directory project root; covered by "
+    "tests/integration/test_home_discovery_ceiling_lifecycle.py",
+    "home-root-user-scope-lock": "warning at a home-directory project root; covered by "
+    "tests/integration/test_home_discovery_ceiling_lifecycle.py",
+    "home-root-user-scope-uninstall": "warning at a home-directory project root; covered by "
+    "tests/integration/test_home_discovery_ceiling_lifecycle.py",
+    "home-root-pick-dir": "usage refusal at a home-directory project root; covered by "
+    "tests/integration/test_home_discovery_ceiling_lifecycle.py",
     "bundle-repack-plugin": "runs in the publisher's source project, not the consumer that "
     "reported the bundle",
     "legacy-bundle-unpack": _OUTSIDE,
