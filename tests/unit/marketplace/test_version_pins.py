@@ -347,3 +347,111 @@ def test_a_pins_lock_that_cannot_be_taken_skips_advisory_writes_and_fails_strict
     with pytest.raises(RefPinWriteError):
         adopt_alias_ref_pins("mkt", "cat", pins_dir)
     assert (tmp_path / "version-pins.json").read_bytes() == before
+
+
+# ---------------------------------------------------------------------------
+# Same-commit pin migration and explicit accept (#5526)
+# ---------------------------------------------------------------------------
+
+_TAG_COMMIT = "5246f7b193b58a32ac8a15fc76aedf37c42b042c"
+_OTHER_COMMIT = "1" * 40
+
+
+def _tag_lookup(commits):
+    """A ``commit_of`` for a remote whose tags select *commits*; SHAs name themselves."""
+    calls = []
+
+    def commit_of(ref):
+        calls.append(ref)
+        if re.fullmatch(r"[0-9a-f]{40}", ref):
+            return ref
+        return commits.get(ref)
+
+    commit_of.calls = calls
+    return commit_of
+
+
+def _enforce_with_stage(tmp_path, ref, commit_of, *, accept_changes=False, times=1):
+    from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
+
+    stage = open_ref_pin_stage(accept_changes=accept_changes)
+    try:
+        results = [
+            enforce_ref_pin(
+                "atlas", "okf", ref, "0.2.1", pins_dir=str(tmp_path), commit_of=commit_of
+            )
+            for _ in range(times)
+        ]
+        stage.commit(pins_dir=str(tmp_path))
+    finally:
+        stage.discard()
+    return results
+
+
+def test_a_tag_pin_and_the_sha_it_peels_to_migrate_the_pin_to_the_commit(tmp_path, capsys):
+    """#5526: a legacy tag pin and a catalog SHA of the same commit are no ref swap."""
+    save_ref_pins({"atlas/okf/0.2.1": "v0.2.1"}, pins_dir=str(tmp_path))
+    lookup = _tag_lookup({"v0.2.1": _TAG_COMMIT})
+
+    assert _enforce_with_stage(tmp_path, _TAG_COMMIT, lookup, times=2) == [None, None]
+
+    assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": _TAG_COMMIT}
+    out = " ".join(capsys.readouterr().out.split())
+    assert out.count("same commit") == 1, out
+    assert f"recorded ref 'v0.2.1' is the same commit as '{_TAG_COMMIT}'" in out
+    assert lookup.calls.count("v0.2.1") == 1, "the second resolution reused the match"
+
+
+def test_a_sha_pin_and_a_tag_peeling_to_it_keep_the_commit_quietly(tmp_path, capsys):
+    save_ref_pins({"atlas/okf/0.2.1": _TAG_COMMIT}, pins_dir=str(tmp_path))
+
+    _enforce_with_stage(tmp_path, "v0.2.1", _tag_lookup({"v0.2.1": _TAG_COMMIT}))
+
+    assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": _TAG_COMMIT}
+    assert "same commit" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        _tag_lookup({"v0.2.1": _OTHER_COMMIT}),
+        _tag_lookup({}),
+        None,
+    ],
+    ids=["different-commit", "unknown-tag", "no-lookup"],
+)
+def test_a_ref_whose_commit_differs_or_is_unknown_is_still_refused(tmp_path, lookup):
+    from apm_cli.marketplace.version_pins import RefPinMismatchError
+
+    save_ref_pins({"atlas/okf/0.2.1": "v0.2.1"}, pins_dir=str(tmp_path))
+
+    with pytest.raises(RefPinMismatchError, match="ref swap attack"):
+        _enforce_with_stage(tmp_path, _TAG_COMMIT, lookup)
+    assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": "v0.2.1"}
+
+
+def test_a_commit_lookup_that_fails_refuses_fail_closed(tmp_path):
+    from apm_cli.marketplace.version_pins import RefPinMismatchError
+
+    save_ref_pins({"atlas/okf/0.2.1": "v0.2.1"}, pins_dir=str(tmp_path))
+
+    def offline(_ref):
+        raise OSError("network unreachable")
+
+    with pytest.raises(RefPinMismatchError):
+        _enforce_with_stage(tmp_path, _TAG_COMMIT, offline)
+    assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": "v0.2.1"}
+
+
+def test_an_attempt_that_accepts_ref_changes_records_a_different_commit(tmp_path):
+    """``apm install --accept-ref-change`` accepts a real change for that attempt only."""
+    from apm_cli.marketplace.version_pins import RefPinMismatchError
+
+    save_ref_pins({"atlas/okf/0.2.1": "v0.2.1"}, pins_dir=str(tmp_path))
+    lookup = _tag_lookup({"v0.2.1": _OTHER_COMMIT})
+
+    assert _enforce_with_stage(tmp_path, _TAG_COMMIT, lookup, accept_changes=True) == ["v0.2.1"]
+    assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": _TAG_COMMIT}
+
+    with pytest.raises(RefPinMismatchError):
+        _enforce_with_stage(tmp_path, "v9", lookup)

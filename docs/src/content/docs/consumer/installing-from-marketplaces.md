@@ -224,8 +224,11 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
 ## When things go wrong
 
 - **`ref changed: was '...', now '...'`.** The marketplace moved a plugin
-  version you already installed to another ref. Confirm with the publisher,
-  then run `apm update` to accept it. Pins belong to the catalog, not its
+  version you already installed to another commit. Confirm with the publisher,
+  then run `apm update` to accept it, or, when a package you are adding brings
+  the plugin, `apm install <package> --accept-ref-change`. A new ref that names
+  the same commit as the pin (a tag and the SHA it points to) is accepted and
+  the pin moves to that commit. Pins belong to the catalog, not its
   name: re-adding a name for another catalog starts without pins, and
   removing a marketplace keeps its catalog pinned.
 - **`marketplace.json` changed but my install did not.** Expected: run

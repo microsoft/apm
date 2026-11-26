@@ -988,6 +988,76 @@ def _package_version_remote(
     return DependencyReference.parse(canonical)
 
 
+def _package_remote_access(
+    lookup: DependencyReference, auth_resolver: object | None
+) -> dict[str, object]:
+    """Return the ``git ls-remote`` transport and credentials for a package remote."""
+    transport_scheme = initial_transport_scheme(lookup)
+    if transport_scheme == "ssh":
+        remote_url = (
+            build_ado_ssh_url(lookup.ado_organization, lookup.ado_project, lookup.ado_repo)
+            if lookup.is_azure_devops()
+            else build_ssh_url(
+                lookup.host,
+                lookup.repo_url,
+                port=lookup.port,
+                user=lookup.ssh_user or "git",
+            )
+        )
+    else:
+        remote_url = lookup.to_clone_url()
+    token, auth_scheme, git_env = _extract_auth(
+        auth_resolver,
+        lookup.host,
+        org=dependency_repository_owner(lookup),
+        port=lookup.port,
+        remote_url=remote_url,
+    )
+    access: dict[str, object] = {
+        "host": lookup.host,
+        "token": token,
+        "auth_scheme": auth_scheme,
+        "auth_resolver": auth_resolver,
+        "transport_scheme": transport_scheme,
+        "ssh_user": lookup.ssh_user or "git",
+        "remote_url": remote_url,
+    }
+    if git_env is not None:
+        access["git_env"] = git_env
+    if lookup.port is not None:
+        access["port"] = lookup.port
+    return access
+
+
+def _ref_commit_lookup(
+    package_remote: Callable[[], DependencyReference], auth_resolver: object | None
+) -> Callable[[str], str | None]:
+    """Return a function naming the commit a pinned ref selects on the package remote now.
+
+    A full commit SHA names itself. A tag name resolves through one lazy
+    ``git ls-remote`` of the package remote, an annotated tag peeled to its
+    commit. Any other ref (a branch) names no fixed commit and returns
+    ``None``; a listing failure propagates so the pin owner fails closed.
+    """
+    from .version_resolver import list_package_refs
+
+    listed: dict[str, str] = {}
+
+    def commit_of(ref: str) -> str | None:
+        if is_full_commit_sha(ref):
+            return ref.lower()
+        if not listed:
+            lookup = package_remote()
+            for remote_ref in list_package_refs(
+                lookup.repo_url, **_package_remote_access(lookup, auth_resolver)
+            ):
+                listed[remote_ref.name] = remote_ref.sha.lower()
+        tag = ref if ref.startswith("refs/tags/") else f"refs/tags/{ref}"
+        return listed.get(tag)
+
+    return commit_of
+
+
 def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
@@ -1215,27 +1285,6 @@ def resolve_marketplace_plugin(
                 plugin, source, dep_ref, canonical, manifest.plugin_root
             )
             dep_ref = lookup
-            transport_scheme = initial_transport_scheme(lookup)
-            if transport_scheme == "ssh":
-                remote_url = (
-                    build_ado_ssh_url(lookup.ado_organization, lookup.ado_project, lookup.ado_repo)
-                    if lookup.is_azure_devops()
-                    else build_ssh_url(
-                        lookup.host,
-                        lookup.repo_url,
-                        port=lookup.port,
-                        user=lookup.ssh_user or "git",
-                    )
-                )
-            else:
-                remote_url = lookup.to_clone_url()
-            token, auth_scheme, git_env = _extract_auth(
-                auth_resolver,
-                lookup.host,
-                org=dependency_repository_owner(lookup),
-                port=lookup.port,
-                remote_url=remote_url,
-            )
             effective_tag_pattern = plugin.tag_pattern
             if effective_tag_pattern is None:
                 logger.debug(
@@ -1246,19 +1295,9 @@ def resolve_marketplace_plugin(
                 )
                 effective_tag_pattern = DEFAULT_TAG_PATTERN
             version_auth = {
-                "host": lookup.host,
-                "token": token,
-                "auth_scheme": auth_scheme,
-                "auth_resolver": auth_resolver,
+                **_package_remote_access(lookup, auth_resolver),
                 "tag_pattern": effective_tag_pattern,
-                "transport_scheme": transport_scheme,
-                "ssh_user": lookup.ssh_user or "git",
-                "remote_url": remote_url,
             }
-            if git_env is not None:
-                version_auth["git_env"] = git_env
-            if lookup.port is not None:
-                version_auth["port"] = lookup.port
             tag_name, _sha = resolve_version_constraint(
                 plugin_name,
                 lookup.repo_url,
@@ -1318,11 +1357,18 @@ def resolve_marketplace_plugin(
             version=resolved_version or plugin.version or "",
             accept_change=accept_ref_change,
             catalog=catalog_pin_identity(source),
+            commit_of=_ref_commit_lookup(
+                lambda: _package_version_remote(
+                    plugin, source, dep_ref, canonical, manifest.plugin_root
+                ),
+                auth_resolver,
+            ),
         )
         if replaced_ref is not None:
+            accepted_by = "this update" if accept_ref_change else "--accept-ref-change"
             _emit_warning(
                 f"Plugin {plugin_name}@{marketplace_name} ref changed: was "
-                f"'{replaced_ref}', now '{current_ref}'. Accepted by this update."
+                f"'{replaced_ref}', now '{current_ref}'. Accepted by {accepted_by}."
             )
 
     logger.debug(

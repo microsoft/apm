@@ -69,12 +69,14 @@ def test_catalog_origin_next_step_offers_both_records() -> None:
     )
 
 
-def test_ref_swap_refusal_names_the_update_that_accepts_it() -> None:
+def test_ref_swap_refusal_names_the_update_and_the_install_that_accept_it() -> None:
     from apm_cli.marketplace.version_pins import RefPinMismatchError
 
     assert str(RefPinMismatchError("p", "mkt", "a", "b", "p@mkt#1")).endswith(
         "refusing to install. If the publisher moved this version on purpose, then run "
-        "'apm update' to accept the new ref (pin 'p@mkt#1')."
+        "'apm update' to accept the new ref (pin 'p@mkt#1'), or "
+        "'apm install <package> --accept-ref-change' to accept it while adding the "
+        "package that brings it."
     )
 
 

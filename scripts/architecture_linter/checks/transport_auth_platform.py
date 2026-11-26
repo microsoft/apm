@@ -664,14 +664,30 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
                 "lookup = _package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root)",
                 "dep_ref = lookup",
                 "canonical = dep_ref.to_canonical()",
-                "transport_scheme = initial_transport_scheme(lookup)",
-                "version_auth['port'] = lookup.port",
+                "version_auth = {**_package_remote_access(lookup, auth_resolver), 'tag_pattern': effective_tag_pattern}",
                 "resolve_version_constraint(plugin_name, lookup.repo_url, version_spec, **version_auth)",
+                "_package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "_package_remote_access",
+            (
+                "transport_scheme = initial_transport_scheme(lookup)",
+                "access['port'] = lookup.port",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "_ref_commit_lookup.commit_of",
+            (
+                "lookup = package_remote()",
+                "list_package_refs(lookup.repo_url, **_package_remote_access(lookup, auth_resolver))",
             ),
         ),
         (
             "src/apm_cli/marketplace/version_resolver.py",
-            "resolve_version_constraint",
+            "list_package_refs",
             (
                 "resolver_kwargs['transport_scheme'] = transport_scheme",
                 "resolver_kwargs['ssh_user'] = ssh_user",
