@@ -272,3 +272,69 @@ def test_the_mcp_before_after_compare_reads_the_lockfile_once(tmp_path: Path, st
     assert verdicts == [True]
     assert reads == (0 if staged else 2)
     assert path.read_text(encoding="utf-8")
+
+
+def _legacy_local_lock(root: Path) -> tuple[LockFile, Path]:
+    """A pre-#5418 lock on disk keying ``vendor/lib`` by its absolute path, and its slot."""
+    (root / "vendor" / "lib").mkdir(parents=True)
+    (root / "apm.yml").write_text("name: app\nversion: 1.0.0\n", encoding="ascii")
+    row = LockedDependency(
+        repo_url="_local/lib",
+        source="local",
+        local_path="../lib",
+        declaring_parent="local:vendor/parent",
+        anchored_local_path=(root / "vendor" / "lib").resolve().as_posix(),
+    )
+    LockFile(dependencies={row.get_unique_key(): row}).write(get_lockfile_path(root))
+    slot = row.to_dependency_ref().get_install_path(root / "apm_modules")
+    slot.mkdir(parents=True)
+    (slot / "apm.yml").write_text("name: lib\n", encoding="ascii")
+    return LockFile.read(get_lockfile_path(root)), slot
+
+
+def test_a_refused_declaration_after_a_rekey_keeps_the_portable_lock(tmp_path: Path) -> None:
+    """Copilot #5485: receipts carried at the early flush stay bound to the lock on disk."""
+    from apm_cli.install.phases.lockfile_rekey import rekey_legacy_local_identities
+
+    ctx = _ctx(tmp_path, None)
+    ctx.existing_lockfile, _slot = _legacy_local_lock(tmp_path)
+    rekey_legacy_local_identities(ctx.existing_lockfile, tmp_path)
+
+    _install_tail(ctx, declare_fails=True)
+
+    on_disk = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
+    assert "anchored_local_path: vendor/lib\n" in on_disk
+    assert tmp_path.resolve().as_posix() not in on_disk
+
+
+def test_a_rollback_after_the_rekeyed_lock_reached_disk_keeps_the_moved_slot(
+    tmp_path: Path,
+) -> None:
+    """Copilot #5485: native registration flushed the re-key; rollback must not undo the move."""
+    from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes
+    from apm_cli.install.phases.lockfile_rekey import rekey_legacy_local_identities
+    from apm_cli.install.transaction import InstallTransaction
+
+    lock, legacy_slot = _legacy_local_lock(tmp_path)
+    modules = tmp_path / "apm_modules"
+    transaction = InstallTransaction(
+        manifest_path=tmp_path / "apm.yml",
+        apm_modules_dir=modules,
+        validation=None,
+        logger=None,
+        acquire_lock=False,
+    )
+    rekey_legacy_local_identities(
+        lock, tmp_path, modules, journal=transaction.journal_materialization_moves
+    )
+    slot = lock.dependencies["local:vendor/lib"].to_dependency_ref().get_install_path(modules)
+    with pytest.raises(RuntimeError), lockfile_write_scope(LockfileWriter.INSTALL):
+        lock.write(get_lockfile_path(tmp_path))
+        flush_lockfile_writes()
+        raise RuntimeError("native registration interrupted")
+
+    transaction.rollback()
+
+    assert list(LockFile.read(get_lockfile_path(tmp_path)).dependencies) == ["local:vendor/lib"]
+    assert (slot / "apm.yml").is_file()
+    assert not legacy_slot.exists()

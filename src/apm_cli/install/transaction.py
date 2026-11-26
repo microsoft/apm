@@ -708,6 +708,11 @@ class InstallTransaction:
         self._materialization_moves = ()
         if not moved:
             return
+        if not self._lock_keeps_legacy_keys():
+            # Native registration flushed the re-keyed lock before this attempt
+            # ended: the slots stay where the lock on disk names them.
+            self._remove_emptied_parents(moved)
+            return
         from apm_cli.core.deployment_reanchor import restore_materializations
         from apm_cli.core.remediation import LOCAL_SLOT_RESTORE
 
@@ -730,14 +735,27 @@ class InstallTransaction:
             after_lockfile_commit,
             unless_lockfile_commits,
         )
-        from apm_cli.integration.base_integrator import BaseIntegrator
 
         unless_lockfile_commits(lambda: self._restore_materialization_moves(moved))
-        after_lockfile_commit(
-            lambda: BaseIntegrator.cleanup_empty_parents(
-                [current for current, _target, _created in moved], stop_at=self.apm_modules_dir
-            )
+        after_lockfile_commit(lambda: self._remove_emptied_parents(moved))
+
+    def _remove_emptied_parents(self, moved: tuple) -> None:
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        BaseIntegrator.cleanup_empty_parents(
+            [current for current, _target, _created in moved], stop_at=self.apm_modules_dir
         )
+
+    def _lock_keeps_legacy_keys(self) -> bool:
+        """Whether the lockfile on disk still records the re-keyed rows by legacy keys."""
+        from apm_cli.deps.lockfile import get_lockfile_path
+        from apm_cli.install.phases.lockfile_rekey import legacy_local_keys
+
+        try:
+            data = get_lockfile_path(self.apm_modules_dir.parent).read_bytes()
+        except OSError:
+            return True
+        return legacy_local_keys(data, self.manifest_path.parent) != set()
 
     def track_created_target_roots(self, roots: list[Path]) -> None:
         """Follow the target roots this attempt creates; rollback removes empty ones."""

@@ -88,6 +88,18 @@ def rekey_legacy_local_identities(
     return renames
 
 
+def legacy_local_keys(data: bytes, project_root: Path) -> set[str] | None:
+    """The pre-#5418 absolute local keys the lockfile *data* records; ``None`` if unreadable."""
+    from apm_cli.deps.local_identity import legacy_local_renames
+    from apm_cli.deps.lockfile import LockFile
+
+    try:
+        lock = LockFile.from_yaml(data.decode("utf-8"))
+    except (ValueError, KeyError, TypeError):
+        return None
+    return set(legacy_local_renames(lock.dependencies, project_root))
+
+
 def with_portable_local_keys(lockfile: LockFile | None, project_root: Path) -> LockFile | None:
     """*lockfile* with its legacy absolute local identities re-keyed (no apm_modules move)."""
     rekey_legacy_local_identities(lockfile, project_root)
