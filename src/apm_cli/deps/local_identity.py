@@ -211,6 +211,13 @@ def legacy_local_renames(locked: Mapping[str, Any], root: Path) -> dict[str, str
     return renames
 
 
+def _canonical_root_local_dir(local_path: str, consumer_root: Path) -> Path:
+    """Resolve *local_path* relative to *consumer_root* and fold volume spelling."""
+    raw = Path(local_path).expanduser()
+    anchored = raw.resolve() if raw.is_absolute() else (consumer_root / raw).resolve()
+    return stored_directory(anchored, consumer_root)
+
+
 def root_local_dirs(
     root_refs: Iterable[DependencyReference], consumer_root: Path
 ) -> dict[Path, DependencyReference]:
@@ -218,10 +225,29 @@ def root_local_dirs(
     dirs: dict[Path, DependencyReference] = {}
     for ref in root_refs:
         if ref.is_local and ref.local_path and ref.replacement is None:
-            raw = Path(ref.local_path).expanduser()
-            anchored = raw.resolve() if raw.is_absolute() else (consumer_root / raw).resolve()
-            dirs.setdefault(stored_directory(anchored, consumer_root), ref)
+            dirs.setdefault(_canonical_root_local_dir(ref.local_path, consumer_root), ref)
     return dirs
+
+
+def find_duplicate_local_declarations(
+    root_refs: Iterable[DependencyReference], consumer_root: Path
+) -> list[tuple[str, str]]:
+    """Return pairs of local_path spellings that resolve to the same directory (#5455)."""
+    seen: dict[Path, str] = {}
+    duplicates: list[tuple[str, str]] = []
+    for ref in root_refs:
+        if not (ref.is_local and ref.local_path and ref.replacement is None):
+            continue
+        try:
+            canonical = _canonical_root_local_dir(ref.local_path, consumer_root)
+        except (OSError, RuntimeError):
+            continue
+        first = seen.get(canonical)
+        if first is None:
+            seen[canonical] = ref.local_path
+        else:
+            duplicates.append((first, ref.local_path))
+    return duplicates
 
 
 def transitive_local_identity(

@@ -27,7 +27,8 @@ external callers keep working.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.core.command_logger import InstallLogger
@@ -44,6 +45,22 @@ class DirectDependencyError(RuntimeError):
     as ``"Failed to resolve APM dependencies: ..."`` (same pattern as
     :class:`PolicyViolationError`).
     """
+
+
+def reject_duplicate_local_declarations(apm_package: Any, source_root: Path) -> None:
+    """Refuse a manifest that names one local dependency directory twice (#5455)."""
+    from apm_cli.deps.local_identity import find_duplicate_local_declarations
+
+    duplicates = find_duplicate_local_declarations(
+        [*apm_package.get_apm_dependencies(), *apm_package.get_dev_apm_dependencies()],
+        source_root,
+    )
+    if duplicates:
+        details = "; ".join(f"{first!r} and {second!r}" for first, second in duplicates)
+        raise DirectDependencyError(
+            f"apm.yml declares the same local dependency directory twice: {details}. "
+            "Remove the duplicate entry and re-run."
+        )
 
 
 class PreviewIncomplete(Exception):

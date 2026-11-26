@@ -1787,6 +1787,11 @@ def _install_apm_packages(ctx, outcome):
 
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
+    from apm_cli.core.scope import get_source_root
+    from apm_cli.install.errors import reject_duplicate_local_declarations
+
+    reject_duplicate_local_declarations(apm_package, get_source_root(ctx.scope))
+
     from apm_cli.install.service import InstallService
 
     frozen_disposition = InstallService.frozen_disposition(ctx)

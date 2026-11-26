@@ -567,6 +567,46 @@ class TestOneAnchoredDirectoryIsOneDependency:
 
         assert edge.get_unique_key() == "local:vendor/a\\b"
 
+    @pytest.mark.parametrize(
+        "second_spelling",
+        ["./vendor/a/", "./vendor/./a"],
+        ids=["trailing-slash", "dot"],
+    )
+    def test_find_duplicate_local_declarations_flags_same_directory(
+        self, tmp_path: Path, second_spelling: str
+    ) -> None:
+        """#5455: two spellings of the same local directory are reported as a pair."""
+        from apm_cli.deps.local_identity import find_duplicate_local_declarations
+
+        (tmp_path / "vendor" / "a").mkdir(parents=True)
+        refs = [
+            DependencyReference.parse("./vendor/a"),
+            DependencyReference.parse(second_spelling),
+        ]
+
+        assert find_duplicate_local_declarations(refs, tmp_path) == [
+            ("./vendor/a", second_spelling)
+        ]
+
+    def test_find_duplicate_local_declarations_allows_distinct_or_single(
+        self, tmp_path: Path
+    ) -> None:
+        """#5455: distinct directories or a single declaration produce no duplicates."""
+        from apm_cli.deps.local_identity import find_duplicate_local_declarations
+
+        (tmp_path / "vendor" / "a").mkdir(parents=True)
+        (tmp_path / "vendor" / "b").mkdir(parents=True)
+        refs = [
+            DependencyReference.parse("./vendor/a"),
+            DependencyReference.parse("./vendor/b"),
+        ]
+
+        assert find_duplicate_local_declarations(refs, tmp_path) == []
+        assert (
+            find_duplicate_local_declarations([DependencyReference.parse("./vendor/a")], tmp_path)
+            == []
+        )
+
     @staticmethod
     def _lockfile(*rows: tuple[str, str, str | None]) -> LockFile:
         lockfile = LockFile()
