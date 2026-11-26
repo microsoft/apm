@@ -54,6 +54,10 @@ class LinkResolutionContext:
     # first but renders asset links as if the target lived under the second,
     # matching install wherever apm_modules sits (#3901).
     deployment_frame: tuple[Path, Path] | None = None
+    # Resolved source file -> where this install deploys it (e.g. a sibling
+    # skill under .agents/skills/). Wins over the apm_modules projection so
+    # committed deployed files link to committed files (#5523).
+    deployed_link_targets: builtins.dict[Path, Path] | None = None
 
 
 def is_external_url(path: str) -> bool:
@@ -100,6 +104,7 @@ class UnifiedLinkResolver:
         self.package_root: Path | None = None
         self.deployment_package_root: Path | None = None
         self.deployment_frame: tuple[Path, Path] | None = None
+        self.deployed_link_targets: builtins.dict[Path, Path] | None = None
 
     def register_contexts(self, primitives) -> None:
         """Build registry of all available context files.
@@ -164,6 +169,7 @@ class UnifiedLinkResolver:
             preserved_source_root=preserved_source_root,
             deployment_package_root=self.deployment_package_root,
             deployment_frame=self.deployment_frame,
+            deployed_link_targets=self.deployed_link_targets,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -334,9 +340,14 @@ class UnifiedLinkResolver:
         # Calculate relative path from target location to actual source file
         # The shared helper owns ../ handling and cross-drive refusal. Audit
         # replay renders in the live deployment coordinates install used (#4832).
-        return portable_link_relpath(
-            self._live_context_source(actual_file, ctx), self._live_target_location(ctx)
+        # A context file a skill of this install deploys links its deployed copy (#5523).
+        deployed = (ctx.deployed_link_targets or {}).get(actual_file.resolve())
+        source = (
+            self._live_deployed_path(deployed, ctx)
+            if deployed is not None
+            else self._live_context_source(actual_file, ctx)
         )
+        return portable_link_relpath(source, self._live_target_location(ctx))
 
     @staticmethod
     def _live_context_source(actual_file: Path, ctx: LinkResolutionContext) -> Path:
@@ -377,6 +388,15 @@ class UnifiedLinkResolver:
             if target_location.is_relative_to(replay_root):
                 target_location = live_root / target_location.relative_to(replay_root)
         return target_location
+
+    @staticmethod
+    def _live_deployed_path(deployed: Path, ctx: LinkResolutionContext) -> Path:
+        """Map a deployed file planned under a replay root to its live location."""
+        if ctx.deployment_frame is not None:
+            replay_root, live_root = ctx.deployment_frame
+            if deployed.is_relative_to(replay_root):
+                return live_root / deployed.relative_to(replay_root)
+        return deployed
 
     def _resolve_to_actual_file(self, link_path: str, source_file: Path) -> Path | None:
         """Resolve a link path to the actual file on disk.
@@ -552,7 +572,12 @@ class UnifiedLinkResolver:
             return None
 
         candidate_in_deployment = candidate
-        if ctx.deployment_package_root is not None:
+        deployed = (ctx.deployed_link_targets or {}).get(candidate)
+        if deployed is not None:
+            # The same install deploys this file; link the deployed copy,
+            # in the live coordinates audit replay renders (#5523).
+            candidate_in_deployment = self._live_deployed_path(deployed, ctx)
+        elif ctx.deployment_package_root is not None:
             # Source containment is already enforced above. This projection only
             # changes emitted link text; it does not access the deployment path.
             try:

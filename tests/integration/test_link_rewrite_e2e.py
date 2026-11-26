@@ -41,6 +41,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.integration.targets import KNOWN_TARGETS
+
 pytestmark = [pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 # ---------------------------------------------------------------------------
@@ -474,14 +476,18 @@ class TestMultiTargetLinkRewriting:
         copilot_file = consumer / ".github" / "agents" / "reviewer.agent.md"
         codex_body = tomllib.loads(codex_file.read_text(encoding="utf-8"))["developer_instructions"]
         resolved = set()
+        skills_root = (consumer / KNOWN_TARGETS["copilot"].skills_rel_root).resolve()
+        assert KNOWN_TARGETS["codex"].skills_rel_root == KNOWN_TARGETS["copilot"].skills_rel_root
         for deployed, body in (
             (codex_file, codex_body),
             (copilot_file, copilot_file.read_text(encoding="utf-8")),
         ):
             path, _, fragment = _link_target(body, "guide").partition("#")
             assert fragment == "usage"
-            assert "apm_modules" in path, f"{deployed.name} link not rewritten: {path}"
+            # #5523: the skill this install deploys is the committed link target.
+            assert "apm_modules" not in path, f"{deployed.name} links gitignored copy: {path}"
             target = (deployed.parent / path).resolve()
+            assert target.is_relative_to(skills_root), target
             assert target.read_text(encoding="utf-8").endswith("# Guide skill\n")
             resolved.add(target)
         assert len(resolved) == 1, f"Codex and Copilot links diverge: {resolved}"

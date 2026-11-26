@@ -214,6 +214,11 @@ harness folder, it rewrites the link so it still points at the file, now inside
 `apm_modules/`. Links inside one skill folder are not rewritten, because the
 folder is copied whole.
 
+An agent's link to a file in one of your skills that the same install deploys,
+such as `../skills/review/SKILL.md`, points at the deployed copy instead (for
+example `.agents/skills/review/SKILL.md`). The committed agent then works in a
+fresh clone without `apm_modules/`.
+
 `#fragment` and `?query` suffixes are kept. `apm compile` checks only the file
 path, so it does not verify that the heading or query exists in the target.
 
