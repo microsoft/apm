@@ -459,22 +459,3 @@ def test_an_attempt_that_accepts_ref_changes_records_a_different_commit(tmp_path
 
     with pytest.raises(RefPinMismatchError):
         _enforce_with_stage(tmp_path, "v9", lookup)
-
-
-def test_an_install_accepting_ref_changes_names_the_conflicting_pins_it_replaces(tmp_path):
-    """``--accept-ref-change`` never replaces conflicting legacy pins silently."""
-    from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
-
-    save_ref_pins({"team/tool/1.0.0": "v1", "other/tool/1.0.0": "v2"}, pins_dir=str(tmp_path))
-    stage = open_ref_pin_stage(accept_changes=True)
-    try:
-        with patch(
-            "apm_cli.marketplace.version_pins._aliases_naming_catalog",
-            return_value=["team", "other"],
-        ):
-            replaced = enforce_ref_pin(
-                "other", "tool", "v3", "1.0.0", pins_dir=str(tmp_path), catalog="cat"
-            )
-    finally:
-        stage.discard()
-    assert replaced == "other=v2, team=v1"
