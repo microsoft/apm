@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-11-26
+
+### Fixed
+
+- Marketplace plugins whose tag pin and new catalog SHA name one commit now install and re-pin; `--accept-ref-change` on `apm install` accepts a real change (closes #5526, #5528)
+- An agent's link to a sibling skill the same install deploys now points at the committed deployed skill, not gitignored `apm_modules/`, so fresh clones keep working links (#5529)
+- Self-listed prompt and agent files of a remote plugin now lock at the plugin's commit, with no `cache-pin` warning per file (closes #5525, #5530)
+
 ## [0.39.0] - 2026-11-25
 
 ### Highlights
