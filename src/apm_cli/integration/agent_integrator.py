@@ -252,6 +252,7 @@ class AgentIntegrator(BaseIntegrator):
         diagnostics=None,
         scope=None,
         source_plan=None,
+        skill_pairing=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -266,7 +267,13 @@ class AgentIntegrator(BaseIntegrator):
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
-        self.init_link_resolver(package_info, project_root)
+        self.init_link_resolver(
+            package_info,
+            project_root,
+            target=target,
+            source_plan=source_plan,
+            skill_pairing=skill_pairing,
+        )
         agent_files = self.find_agent_files(
             package_info.install_path,
             source_plan,

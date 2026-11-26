@@ -499,6 +499,11 @@ MARKETPLACE_REF_SWAP_ACCEPT = _entry(
     "accept the new ref (pin '{key}')",
     before="if the publisher moved this version on purpose",
 )
+MARKETPLACE_REF_SWAP_ACCEPT_INSTALL = _entry(
+    "marketplace-ref-swap-accept-install",
+    "apm install <package> --accept-ref-change",
+    "accept it while adding the package that brings it",
+)
 MARKETPLACE_PROJECT_ORIGIN_RELOCK = _entry(
     "marketplace-project-origin-relock",
     "apm install",

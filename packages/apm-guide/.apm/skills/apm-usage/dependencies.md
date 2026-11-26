@@ -70,7 +70,8 @@ already trusts the layout.
 
 Remote-cloned packages may declare a relative `path:` only when it resolves
 inside the same authenticated remote repo root. APM expands that path to the
-parent's remote host/repo/ref and fetches the sibling from the same origin.
+parent's remote host/repo and fetches the sibling from the same origin at the
+commit the parent resolved at; the lockfile pins it to that commit.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
 
@@ -399,9 +400,12 @@ registry dependency.
 Unknown keys in a marketplace entry are rejected.
 A committed install records each plugin version's catalog ref under
 `APM_HOME` (`cache/marketplace/version-pins.json`, keyed by the resolved
-version). If the catalog later points that version at another ref, install
-refuses (exit 1) and names both refs; `apm update`
-accepts the new ref. A raw
+version). If the catalog later points that version at another commit, install
+refuses (exit 1) and names both refs; `apm update`, or
+`apm install <package> --accept-ref-change` for a plugin a new package brings,
+accepts the new ref. A catalog SHA that the pinned tag peels to is the same
+commit: it is accepted and the pin moves to the SHA; if the commit cannot be
+read, install still refuses. A raw
 ref override (`version: main`) never checks or records a pin, and a failed or
 `--dry-run` install records nothing. Pins are scoped to the catalog (origin
 and path), not the marketplace name: re-adding a name for another catalog

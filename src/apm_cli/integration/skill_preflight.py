@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from apm_cli.integration.skill_integrator import SkillIntegrator
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.models.apm_package import PackageInfo
+    from apm_cli.models.dependency.subsets import SkillTargetSelection
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,63 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
     ):
         return SkillSourceSelection("bundle", None, children)
     return SkillSourceSelection("subskills", None, local_children())
+
+
+def planned_skill_files(
+    package_info: PackageInfo,
+    target: TargetProfile,
+    project_root: Path,
+    source_plan: DeployableSourcePlan | None,
+    skill_pairing: SkillTargetSelection | None = None,
+) -> dict[Path, Path]:
+    """Map each source file a promoted skill deploys for *target* to its destination.
+
+    Read-only projection of the route, name filter, destination and copy filter
+    skill deployment uses, so other primitives can link to the deployed copy
+    instead of gitignored ``apm_modules/`` (#5523). A plugin's normalized
+    ``.apm/skills/<name>`` mirror is keyed too: in-package links resolve there.
+    Unknown plans, native skills and executables yield no entry (the caller
+    keeps its fallback), so the map never names a file deployment skips.
+    """
+    from apm_cli.integration.skill_bundle_routes import promoted_skill_name
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.integration.skill_support import _build_deployable_copy_ignore
+    from apm_cli.models.apm_package import PackageType
+    from apm_cli.utils.realpath import resolve_path
+
+    if source_plan is None or not target.supports("skills"):
+        return {}
+    selection = selected_skill_sources(package_info)
+    if selection.route not in ("bundle", "subskills"):
+        return {}
+    # The effective pairing deployment receives, not the raw dependency one.
+    name_filter = SkillIntegrator._paired_name_filter(
+        source_plan.selected_skill_names, skill_pairing, (target.name,)
+    )
+    skills_root = (
+        project_root / target.skills_rel_root
+        if selection.route == "bundle"
+        else SkillIntegrator._target_skills_root(target, project_root)
+    )
+    mirror_root = resolve_path(package_info.install_path) / ".apm" / "skills"
+    is_plugin = package_info.package_type is PackageType.MARKETPLACE_PLUGIN
+    ignore = _build_deployable_copy_ignore(skip_bin=True, source_plan=source_plan)
+    walker = BaseIntegrator()
+    planned: dict[Path, Path] = {}
+    for key, source in selection.children.items():
+        if not (source / "SKILL.md").is_file():
+            continue
+        if name_filter is not None and source.name not in name_filter:
+            continue
+        destination = skills_root / promoted_skill_name(source.name)
+        source = source.resolve()
+        aliases = (source, mirror_root / key) if is_plugin else (source,)
+        # The same admitted-member walk the skill copy performs.
+        for member in walker.admitted_source_members(source, ignore):
+            relative = member.relative_to(source)
+            for alias in aliases:
+                planned[alias / relative] = destination / relative
+    return planned
 
 
 def preflight_skill_selection(

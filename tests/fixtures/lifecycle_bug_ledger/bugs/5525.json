@@ -1,0 +1,28 @@
+{
+  "issue": 5525,
+  "fixed_in": "Unreleased",
+  "summary": "A remote plugin's self-listed prompt and agent files were fetched by branch name and, on hosts without a commits API, locked without resolved_commit, so every install warned cache-pin per file; each file is now fetched at the commit its plugin resolved at and locks that commit.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_self_listed_files_lock_the_plugin_commit",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_moves_the_files_with_the_plugin",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_files_come_from_the_plugin_commit_when_the_branch_moves",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_lock_written_without_file_commits_heals_on_install",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_two_plugins_sharing_a_file_at_different_commits_install",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_a_file_with_no_known_commit_still_warns",
+    "tests/unit/deps/test_same_repo_pin.py::test_the_commit_the_parent_was_fetched_at_wins",
+    "tests/unit/deps/test_same_repo_pin.py::test_a_self_listed_file_is_fetched_at_the_plugin_commit",
+    "tests/unit/deps/test_same_repo_pin.py::test_a_cached_semver_parent_resolves_at_its_lock_row_commit",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_fetches_the_plugin_at_the_commit_its_files_got",
+    "tests/unit/deps/test_same_repo_pin.py::test_the_inherited_marker_survives_nested_same_repo_children",
+    "tests/unit/install/test_resolve_spec_drift.py::test_update_fetches_a_package_at_the_commit_its_same_repo_children_got",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_refresh_moves_a_cached_plugin_with_its_files",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_keeps_the_plugin_on_its_files_commit_after_a_branch_reset",
+    "tests/unit/install/test_resolve_spec_drift.py::test_a_cached_tag_copy_is_not_reused_once_resolution_moved_its_commit"
+  ]
+}

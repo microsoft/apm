@@ -1,0 +1,16 @@
+{
+  "issue": 5526,
+  "fixed_in": "0.39.1",
+  "summary": "apm install refused a marketplace plugin as a ref swap when its legacy tag pin and the catalog's new SHA named the same commit, and the printed 'apm update' fix could not accept a plugin that a newly added package brings.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_ref_pin_same_commit_lifecycle.py::test_a_tag_pin_and_the_sha_it_peels_to_install_and_migrate_the_pin",
+    "tests/integration/test_marketplace_ref_pin_same_commit_lifecycle.py::test_a_different_commit_is_refused_and_the_printed_install_accepts_it"
+  ]
+}

@@ -371,11 +371,14 @@ class InstallTransaction:
         logger: InstallLogger,
         acquire_lock: bool = True,
         recover_deploys: bool = True,
+        accept_ref_changes: bool = False,
     ) -> None:
         """Capture the manifest and create one resolution staging session.
 
         *recover_deploys* is ``False`` for a lock-only run (``apm lock``) or a
         dry run, which never change deployed files, not even to replay a journal.
+        *accept_ref_changes* (``--accept-ref-change``) lets this attempt accept
+        marketplace plugin refs that contradict their recorded pins.
         """
         from apm_cli.cache.deploy_store import process_umask
 
@@ -400,7 +403,7 @@ class InstallTransaction:
                 self._replay_abandoned_deploys()
             self._resolution = ResolutionStagingSession(apm_modules_dir)
             # Marketplace ref pins resolved by this attempt; written on commit only.
-            self._ref_pins = open_ref_pin_stage()
+            self._ref_pins = open_ref_pin_stage(accept_changes=accept_ref_changes)
             # Commit reachability verdicts of this attempt; written on commit only.
             self._verdicts = open_verdict_stage()
         except BaseException:

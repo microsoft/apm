@@ -39,7 +39,17 @@ def test_marketplace_remote_owner_is_compliant() -> None:
             "return DependencyReference.parse('github.com/wrong/catalog')",
         ),
         (RESOLVER, "initial_transport_scheme(lookup)", "'https'"),
-        (RESOLVER, 'version_auth["port"] = lookup.port', 'version_auth["port"] = source.port'),
+        (RESOLVER, 'access["port"] = lookup.port', 'access["port"] = source.port'),
+        (
+            RESOLVER,
+            "lambda: _package_version_remote(",
+            "lambda: DependencyReference.parse(source.url) or _package_version_remote(",
+        ),
+        (
+            RESOLVER,
+            "lookup.repo_url, **_package_remote_access(lookup, auth_resolver)",
+            "source.repo, **_package_remote_access(lookup, auth_resolver)",
+        ),
         (
             VERSION,
             'resolver_kwargs["transport_scheme"] = transport_scheme',
@@ -85,6 +95,8 @@ def test_marketplace_remote_owner_is_compliant() -> None:
         "catalog-local",
         "scheme-owner",
         "foreign-port",
+        "pin-commit-callback-catalog-redirect",
+        "pin-commit-lookup-package-remote",
         "scheme-forwarding",
         "ssh-user-forwarding",
         "lookup-return-handoff",
