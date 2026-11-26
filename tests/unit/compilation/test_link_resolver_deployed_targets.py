@@ -1,12 +1,21 @@
 """Links to files the same install deploys name the deployed copy (#5523)."""
 
+import os
+import re
 from pathlib import Path
 
 import pytest
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I7")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I7")]
+
+
+def _assert_link_resolves(content: str, label: str, deployed_file: Path) -> None:
+    """The rendered *label* link names an existing file from *deployed_file* (fresh clone)."""
+    match = re.search(rf"\[{label}\]\(([^)#]+)", content)
+    assert match is not None, content
+    assert Path(os.path.normpath(deployed_file.parent / match.group(1))).is_file(), content
 
 
 class TestDeployedFileLinks:
@@ -21,6 +30,10 @@ class TestDeployedFileLinks:
         for path in (agent, skill, notes):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("x", encoding="utf-8")
+        deployed = project / ".agents" / "skills" / "demo"
+        deployed.mkdir(parents=True)
+        (deployed / "SKILL.md").write_text("x", encoding="utf-8")
+        (deployed / "design.context.md").write_text("x", encoding="utf-8")
         resolver = UnifiedLinkResolver(project)
         resolver.package_root = package
         resolver.deployment_package_root = package
@@ -32,9 +45,9 @@ class TestDeployedFileLinks:
     def test_deployed_sibling_skill_links_to_deployed_copy(self, tmp_path):
         project, agent, resolver = self._world(tmp_path)
         content = "See [demo](../skills/demo/SKILL.md#use) and [notes](../notes.md)."
-        result = resolver.resolve_links_for_installation(
-            content, agent, project / ".github" / "agents" / "reviewer.agent.md"
-        )
+        deployed_agent = project / ".github" / "agents" / "reviewer.agent.md"
+        result = resolver.resolve_links_for_installation(content, agent, deployed_agent)
+        _assert_link_resolves(result, "demo", deployed_agent)
         assert "[demo](../../.agents/skills/demo/SKILL.md#use)" in result
         # Negative control: a file no primitive deploys keeps the apm_modules projection.
         assert "[notes](../../apm_modules/_local/pkg/.apm/notes.md)" in result
@@ -53,6 +66,7 @@ class TestDeployedFileLinks:
             scratch / ".codex" / "agents" / "reviewer.toml",
         )
         assert result == "[demo](../../.agents/skills/demo/SKILL.md)"
+        _assert_link_resolves(result, "demo", project / ".codex" / "agents" / "reviewer.toml")
 
     def test_context_file_inside_deployed_skill_links_to_deployed_copy(self, tmp_path):
         project, agent, resolver = self._world(tmp_path)
@@ -61,9 +75,9 @@ class TestDeployedFileLinks:
         resolver.deployed_link_targets[context.resolve()] = (
             project / ".agents" / "skills" / "demo" / "design.context.md"
         )
+        deployed_agent = project / ".github" / "agents" / "reviewer.agent.md"
         result = resolver.resolve_links_for_installation(
-            "[design](../skills/demo/design.context.md)",
-            agent,
-            project / ".github" / "agents" / "reviewer.agent.md",
+            "[design](../skills/demo/design.context.md)", agent, deployed_agent
         )
         assert result == "[design](../../.agents/skills/demo/design.context.md)"
+        _assert_link_resolves(result, "design", deployed_agent)
