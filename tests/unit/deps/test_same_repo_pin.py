@@ -101,3 +101,15 @@ def test_an_update_keeps_a_commit_pinned_parent_without_asking_the_origin() -> N
         raise AssertionError("a pinned parent needs no ref resolution")
 
     assert same_repo_child_reference(parent, None, refresh=refresh) == FETCHED
+
+
+def test_a_cached_semver_parent_resolves_at_its_lock_row_commit() -> None:
+    parent = _parent(reference="^1.0.0")
+    lock = _lock(parent, resolved_ref="v1.2.0")
+    lock.get_dependency(parent.get_unique_key()).constraint = "^1.0.0"
+    assert same_repo_child_reference(parent, lock) == LOCKED
+
+
+def test_a_parent_that_dropped_its_ref_ignores_the_locked_branch_commit() -> None:
+    parent = _parent()
+    assert same_repo_child_reference(parent, _lock(parent, resolved_ref="main")) is None

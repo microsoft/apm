@@ -71,7 +71,8 @@ def same_repo_child_reference(
     In order: the commit the parent was fetched at in this run; under an
     update that selects the parent (*refresh* given), the commit its selector
     resolves to now, recorded on the parent so its own fetch reuses it; else
-    the parent lock row's commit while the parent's selector is unchanged.
+    the parent lock row's commit while the parent's selector (a ref, or a
+    semver range) is unchanged.
     Otherwise the parent's selector, so the child stays unpinned.
     """
     commit = _full_commit(getattr(parent_dep, "resolved_reference", None))
@@ -96,7 +97,10 @@ def same_repo_child_reference(
     if (
         locked is not None
         and locked.source not in {"local", "registry"}
-        and locked.resolved_ref == parent_dep.reference
+        and (
+            parent_dep.reference == locked.resolved_ref
+            or (locked.constraint is not None and parent_dep.reference == locked.constraint)
+        )
         and is_full_revision_pin(locked.resolved_commit)
     ):
         return locked.resolved_commit.strip().lower()

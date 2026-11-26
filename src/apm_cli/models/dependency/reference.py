@@ -102,6 +102,9 @@ class DependencyReference(ProviderCoordinateMixin):
 
     # Monorepo inheritance: { git: parent, path: ... } -- expanded in resolver
     is_parent_repo_inheritance: bool = False
+    # A same-repository path child fetched at its parent's resolved commit
+    # (#5525): an inherited commit, not a pin the user declared.
+    pinned_by_parent: bool = field(default=False, repr=False, compare=False)
 
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
 
