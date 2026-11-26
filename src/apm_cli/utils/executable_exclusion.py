@@ -116,19 +116,35 @@ def is_home_or_above(directory: Path, home: Path | None) -> bool:
     if directory == home or directory in home.parents:
         return True
     known = _LEVEL_VERDICTS.get((home, directory))
-    if known is not None:
-        return known
-    chain = _home_chain_identities(home)
-    try:
-        wanted = os.stat(directory)
-    except OSError:
-        # Fail closed: an unreadable directory spelled as a HOME level stays a ceiling.
-        levels = {os.path.normcase(str(level)) for level in (home, *home.parents)}
-        return os.path.normcase(str(directory)) in levels
-    if chain is None:
-        return any(same_directory(directory, level) for level in (home, *home.parents))
-    verdict = _LEVEL_VERDICTS[(home, directory)] = (wanted.st_dev, wanted.st_ino) in chain
-    return verdict
+    if known is None:
+        chain = _home_chain_identities(home)
+        try:
+            wanted = os.stat(directory)
+        except OSError:
+            # Fail closed: an unreadable directory spelled as a HOME level stays a ceiling.
+            levels = {os.path.normcase(str(level)) for level in (home, *home.parents)}
+            return os.path.normcase(str(directory)) in levels
+        if chain is None:
+            return any(same_directory(directory, level) for level in (home, *home.parents))
+        known = _LEVEL_VERDICTS[(home, directory)] = (wanted.st_dev, wanted.st_ino) in chain
+    return known or _folds_onto_home_level(directory, home)
+
+
+def _folds_onto_home_level(directory: Path, home: Path) -> bool:
+    """Whether *directory* differs from a HOME level only in case or Unicode form
+    on a volume that folds them (``samefile`` decides; #5470)."""
+    from apm_cli.utils.paths import spelling_key
+
+    key = spelling_key(str(directory))
+    for candidate in (home, *home.parents):
+        if spelling_key(str(candidate)) != key:
+            continue
+        try:
+            if os.path.samefile(directory, candidate):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def note_shadow(name: str, error: FileNotFoundError) -> None:
