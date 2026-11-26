@@ -14,6 +14,7 @@ from apm_cli.utils.file_ops import (
     _is_transient_lock_error,
     _on_readonly_retry,
     _retry_on_lock,
+    retry_on_sharing_violation,
     robust_copy2,
     robust_copytree,
     robust_replace,
@@ -832,3 +833,70 @@ class TestReflinkIntegration:
             mac.assert_not_called()
             lin.assert_not_called()
         assert (tmp_path / "dst" / "a.txt").read_bytes() == b"x"
+
+
+class TestRetryOnSharingViolation:
+    """Bounded retry for a removal blocked by another process's handle (#5441)."""
+
+    @staticmethod
+    def _remover(error: OSError, failures: int):
+        calls = {"n": 0}
+
+        def remove() -> str:
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise error
+            return "removed"
+
+        return remove, calls
+
+    @staticmethod
+    def _sharing_violation() -> OSError:
+        exc = OSError(13, "in use", "f")
+        exc.winerror = 32
+        return exc
+
+    @staticmethod
+    def _access_denied() -> OSError:
+        exc = OSError(13, "denied", "f")
+        exc.winerror = 5
+        return exc
+
+    def test_retries_on_windows_until_released(self):
+        remove, calls = self._remover(self._sharing_violation(), failures=2)
+        with (
+            patch("sys.platform", "win32"),
+            patch("time.sleep"),
+        ):
+            assert retry_on_sharing_violation(remove, "unlink") == "removed"
+        assert calls["n"] == 3
+
+    def test_still_held_after_the_budget_raises_the_original_error(self):
+        remove, calls = self._remover(self._sharing_violation(), failures=99)
+        with (
+            patch("sys.platform", "win32"),
+            patch("time.sleep"),
+            pytest.raises(OSError, match="in use"),
+        ):
+            retry_on_sharing_violation(remove, "unlink")
+        assert calls["n"] == 1 + 5
+
+    def test_other_errors_raise_immediately(self):
+        remove, calls = self._remover(self._access_denied(), failures=1)
+        with (
+            patch("sys.platform", "win32"),
+            patch("time.sleep"),
+            pytest.raises(OSError, match="denied"),
+        ):
+            retry_on_sharing_violation(remove, "unlink")
+        assert calls["n"] == 1
+
+    def test_non_windows_does_not_retry(self):
+        remove, calls = self._remover(self._sharing_violation(), failures=1)
+        with (
+            patch("sys.platform", "linux"),
+            patch("time.sleep"),
+            pytest.raises(OSError, match="in use"),
+        ):
+            retry_on_sharing_violation(remove, "unlink")
+        assert calls["n"] == 1

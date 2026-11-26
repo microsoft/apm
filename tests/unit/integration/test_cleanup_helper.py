@@ -13,6 +13,7 @@ local-package stale-file deletion. These tests pin its invariants:
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -900,3 +901,338 @@ def test_hook_sync_unlinks_agrees_with_the_hook_sync_under_consent(
     assert predicted is (rel in result.deleted)
     assert predicted is not consent
     assert link.is_symlink() is consent
+
+
+def test_file_rewritten_during_sharing_retry_is_kept(project_root, diagnostics, logger):
+    """A held file saved with new bytes while the retry waits is not deleted (#5441)."""
+    rel = ".github/prompts/held.prompt.md"
+    target = _make_managed_file(project_root, rel, "as deployed\n")
+    recorded = _recorded(project_root, rel)
+    calls = []
+
+    def held_then_edited(path, *_args, **_kwargs):
+        if path != target:
+            return None
+        calls.append(path)
+        path.write_text("user saved while held\n", encoding="utf-8")
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_then_edited),
+    ):
+        result = remove_stale_deployed_files(
+            [rel],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
+            recorded_hashes=recorded,
+        )
+
+    assert len(calls) == 1
+    assert result.deleted == []
+    assert result.failed == []
+    assert target.read_text(encoding="utf-8") == "user saved while held\n"
+
+
+def _held_once_then_real(real_unlink, held_path):
+    """A Path.unlink double: *held_path* is held (winerror 32) once, then removed."""
+    calls = []
+
+    def unlink(path, *args, **kwargs):
+        if path != held_path:
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        if len(calls) == 1:
+            exc = OSError(13, "in use", str(path))
+            exc.winerror = 32
+            raise exc
+        return real_unlink(path, *args, **kwargs)
+
+    return unlink, calls
+
+
+def test_cowork_target_held_once_then_released_is_removed(tmp_path, diagnostics):
+    """A managed-root target outside the project gets the retry too (#5441)."""
+    cowork_root = tmp_path / "cowork-skills"
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    unlink, calls = _held_once_then_real(Path.unlink, skill_md)
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=unlink),
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(cowork_root, deploy_root=project_root),
+        )
+
+    assert len(calls) == 2
+    assert not skill_md.exists()
+    assert result.deleted == ["cowork://skills/my-skill/SKILL.md"]
+
+
+def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed(
+    tmp_path, diagnostics
+):
+    """A cowork skill dir relinked outside the cowork root while a file is held loses nothing."""
+    from apm_cli.integration.cleanup import AUTHORIZED, REJECTED_UNSAFE_PATH
+
+    cowork_root = tmp_path / "cowork-skills"
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    victim = tmp_path / "outside-victim" / "SKILL.md"
+    victim.parent.mkdir()
+    victim.write_text("# My Skill\n", encoding="ascii")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    real_unlink = Path.unlink
+    calls = []
+    # Receipts are keyed by resolved path, so force proof of the swapped file too.
+    evidence = receipted_evidence(cowork_root, deploy_root=project_root)
+    evidence.verdict = lambda *_args, **_kwargs: AUTHORIZED
+
+    def held_once_then_real(path, *args, **kwargs):
+        if path.name != "SKILL.md":
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        if len(calls) > 1:
+            return real_unlink(path, *args, **kwargs)
+        skill_md.parent.rename(cowork_root / "moved-away")
+        skill_md.parent.symlink_to(victim.parent, target_is_directory=True)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_once_then_real),
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=evidence,
+        )
+
+    assert len(calls) == 1
+    assert victim.read_text(encoding="ascii") == "# My Skill\n"
+    assert result.deleted == []
+    assert result.rejected == {"cowork://skills/my-skill/SKILL.md": REJECTED_UNSAFE_PATH}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_cowork_root_swapped_outside_during_sharing_retry_is_not_followed(tmp_path, diagnostics):
+    """The cowork root itself relinked outward while a file is held loses nothing (#5441)."""
+    from apm_cli.integration.cleanup import AUTHORIZED, REJECTED_UNSAFE_PATH
+
+    cowork_root = tmp_path / "cowork-skills"
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    victim = tmp_path / "outside-root" / "my-skill" / "SKILL.md"
+    victim.parent.mkdir(parents=True)
+    victim.write_text("# My Skill\n", encoding="ascii")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    real_unlink = Path.unlink
+    calls = []
+    # Receipts are keyed by resolved path, so force proof of the swapped file too.
+    evidence = receipted_evidence(cowork_root, deploy_root=project_root)
+    evidence.verdict = lambda *_args, **_kwargs: AUTHORIZED
+
+    def held_once_then_real(path, *args, **kwargs):
+        if path.name != "SKILL.md":
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        if len(calls) > 1:
+            return real_unlink(path, *args, **kwargs)
+        cowork_root.rename(tmp_path / "cowork-moved-away")
+        cowork_root.symlink_to(victim.parent.parent, target_is_directory=True)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_once_then_real),
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=evidence,
+        )
+
+    assert len(calls) == 1
+    assert victim.read_text(encoding="ascii") == "# My Skill\n"
+    assert result.deleted == []
+    assert result.rejected == {"cowork://skills/my-skill/SKILL.md": REJECTED_UNSAFE_PATH}
+
+
+def _held_then_swapped_to_link(target: Path, real: Path):
+    """A Path.unlink double: the first unlink of *target* swaps it for a link to *real*, held."""
+    calls = []
+    real_unlink = Path.unlink
+
+    def swap(path, *args, **kwargs):
+        if path != target:
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        real_unlink(path)
+        path.symlink_to(real)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    return swap, calls
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+@pytest.mark.parametrize("recorded", [False, True], ids=["no-hash", "recorded-hash"])
+def test_hook_swapped_to_link_during_sharing_retry_is_consent_kept(
+    tmp_path, project_root, diagnostics, recorded
+):
+    """A held hook file relinked mid-backoff gets the first pass's consent keep (#5441)."""
+    rel = ".github/hooks/pkg-hooks.json"
+    target = _make_managed_file(project_root, rel, "as deployed\n")
+    recorded_hashes = _recorded(project_root, rel) if recorded else {}
+    real = tmp_path / "elsewhere.json"
+    real.write_text("elsewhere\n", encoding="utf-8")
+    swap, calls = _held_then_swapped_to_link(target, real)
+    evidence = receipted_evidence(project_root)
+    evidence.consent_to_lockfile_hashes()
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=swap),
+    ):
+        result = remove_stale_deployed_files(
+            [rel],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=evidence,
+            recorded_hashes=recorded_hashes,
+            allow_final_symlink=True,
+        )
+
+    assert len(calls) == 1
+    assert target.is_symlink()
+    assert result.deleted == []
+    assert result.failed == []
+    assert result.skipped_user_edit == []
+    assert rel in result.skipped_unmanaged
+    assert rel in evidence.kept_under_consent()
+
+
+def _held_then_swapped_to_dir(target: Path):
+    """A Path.unlink double: the first unlink of *target* swaps in a non-empty dir, held."""
+    real_unlink = Path.unlink
+    calls = []
+
+    def swap(path, *args, **kwargs):
+        if path != target:
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        real_unlink(path)
+        path.mkdir()
+        (path / "keep.txt").write_text("precious\n", encoding="utf-8")
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    return swap, calls
+
+
+@pytest.mark.parametrize("content", ["as deployed\n", ""], ids=["content", "empty-file"])
+def test_directory_swapped_in_during_sharing_retry_is_never_deleted(
+    project_root, diagnostics, content
+):
+    """A held file replaced by a non-empty directory mid-backoff is kept intact (#5441)."""
+    rel = ".github/prompts/held.prompt.md"
+    target = _make_managed_file(project_root, rel, content)
+    recorded = _recorded(project_root, rel)
+    swap, calls = _held_then_swapped_to_dir(target)
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=swap),
+    ):
+        result = remove_stale_deployed_files(
+            [rel],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
+            recorded_hashes=recorded,
+        )
+
+    assert len(calls) == 1
+    assert result.deleted == []
+    assert (target / "keep.txt").read_text(encoding="utf-8") == "precious\n"
+    assert rel in result.skipped_user_edit or rel in result.failed
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_in_project_final_link_is_kept_as_replaced_by_link(project_root, diagnostics):
+    """Without allow_final_symlink an in-project final link is kept, named as a link (#5441)."""
+    rel = ".github/prompts/linked.prompt.md"
+    real = _make_managed_file(project_root, "docs/real.md", "as deployed\n")
+    link = project_root / rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real)
+
+    result = remove_stale_deployed_files(
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=receipted_evidence(project_root),
+        recorded_hashes={rel: compute_file_hash(real)},
+    )
+
+    assert link.is_symlink()
+    assert real.read_text(encoding="utf-8") == "as deployed\n"
+    assert result.deleted == []
+    assert rel in result.skipped_user_edit
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any(rel in m and "replaced by a symlink" in m for m in msgs), msgs

@@ -473,3 +473,48 @@ class TestDepartingOwnerReleasesUserContentDirectory:
 
         assert result.released == []
         assert ".agents/skills/my-skill" in result.retained
+
+
+def test_skill_dir_swapped_to_outside_link_during_sharing_retry_is_not_followed(
+    project_root, diagnostics
+):
+    """A skill dir relinked outside the project while a held file waits loses nothing (#5441)."""
+    from unittest.mock import patch
+
+    skill_dir = project_root / ".agents" / "skills" / "my-skill"
+    _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+    entries = skill_bundle_file_entries(skill_dir, project_root, targets=[])
+    recorded_hashes = {entry: compute_file_hash(project_root / entry) for entry in entries}
+    victim = _make_file(project_root.parent / "outside-victim", "SKILL.md", "# Skill\n")
+    calls = []
+    real_unlink = Path.unlink
+
+    def held_then_relinked(path, *args, **kwargs):
+        if path.name != "SKILL.md":
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        if len(calls) > 1:
+            return real_unlink(path, *args, **kwargs)
+        skill_dir.rename(skill_dir.with_name("moved-away"))
+        skill_dir.symlink_to(victim.parent, target_is_directory=True)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_then_relinked),
+    ):
+        remove_stale_deployed_files(
+            [".agents/skills/my-skill", *entries],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
+            recorded_hashes=recorded_hashes,
+        )
+
+    assert len(calls) == 1
+    assert victim.read_text(encoding="utf-8") == "# Skill\n"
