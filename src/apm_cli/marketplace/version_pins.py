@@ -644,7 +644,7 @@ def _migrate_same_commit_pin(
 
     _rich_info(
         f"Plugin {plugin_name}@{marketplace_name}: recorded ref '{previous_ref}' is the "
-        f"same commit as '{ref}'; pin moved to commit {commit}.",
+        f"same commit as '{ref}'; accepted, and the install records it as the pin.",
         symbol="info",
     )
     return commit

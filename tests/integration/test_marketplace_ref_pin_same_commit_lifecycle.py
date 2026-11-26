@@ -190,7 +190,7 @@ def test_a_tag_pin_and_the_sha_it_peels_to_install_and_migrate_the_pin(
     assert text.count("same commit") == 1, _evidence(installed)
     assert (
         f"[i] Plugin {_PLUGIN}@{_ALIAS}: recorded ref '{_TAG}' is the same commit as "
-        f"'{world.released}'; pin moved to commit {world.released}." in text
+        f"'{world.released}'; accepted, and the install records it as the pin." in text
     ), _evidence(installed)
     assert world.pinned() == {_PIN_KEY: world.released}
     assert world.locked_commit() == world.released

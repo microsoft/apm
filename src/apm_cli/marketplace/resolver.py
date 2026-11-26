@@ -1036,8 +1036,9 @@ def _ref_commit_lookup(
 
     A full commit SHA names itself. A tag name resolves through one lazy
     ``git ls-remote`` of the package remote, an annotated tag peeled to its
-    commit. Any other ref (a branch) names no fixed commit and returns
-    ``None``; a listing failure propagates so the pin owner fails closed.
+    commit. Any other ref (a branch, or a name that is both a branch and a
+    tag) names no fixed commit and returns ``None``; a listing failure
+    propagates so the pin owner fails closed.
     """
     from .version_resolver import list_package_refs
 
@@ -1052,8 +1053,11 @@ def _ref_commit_lookup(
                 lookup.repo_url, **_package_remote_access(lookup, auth_resolver)
             ):
                 listed[remote_ref.name] = remote_ref.sha.lower()
-        tag = ref if ref.startswith("refs/tags/") else f"refs/tags/{ref}"
-        return listed.get(tag)
+        if ref.startswith("refs/tags/"):
+            return listed.get(ref)
+        if f"refs/heads/{ref}" in listed:
+            return None
+        return listed.get(f"refs/tags/{ref}")
 
     return commit_of
 
