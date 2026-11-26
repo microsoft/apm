@@ -372,6 +372,41 @@ def test_dependency_unique_key_cannot_drop_the_port(
 
 
 @pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        pytest.param(
+            "reference = self._same_repo_child_reference(parent_dep)",
+            "reference = parent_dep.reference",
+            id="child-takes-parent-selector",
+        ),
+        pytest.param(
+            "reference=reference,\n            is_virtual=virtual_path is not None,",
+            "reference=parent_dep.reference,\n            is_virtual=virtual_path is not None,",
+            id="expansion-bypasses-selected-commit",
+        ),
+        pytest.param(
+            "pinned_by_parent=parent_dep.pinned_by_parent or reference != parent_dep.reference,",
+            "pinned_by_parent=reference != parent_dep.reference,",
+            id="nested-child-drops-inherited-marker",
+        ),
+    ],
+)
+def test_same_repo_child_commit_cannot_bypass_the_pin_owner(
+    original: str, replacement: str
+) -> None:
+    """A self-listed file is fetched at the commit same_repo_pin selects (#5525)."""
+    path = "src/apm_cli/deps/apm_resolver.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "contracts-tooling-dependency-identity"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement"),
     [
         pytest.param(

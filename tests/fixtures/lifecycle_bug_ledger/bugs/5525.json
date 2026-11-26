@@ -17,6 +17,9 @@
     "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_a_file_with_no_known_commit_still_warns",
     "tests/unit/deps/test_same_repo_pin.py::test_the_commit_the_parent_was_fetched_at_wins",
     "tests/unit/deps/test_apm_resolver.py::TestRemoteParentLocalPathFailClosed::test_remote_parent_same_repo_file_is_fetched_at_the_parent_commit",
-    "tests/unit/deps/test_same_repo_pin.py::test_a_cached_semver_parent_resolves_at_its_lock_row_commit"
+    "tests/unit/deps/test_same_repo_pin.py::test_a_cached_semver_parent_resolves_at_its_lock_row_commit",
+    "tests/lifecycle/scenarios/test_same_repo_path_commit.py::test_update_fetches_the_plugin_at_the_commit_its_files_got",
+    "tests/unit/deps/test_apm_resolver.py::TestRemoteParentLocalPathFailClosed::test_inherited_commit_stays_marked_through_nested_same_repo_children",
+    "tests/unit/install/test_resolve_spec_drift.py::test_update_fetches_a_package_at_the_commit_its_same_repo_children_got"
   ]
 }

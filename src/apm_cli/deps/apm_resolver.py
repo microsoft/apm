@@ -465,6 +465,7 @@ class APMDependencyResolver:
             virtual_path=child_dep.virtual_path,
             reference=merged_ref,
             is_virtual=True,
+            pinned_by_parent=child_dep.reference is None and parent_dep.pinned_by_parent,
         )
 
     def _same_repo_child_reference(self, parent_dep: DependencyReference) -> str | None:
@@ -544,15 +545,13 @@ class APMDependencyResolver:
         else:
             validate_path_segments(virtual_path, context="same-repo path")
         reference = self._same_repo_child_reference(parent_dep)
-        return replace(
-            inherit_remote_parent_fields(
-                parent_dep,
-                child_dep,
-                virtual_path=virtual_path,
-                reference=reference,
-                is_virtual=virtual_path is not None,
-            ),
-            pinned_by_parent=reference != parent_dep.reference,
+        return inherit_remote_parent_fields(
+            parent_dep,
+            child_dep,
+            virtual_path=virtual_path,
+            reference=reference,
+            is_virtual=virtual_path is not None,
+            pinned_by_parent=parent_dep.pinned_by_parent or reference != parent_dep.reference,
         )
 
     def _reject_remote_parent_local_path(
