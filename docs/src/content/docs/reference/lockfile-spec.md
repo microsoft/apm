@@ -351,7 +351,19 @@ fields are persisted.
 Lockfile dependency keys keep `github.com` implicit for migration stability:
 existing `github.com` entries remain keyed as `owner/repo`. Local dependencies
 use `local_path` directly. Virtual dependencies append `virtual_path` to the
-base repo key. Entries for non-default hosts prefix the key with the lowercased
+base repo key. A local package declared by another local package is keyed
+`local:<anchored_local_path>`: its directory relative to the project root, with
+`../` for a sibling in the same Git repository (a monorepo), so clones at
+different paths write the same lockfile. A project in no repository (a
+home-directory `~/.git` does not count) also records `../` when the project and
+the package share a parent directory other than `/`, a drive root, or your home
+directory or its parents, as with `/work/app` and `/work/lib` or `~/work/app`
+and `~/work/lib`.
+Otherwise the path is absolute: a package in another repository, or sharing only
+`/`, a drive root, your home directory or one of its parents, or on another
+drive. Lockfiles written before this rule
+keep working with `--frozen`; the next `apm install` re-keys those rows in
+place, keeping their owners. Entries for non-default hosts prefix the key with the lowercased
 host (`host/owner/repo`), so `github.com/team/skills` and
 `gitea.myorg.com/team/skills` can coexist without overwriting each other, and
 host casing cannot create duplicate keys. A non-default `port` names another

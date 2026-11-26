@@ -289,7 +289,12 @@ and `alias`.
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
 Local-path deps inside another local package resolve relative to that
-package's directory, not the project root.
+package's directory, not the project root. The lockfile records such a
+package relative to the project root (`../` for a monorepo sibling in the same
+Git repository, or, outside any repository, for a sibling sharing a parent
+directory other than `/`, a drive root, or your home directory or its parents),
+so clones at different paths write the same lockfile. Anything else records an
+absolute path.
 
 Local strings and `path:` objects can select one `.agent.md`, `.instructions.md`,
 or `.prompt.md` file as well as a directory package. The selected file goes

@@ -10,6 +10,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.base_integrator import kept_edit_message
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -32,10 +33,11 @@ _PARENT_REPO = "MixedParent"
 _CHILD_REPO = "MixedChild"
 _PARENT_REMOTE = f"https://github.com/{_OWNER}/{_PARENT_REPO}"
 _CHILD_REMOTE = f"https://github.com/{_OWNER}/{_CHILD_REPO}"
+_TARGETS = ("copilot", "cursor")
 _INSTALL = (
     "install",
     "--target",
-    "copilot,cursor",
+    ",".join(_TARGETS),
     "--no-policy",
     "--parallel-downloads",
     "0",
@@ -131,7 +133,14 @@ def _assert_all_managed_links_resolve(project: LocalPackage) -> tuple[Path, ...]
             assert resolved.is_file(), f"{generated}: broken link {raw_target!r}"
             relative = resolved.relative_to(project.root.resolve())
             parts = relative.parts
-            assert parts[:3] == ("apm_modules", _OWNER, _CHILD_REPO)
+            if "agents" in generated.relative_to(project.root).parts:
+                # #5523: an agent links the copy of the skill this install deploys.
+                skill_roots = {KNOWN_TARGETS[name].skills_rel_root for name in _TARGETS}
+                assert relative.parent.parent.as_posix() in {
+                    f"{root}/linked" for root in skill_roots
+                }, relative
+            else:
+                assert parts[:3] == ("apm_modules", _OWNER, _CHILD_REPO)
     return linked_files
 
 
@@ -260,7 +269,10 @@ def test_mixed_case_links_survive_install_update_audit_and_uninstall(
     ]
     _assert_all_managed_links_resolve(consumer)
 
-    stale_managed = first_links[0]
+    # The stale casing lives in an apm_modules link (agents link deployed skills, #5523).
+    stale_managed = next(
+        path for path in first_links if f"{_OWNER}/{_CHILD_REPO}" in path.read_text("utf-8")
+    )
     stale_managed.write_text(
         stale_managed.read_text(encoding="utf-8").replace(
             f"{_OWNER}/{_CHILD_REPO}",

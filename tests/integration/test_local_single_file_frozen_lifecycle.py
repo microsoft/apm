@@ -1,5 +1,6 @@
 """Local-file snapshot baselines through the canonical frozen-local owner."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,9 @@ def test_nested_file_frozen_hash_uses_declaring_anchor_and_rejects_symlink(
     # The changed canonical source identity is rejected before leaf admission.
     diagnostic = " ".join((result.stdout + result.stderr).split())
     # Rich may wrap inside the filename; retain the complete canonical identity.
-    assert f"local:{actual.resolve().as_posix()}" in "".join(diagnostic.split()), (
+    # No repository, and work/ is below / and HOME's ancestors: ../ (#5418).
+    identity = os.path.relpath(actual.resolve(), scenario.project.root.resolve())
+    assert f"local:{Path(identity).as_posix()}" in "".join(diagnostic.split()), (
         result.stdout + result.stderr
     )
     assert "missing from apm.lock.yaml" in diagnostic, result.stdout + result.stderr

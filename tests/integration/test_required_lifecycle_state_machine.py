@@ -2871,8 +2871,11 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
         for record in installed.deployment_records
         if record.locator.value == deployed_instruction
     )
-    assert shared_record.owners == (f"local:{shared.root.as_posix()}",)
-    assert shared_record.active_owner == f"local:{shared.root.as_posix()}"
+    # No repository; work/ is below / and HOME's ancestors: the owner is ../ (#5418).
+    shared_root, consumer_root = shared.root.resolve(), consumer.root.resolve()
+    shared_owner = f"local:{Path(os.path.relpath(shared_root, consumer_root)).as_posix()}"
+    assert shared_record.owners == (shared_owner,)
+    assert shared_record.active_owner == shared_owner
     assert deployed_instruction in dependencies["_local/shared"].deployed_files
     modules = consumer.root / "apm_modules"
     installed_sources = {
