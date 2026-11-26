@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from apm_cli.integration.skill_integrator import SkillIntegrator
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.models.apm_package import PackageInfo
+    from apm_cli.models.dependency.subsets import SkillTargetSelection
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ def planned_skill_files(
     target: TargetProfile,
     project_root: Path,
     source_plan: DeployableSourcePlan | None,
+    skill_pairing: SkillTargetSelection | None = None,
 ) -> dict[Path, Path]:
     """Map each source file a promoted skill deploys for *target* to its destination.
 
@@ -91,7 +93,6 @@ def planned_skill_files(
     from apm_cli.integration.skill_integrator import SkillIntegrator
     from apm_cli.integration.skill_support import _build_deployable_copy_ignore
     from apm_cli.models.apm_package import PackageType
-    from apm_cli.models.dependency.subsets import SkillTargetSelection
     from apm_cli.utils.realpath import resolve_path
 
     if source_plan is None or not target.supports("skills"):
@@ -99,11 +100,9 @@ def planned_skill_files(
     selection = selected_skill_sources(package_info)
     if selection.route not in ("bundle", "subskills"):
         return {}
-    pairing = getattr(package_info.dependency_ref, "subset_pairings", None)
+    # The effective pairing deployment receives, not the raw dependency one.
     name_filter = SkillIntegrator._paired_name_filter(
-        source_plan.selected_skill_names,
-        pairing if isinstance(pairing, SkillTargetSelection) else None,
-        (target.name,),
+        source_plan.selected_skill_names, skill_pairing, (target.name,)
     )
     skills_root = (
         project_root / target.skills_rel_root
