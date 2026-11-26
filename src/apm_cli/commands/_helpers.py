@@ -580,7 +580,8 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
 
     for candidate in (cwd, *cwd.parents):
         if candidate != cwd and (
-            is_home_or_above(candidate, home)
+            home is None  # no HOME ceiling known: only the start directory counts
+            or is_home_or_above(candidate, home)
             or any(same_directory(candidate, root) for root in metadata_roots)
         ):
             break

@@ -168,6 +168,23 @@ def _home_world(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     return home, work
 
 
+def test_an_unresolved_home_keeps_discovery_in_the_start_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from apm_cli.commands._helpers import _find_apm_yml
+
+    home, work = _home_world(tmp_path, monkeypatch)
+    (home / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+
+    def no_home(cls) -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+
+    assert _find_apm_yml(work) is None
+    assert (home / "apm.yml").read_text(encoding="utf-8") == "name: home\nversion: 1.0.0\n"
+
+
 def test_a_walk_below_home_never_adopts_the_home_manifest(tmp_path: Path, monkeypatch) -> None:
     from apm_cli.commands._helpers import _find_apm_yml
 
