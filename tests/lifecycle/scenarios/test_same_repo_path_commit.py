@@ -32,7 +32,8 @@ from tests.lifecycle.scenarios._kit import assert_changes, changed_paths
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
 pytestmark = [
-    pytest.mark.promise("P-INV-I1", "P-INV-I2", "P-INV-I3", "P-LAW-source.ref_cache_coherent")
+    pytest.mark.e2e,
+    pytest.mark.promise("P-INV-I1", "P-INV-I2", "P-INV-I3", "P-LAW-source.ref_cache_coherent"),
 ]
 
 REMOTE = "https://gitlab.com/acme/agents-marketplace"
