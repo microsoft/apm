@@ -53,3 +53,19 @@ def test_apm_home_guard_requires_the_canonical_owner() -> None:
     )
 
     assert any("get_apm_home must be defined only" in item.message for item in result.violations)
+
+
+def test_apm_home_guard_rejects_module_level_call() -> None:
+    source = (_ROOT / "src/apm_cli/config.py").read_text(encoding="utf-8")
+    mutated = "from apm_cli.core.scope import get_apm_home\n_SEEDED = get_apm_home()\n" + source
+
+    result = run_selected_rules(
+        _ROOT,
+        {_RULE_ID},
+        source_overrides={"src/apm_cli/config.py": mutated},
+    )
+
+    assert any(
+        "get_apm_home must not be called at module level" in item.message
+        for item in result.violations
+    )
