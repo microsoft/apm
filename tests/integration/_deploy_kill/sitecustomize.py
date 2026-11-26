@@ -20,6 +20,8 @@ and sets ``APM_TEST_DEPLOY_FAULT``:
   path is written, before its post-write seal.
 * ``retire+kill``: exit right after the first journaled delete is sealed
   (a retire killed partway, #5130).
+* ``manifest+kill``: exit at the install's first apm.yml seal, right after
+  ``apm install <package>`` wrote apm.yml (#5454).
 * ``stage+kill``: exit once an atomic write staged ``APM_TEST_DEPLOY_KILL_PATH``
   (POSIX, relative) beside it, before the rename publishes it, so the staging
   file is left behind (#5395).
@@ -49,7 +51,11 @@ if _FAULT:
         os._exit(_KILLED_EXIT)
 
     faults = _FAULT.split("+")
-    if "settle" in faults:
+    if "manifest" in faults:
+        from apm_cli.install import manifest_journal
+
+        manifest_journal.ManifestJournal.seal = _killed
+    elif "settle" in faults:
         deploy_snapshot.DeployJournal.discard = _killed
     elif "deploy" in faults:
         _after = int(os.environ.get("APM_TEST_DEPLOY_KILL_AFTER", "0") or 0)

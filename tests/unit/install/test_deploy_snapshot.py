@@ -2368,7 +2368,7 @@ def test_the_printed_chmod_fixes_an_apm_home_whose_path_has_a_space(
     logger = type("Logger", (), {"warning": lambda self, m: warnings.append(m)})()
 
     with pytest.raises(InstallFailureAlreadyRendered):
-        replay_abandoned_deploys(project / "apm_modules", logger)
+        replay_abandoned_deploys(project / "apm_modules", logger, project / "apm.yml")
 
     (command,) = [m.split("Run '", 1)[1].split("',", 1)[0] for m in warnings if "Run '" in m]
     assert shlex.split(command) == ["chmod", "g-w", str(home)]

@@ -267,7 +267,12 @@ def install_local_bundle(
             approval_key=bundle_approval_key,
         )
         refuse_unmanaged_bundle_files(
-            bundle_policy, deploy, user_scope=global_, logger=logger, dry_run=dry_run
+            bundle_policy,
+            deploy,
+            user_scope=global_,
+            logger=logger,
+            dry_run=dry_run,
+            mcp_writes=(bundle_mcp_deps, [t.name for t in targets]),
         )
         result = deploy(dry_run=dry_run, logger=logger, create_config=create_config)
 
@@ -299,7 +304,7 @@ def install_local_bundle(
                 f"Would deploy {len(deployed) + len(staged_instructions)} file(s) from local bundle"
             )
             # IM5: list the files in default mode too, so users see WHICH would deploy.
-            for f in (*deployed, *staged_instructions):
+            for f in (*deployed, *staged_instructions, *result.get("hook_config_files", [])):
                 logger.tree_item(f)
             return
 

@@ -11,6 +11,7 @@ It never writes hook configuration itself (#3700).
 from __future__ import annotations
 
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,11 @@ class BundleHookResult:
     written: list[str] = field(default_factory=list)
     hook_files: int = 0
     skipped: int = 0
+    # Hook configs and ownership sidecars the run writes beside the scripts; a
+    # dry run lists them (#4956).
+    configs: list[str] = field(default_factory=list)
+    # The configs among them whose ownership verifies once written (#5277).
+    verified_configs: list[str] = field(default_factory=list)
 
 
 def integrate_local_bundle_hooks(
@@ -117,6 +123,17 @@ def integrate_local_bundle_hooks(
     if dry_run:
         if logger is not None:
             logger.verbose_detail(f"[dry-run] would register hooks from {len(hook_paths)} file(s)")
+        _preview_hook_claims(
+            result,
+            project_root,
+            bundle_info,
+            verified_files,
+            hook_targets,
+            slug,
+            approval_key,
+            scope,
+            force=force,
+        )
         return result
 
     from ..core.scope import InstallScope
@@ -133,21 +150,20 @@ def integrate_local_bundle_hooks(
 
         retire_merged_bundle_entries(project_root, targets, slug)
         integrator = HookIntegrator()
-        for target in hook_targets:
-            outcome = integrator.integrate_hooks_for_target(
-                target,
-                package_info,
-                project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
-                scope=scope,
-                user_scope=user_scope,
-            )
+        for outcome in _integrate_hook_targets(
+            integrator,
+            hook_targets,
+            package_info,
+            project_root,
+            slug,
+            approval_key,
+            user_scope,
+            force=force,
+            managed_files=managed_files,
+            diagnostics=diagnostics,
+            scope=scope,
+        ):
             result.hook_files += outcome.files_integrated
-            _record_per_file_approval(
-                target, project_root, slug, approval_key, outcome.target_paths, user_scope
-            )
             for target_path in outcome.target_paths:
                 dest = Path(target_path)
                 record = _record_path(dest, project_root, user_scope=user_scope)
@@ -163,6 +179,180 @@ def integrate_local_bundle_hooks(
     if result.hook_files and logger is not None:
         logger.verbose_detail(f"Registered {result.hook_files} hook file(s) from bundle '{slug}'")
     return result
+
+
+def _integrate_hook_targets(
+    integrator: Any,
+    hook_targets: Any,
+    package_info: Any,
+    root: Path,
+    slug: str,
+    approval_key: str | None,
+    user_scope: bool,
+    **options: Any,
+):
+    """Register the bundle's hooks per target under *root*; the one integrator call site."""
+    for target in hook_targets:
+        outcome = integrator.integrate_hooks_for_target(
+            target, package_info, root, user_scope=user_scope, **options
+        )
+        _record_per_file_approval(
+            target, root, slug, approval_key, outcome.target_paths, user_scope
+        )
+        yield outcome
+
+
+def _preview_hook_claims(
+    result: BundleHookResult,
+    project_root: Path,
+    bundle_info: Any,
+    verified_files: dict[str, str],
+    hook_targets: Any,
+    slug: str,
+    approval_key: str | None,
+    scope: Any,
+    *,
+    force: bool,
+) -> None:
+    """List what the hook install writes, by running it in a scratch project (#4956).
+
+    The run keeps the caller's ``force`` and the project's prior bundle claims
+    over a copy of the destinations it reads (hook scripts, merged configs,
+    sidecars, ``apm.yml``), so a script the real run would skip is no claim and
+    every file written is a script claim, a hook config or an ownership
+    sidecar. The project and its lockfile are untouched. A user-scope install
+    writes under HOME, which a scratch project cannot stand in for.
+    """
+    from ..core.scope import InstallScope
+    from ..integration.config_file_provenance import replay_render
+    from ..integration.hook_integrator import HookIntegrator
+    from ..utils.content_hash import compute_file_hash
+    from ..utils.paths import portable_relpath
+
+    if scope == InstallScope.USER:
+        return
+    managed_files = _prior_bundle_claims(project_root)
+    with tempfile.TemporaryDirectory(prefix="apm-bundle-hook-preview-") as tmp:
+        scratch = Path(tmp) / "project"
+        scratch.mkdir()
+        spec_files = _seed_preview_destinations(project_root, scratch, hook_targets)
+        seeded = _file_hashes(scratch)
+        try:
+            package_info = _bundle_hook_package(
+                bundle_info, verified_files, Path(tmp) / "stage" / slug, slug
+            )
+        except ValueError:
+            return  # the real install refuses the same bytes
+        package_info.local_bundle_approval = approval_key
+        from .local_bundle_hook_trust import retire_merged_bundle_entries
+
+        integrator = HookIntegrator()
+        scripts: set[str] = set()
+        with replay_render():  # a preview records no receipts
+            retire_merged_bundle_entries(scratch, hook_targets, slug)  # as the real run does
+            outcomes = list(
+                _integrate_hook_targets(
+                    integrator,
+                    hook_targets,
+                    package_info,
+                    scratch,
+                    slug,
+                    approval_key,
+                    False,
+                    force=force,
+                    managed_files=managed_files,
+                    scope=scope,
+                )
+            )
+        for preview in outcomes:
+            for target_path in preview.target_paths:
+                record = portable_relpath(Path(target_path), scratch)
+                scripts.add(record)
+                if record not in result.script_hashes:
+                    result.scripts.append(record)
+                    result.script_hashes[record] = compute_file_hash(Path(target_path))
+        integrator.take_rendered_writes()
+        after = _file_hashes(scratch)
+        result.configs = [
+            rel
+            for rel, digest in after.items()
+            if rel not in scripts and (seeded.get(rel) != digest or rel in spec_files)
+        ]
+        result.verified_configs = _verified_configs(scratch, project_root, result.configs)
+
+
+def _file_hashes(root: Path) -> dict[str, str]:
+    from ..utils.content_hash import compute_file_hash
+    from ..utils.paths import portable_relpath
+
+    return {
+        portable_relpath(path, root): compute_file_hash(path)
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _seed_preview_destinations(project_root: Path, scratch: Path, hook_targets: Any) -> set[str]:
+    """Copy the destinations a hook install reads into *scratch*; return its config files.
+
+    Opt-in targets (Kiro) write only into a directory that already exists.
+    """
+    from ..core.scope import manifest_file
+    from .manifest_reconcile import merge_hook_config_projection_specs
+
+    specs = merge_hook_config_projection_specs(list(hook_targets))
+    config_files = {*specs, *(sidecar for sidecar, _key in specs.values())}
+    for target in hook_targets:
+        root = project_root / target.root_dir
+        if not _is_regular_dir(root):
+            continue
+        (scratch / target.root_dir).mkdir(exist_ok=True)
+        hooks = root / "hooks"
+        if _is_regular_dir(hooks):
+            shutil.copytree(
+                hooks,
+                scratch / target.root_dir / "hooks",
+                ignore=lambda directory, names: [
+                    name for name in names if not _is_seedable(Path(directory) / name)
+                ],
+            )
+    for rel in config_files:
+        src = project_root / rel
+        if (scratch / rel).parent.is_dir() and _is_regular_file(src):
+            shutil.copy2(src, scratch / rel)
+    manifest = manifest_file(project_root)
+    if _is_regular_file(manifest):
+        shutil.copy2(manifest, scratch / manifest.name)
+    return config_files
+
+
+def _is_regular_file(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _is_regular_dir(path: Path) -> bool:
+    try:
+        return stat.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _is_seedable(path: Path) -> bool:
+    """Only regular files and real directories seed the scratch: a link never does."""
+    return _is_regular_file(path) or _is_regular_dir(path)
+
+
+def _verified_configs(scratch: Path, project_root: Path, configs: list[str]) -> list[str]:
+    """The *configs* whose ownership verifies in *scratch* under the project's lockfile."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..integration.hook_ownership import verified_apm_hook_files
+
+    lockfile = LockFile.read(get_lockfile_path(project_root)) or LockFile()
+    verified = verified_apm_hook_files(scratch, lockfile)
+    return [rel for rel in configs if rel in verified]
 
 
 def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage: Path, slug: str):
