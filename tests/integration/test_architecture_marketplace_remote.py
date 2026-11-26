@@ -42,6 +42,11 @@ def test_marketplace_remote_owner_is_compliant() -> None:
         (RESOLVER, 'access["port"] = lookup.port', 'access["port"] = source.port'),
         (
             RESOLVER,
+            "lambda: _package_version_remote(",
+            "lambda: DependencyReference.parse(source.url) or _package_version_remote(",
+        ),
+        (
+            RESOLVER,
             "lookup.repo_url, **_package_remote_access(lookup, auth_resolver)",
             "source.repo, **_package_remote_access(lookup, auth_resolver)",
         ),
@@ -90,6 +95,7 @@ def test_marketplace_remote_owner_is_compliant() -> None:
         "catalog-local",
         "scheme-owner",
         "foreign-port",
+        "pin-commit-callback-catalog-redirect",
         "pin-commit-lookup-package-remote",
         "scheme-forwarding",
         "ssh-user-forwarding",

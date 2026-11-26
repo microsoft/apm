@@ -666,7 +666,7 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
                 "canonical = dep_ref.to_canonical()",
                 "version_auth = {**_package_remote_access(lookup, auth_resolver), 'tag_pattern': effective_tag_pattern}",
                 "resolve_version_constraint(plugin_name, lookup.repo_url, version_spec, **version_auth)",
-                "_package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root)",
+                "_ref_commit_lookup(lambda: _package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root), auth_resolver)",
             ),
         ),
         (
