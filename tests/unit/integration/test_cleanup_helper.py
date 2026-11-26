@@ -1047,6 +1047,62 @@ def test_cowork_parent_swapped_outside_root_during_sharing_retry_is_not_followed
     assert result.rejected == {"cowork://skills/my-skill/SKILL.md": REJECTED_UNSAFE_PATH}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_cowork_root_swapped_outside_during_sharing_retry_is_not_followed(tmp_path, diagnostics):
+    """The cowork root itself relinked outward while a file is held loses nothing (#5441)."""
+    from apm_cli.integration.cleanup import AUTHORIZED, REJECTED_UNSAFE_PATH
+
+    cowork_root = tmp_path / "cowork-skills"
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    victim = tmp_path / "outside-root" / "my-skill" / "SKILL.md"
+    victim.parent.mkdir(parents=True)
+    victim.write_text("# My Skill\n", encoding="ascii")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    real_unlink = Path.unlink
+    calls = []
+    # Receipts are keyed by resolved path, so force proof of the swapped file too.
+    evidence = receipted_evidence(cowork_root, deploy_root=project_root)
+    evidence.verdict = lambda *_args, **_kwargs: AUTHORIZED
+
+    def held_once_then_real(path, *args, **kwargs):
+        if path.name != "SKILL.md":
+            return real_unlink(path, *args, **kwargs)
+        calls.append(path)
+        if len(calls) > 1:
+            return real_unlink(path, *args, **kwargs)
+        cowork_root.rename(tmp_path / "cowork-moved-away")
+        cowork_root.symlink_to(victim.parent.parent, target_is_directory=True)
+        exc = OSError(13, "in use", str(path))
+        exc.winerror = 32
+        raise exc
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch("sys.platform", "win32"),
+        patch("time.sleep"),
+        patch.object(Path, "unlink", autospec=True, side_effect=held_once_then_real),
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=evidence,
+        )
+
+    assert len(calls) == 1
+    assert victim.read_text(encoding="ascii") == "# My Skill\n"
+    assert result.deleted == []
+    assert result.rejected == {"cowork://skills/my-skill/SKILL.md": REJECTED_UNSAFE_PATH}
+
+
 def _held_then_swapped_to_link(target: Path, real: Path):
     """A Path.unlink double: the first unlink of *target* swaps it for a link to *real*, held."""
     calls = []

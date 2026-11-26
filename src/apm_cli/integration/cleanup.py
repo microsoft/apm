@@ -1619,6 +1619,7 @@ def remove_stale_deployed_files(
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
     _cowork_root_resolved: bool = False
     _cowork_root_cached: Path | None = None
+    _cowork_root_real: Path | None = None
     _cowork_orphans_skipped: int = 0
     _cowork_resolve_errors: int = 0
 
@@ -1650,12 +1651,13 @@ def remove_stale_deployed_files(
             # Resolve the cowork:// URI to a real filesystem path.
             try:
                 if not _cowork_root_resolved:
-                    from .copilot_cowork_paths import (
-                        resolve_copilot_cowork_skills_dir,
-                    )
+                    from ..utils.path_security import resolve_path
+                    from .copilot_cowork_paths import resolve_copilot_cowork_skills_dir
 
                     _cowork_root_cached = resolve_copilot_cowork_skills_dir()
                     _cowork_root_resolved = True
+                    # Pinned once: a root relinked outward mid-backoff must not re-resolve.
+                    _cowork_root_real = _cowork_root_cached and resolve_path(_cowork_root_cached)
                 if _cowork_root_cached is None:
                     # OneDrive unavailable -- retain lockfile entry so a
                     # later install with a configured root can clean up.
@@ -1666,7 +1668,9 @@ def remove_stale_deployed_files(
 
                 # Never follow a final symlink to the file it points at.
                 stale_target = cowork_locator(stale_path, _cowork_root_cached)
-                path_check = partial(_cowork_path_outcome, stale_path, _cowork_root_cached, result)
+                path_check = partial(
+                    _cowork_path_outcome, stale_path, _cowork_root_cached, result, _cowork_root_real
+                )
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -1888,22 +1892,24 @@ def remove_synced_files(
     return result
 
 
-def _cowork_gate_passes(stale_path: str, cowork_root: Path) -> bool:
+def _cowork_gate_passes(stale_path: str, cowork_root: Path, resolved_root: Path) -> bool:
     """Whether a cowork entry still resolves inside its (originally resolved) cowork root."""
+    from ..utils.path_security import ensure_path_within_resolved
     from .copilot_cowork_paths import cowork_locator
 
     try:
-        cowork_locator(stale_path, cowork_root, reject_linked_ancestors=True)
+        locator = cowork_locator(stale_path, cowork_root, reject_linked_ancestors=True)
+        ensure_path_within_resolved(locator.parent, resolved_root)
     except Exception:
         return False
     return True
 
 
 def _cowork_path_outcome(
-    stale_path: str, cowork_root: Path, result: CleanupResult
+    stale_path: str, cowork_root: Path, result: CleanupResult, resolved_root: Path
 ) -> Callable[[], None] | None:
     """The cowork path gate; None while it passes, else the outcome recorder."""
-    if _cowork_gate_passes(stale_path, cowork_root):
+    if _cowork_gate_passes(stale_path, cowork_root, resolved_root):
         return None
     return lambda: result.reject(stale_path, REJECTED_UNSAFE_PATH)
 
