@@ -10,7 +10,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.models.dependency import DependencyReference
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-skills-root-derivation")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-skills-root-derivation")]
 
 
 def _package(tmp_path: Path) -> PackageInfo:
@@ -55,6 +55,7 @@ def test_planned_skill_files_maps_selected_skill_files_to_target_destination(tmp
         source / "SKILL.md": destination / "SKILL.md",
         source / "refs" / "guide.md": destination / "refs" / "guide.md",
     }
+    assert all(path.is_file() for path in planned)
 
 
 def test_planned_skill_files_is_empty_for_unselected_skill_or_unknown_plan(tmp_path: Path):
@@ -69,6 +70,7 @@ def test_planned_skill_files_is_empty_for_unselected_skill_or_unknown_plan(tmp_p
     planned = planned_skill_files(info, target, project, _plan(info, ("other",)))
 
     assert {path.parent.name for path in planned} == {"other"}
+    assert all(path.is_file() for path in planned)
     assert planned_skill_files(info, target, project, None) == {}
 
 
@@ -82,4 +84,6 @@ def test_planned_skill_files_honours_the_effective_pairing_for_the_target(tmp_pa
 
     plan = _plan(info)
     assert planned_skill_files(info, KNOWN_TARGETS["copilot"], project, plan, pairing) == {}
-    assert planned_skill_files(info, KNOWN_TARGETS["claude"], project, plan, pairing)
+    claude = planned_skill_files(info, KNOWN_TARGETS["claude"], project, plan, pairing)
+    assert claude
+    assert all(path.is_file() for path in claude)
