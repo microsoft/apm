@@ -266,7 +266,7 @@ class AgentIntegrator(BaseIntegrator):
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
-        self.init_link_resolver(package_info, project_root)
+        self.init_link_resolver(package_info, project_root, target=target, source_plan=source_plan)
         agent_files = self.find_agent_files(
             package_info.install_path,
             source_plan,

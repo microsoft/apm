@@ -70,6 +70,70 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
     return SkillSourceSelection("subskills", None, local_children())
 
 
+def planned_skill_files(
+    package_info: PackageInfo,
+    target: TargetProfile,
+    project_root: Path,
+    source_plan: DeployableSourcePlan | None,
+) -> dict[Path, Path]:
+    """Map each source file a promoted skill deploys for *target* to its destination.
+
+    Read-only projection of the route, name filter, destination and copy filter
+    skill deployment uses, so other primitives can link to the deployed copy
+    instead of gitignored ``apm_modules/`` (#5523). A plugin's normalized
+    ``.apm/skills/<name>`` mirror is keyed too: in-package links resolve there.
+    Unknown plans, native skills and executables yield no entry (the caller
+    keeps its fallback), so the map never names a file deployment skips.
+    """
+    import os
+
+    from apm_cli.integration.skill_bundle_routes import promoted_skill_name
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.integration.skill_support import _build_deployable_copy_ignore
+    from apm_cli.models.apm_package import PackageType
+    from apm_cli.models.dependency.subsets import SkillTargetSelection
+    from apm_cli.utils.realpath import resolve_path
+
+    if source_plan is None or not target.supports("skills"):
+        return {}
+    selection = selected_skill_sources(package_info)
+    if selection.route not in ("bundle", "subskills"):
+        return {}
+    pairing = getattr(package_info.dependency_ref, "subset_pairings", None)
+    name_filter = SkillIntegrator._paired_name_filter(
+        source_plan.selected_skill_names,
+        pairing if isinstance(pairing, SkillTargetSelection) else None,
+        (target.name,),
+    )
+    skills_root = (
+        project_root / target.skills_rel_root
+        if selection.route == "bundle"
+        else SkillIntegrator._target_skills_root(target, project_root)
+    )
+    mirror_root = resolve_path(package_info.install_path) / ".apm" / "skills"
+    is_plugin = package_info.package_type is PackageType.MARKETPLACE_PLUGIN
+    ignore = _build_deployable_copy_ignore(skip_bin=True, source_plan=source_plan)
+    planned: dict[Path, Path] = {}
+    for key, source in selection.children.items():
+        if not (source / "SKILL.md").is_file():
+            continue
+        if name_filter is not None and source.name not in name_filter:
+            continue
+        destination = skills_root / promoted_skill_name(source.name)
+        source = source.resolve()
+        aliases = (source, mirror_root / key) if is_plugin else (source,)
+        for directory, dirs, files in os.walk(source):
+            skipped = set(ignore(directory, [*dirs, *files]))
+            dirs[:] = [name for name in dirs if name not in skipped]
+            relative_dir = Path(directory).relative_to(source)
+            for name in files:
+                if name in skipped:
+                    continue
+                for alias in aliases:
+                    planned[alias / relative_dir / name] = destination / relative_dir / name
+    return planned
+
+
 def preflight_skill_selection(
     package_info: PackageInfo,
     *,
