@@ -1,0 +1,103 @@
+"""Owner tests: the commit a same-repository ``path:`` child is fetched at (#5525)."""
+
+from __future__ import annotations
+
+import pytest
+
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.same_repo_pin import same_repo_child_reference
+from apm_cli.models.apm_package import DependencyReference
+from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
+
+FETCHED = "a" * 40
+LOCKED = "b" * 40
+REFRESHED = "c" * 40
+
+
+def _parent(reference: str | None = None, commit: str | None = None) -> DependencyReference:
+    dep = DependencyReference(
+        repo_url="acme/agents-marketplace",
+        host="gitlab.com",
+        reference=reference,
+        virtual_path="plugins/guild",
+        is_virtual=True,
+    )
+    if commit is not None:
+        dep.resolved_reference = ResolvedReference(
+            original_ref=reference or "default",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit=commit,
+            ref_name=reference or "default",
+        )
+    return dep
+
+
+def _lock(parent: DependencyReference, *, resolved_ref=None, commit=LOCKED) -> LockFile:
+    lock = LockFile()
+    row = LockedDependency.from_dependency_ref(parent, commit, 1, None)
+    row.resolved_ref = resolved_ref
+    lock.add_dependency(row)
+    return lock
+
+
+def test_the_commit_the_parent_was_fetched_at_wins() -> None:
+    parent = _parent(commit=FETCHED.upper())
+    assert same_repo_child_reference(parent, _lock(parent)) == FETCHED
+
+
+def test_a_cached_parent_resolves_at_its_lock_row_commit() -> None:
+    parent = _parent()
+    assert same_repo_child_reference(parent, _lock(parent)) == LOCKED
+
+
+@pytest.mark.parametrize(
+    ("declared", "locked_ref", "locked_commit"),
+    [
+        ("v2", "v1", LOCKED),  # the selector changed since the lock
+        (None, None, None),  # the parent row has no commit
+        (None, None, "cached"),  # a sentinel is not a commit
+    ],
+)
+def test_without_a_known_parent_commit_the_child_keeps_the_selector(
+    declared, locked_ref, locked_commit
+) -> None:
+    parent = _parent(reference=declared, commit="unknown")
+    lock = _lock(parent, resolved_ref=locked_ref, commit=locked_commit)
+    assert same_repo_child_reference(parent, lock) == declared
+    assert same_repo_child_reference(parent, None) == declared
+
+
+def test_an_update_resolves_the_parent_now_and_records_it_on_the_parent() -> None:
+    parent = _parent(reference="main")
+    calls: list[DependencyReference] = []
+
+    def refresh(dep: DependencyReference) -> ResolvedReference:
+        calls.append(dep)
+        return ResolvedReference("main", GitReferenceType.BRANCH, REFRESHED, "main")
+
+    lock = _lock(parent, resolved_ref="main")
+    assert same_repo_child_reference(parent, lock, refresh=refresh) == REFRESHED
+    # The next child of the same parent reuses the recorded commit.
+    assert same_repo_child_reference(parent, lock, refresh=refresh) == REFRESHED
+    assert calls == [parent]
+
+
+def test_an_update_never_falls_back_to_the_stale_lock_commit() -> None:
+    parent = _parent()
+
+    def unreachable(dep: DependencyReference) -> ResolvedReference:
+        raise RuntimeError("origin unreachable")
+
+    assert same_repo_child_reference(parent, _lock(parent), refresh=unreachable) is None
+    assert getattr(parent, "resolved_reference", None) is None
+
+
+def test_an_update_keeps_a_commit_pinned_parent_without_asking_the_origin() -> None:
+    parent = _parent(reference=FETCHED)
+
+    def refresh(dep: DependencyReference) -> ResolvedReference:
+        raise AssertionError("a pinned parent needs no ref resolution")
+
+    assert same_repo_child_reference(parent, None, refresh=refresh) == FETCHED

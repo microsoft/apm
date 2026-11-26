@@ -45,6 +45,7 @@ from .local_identity import (
     with_declaring_edge,
 )
 from .local_identity import root_local_dirs as collect_root_local_dirs
+from .same_repo_pin import inherit_remote_parent_fields, same_repo_child_reference
 
 if TYPE_CHECKING:
     from .lockfile import LockFile
@@ -458,7 +459,7 @@ class APMDependencyResolver:
             child_dep.reference if child_dep.reference is not None else parent_dep.reference
         )
 
-        return self._inherit_remote_parent_fields(
+        return inherit_remote_parent_fields(
             parent_dep,
             child_dep,
             virtual_path=child_dep.virtual_path,
@@ -466,39 +467,13 @@ class APMDependencyResolver:
             is_virtual=True,
         )
 
-    @staticmethod
-    def _inherit_remote_parent_fields(
-        parent_dep: DependencyReference,
-        child_dep: DependencyReference,
-        *,
-        virtual_path: str | None,
-        reference: str | None,
-        is_virtual: bool,
-    ) -> DependencyReference:
-        """Return *child_dep* with remote identity inherited from *parent_dep*."""
-        return replace(
-            child_dep,
-            repo_url=parent_dep.repo_url,
-            host=parent_dep.host,
-            host_type=parent_dep.host_type,
-            port=parent_dep.port,
-            explicit_scheme=parent_dep.explicit_scheme,
-            ssh_user=parent_dep.ssh_user,
-            ado_organization=parent_dep.ado_organization,
-            ado_project=parent_dep.ado_project,
-            ado_repo=parent_dep.ado_repo,
-            artifactory_prefix=parent_dep.artifactory_prefix,
-            is_insecure=parent_dep.is_insecure,
-            allow_insecure=parent_dep.allow_insecure,
-            source=parent_dep.source,
-            registry_name=None,
-            reference=reference,
-            virtual_path=virtual_path,
-            is_virtual=is_virtual,
-            is_parent_repo_inheritance=False,
-            is_local=False,
-            local_path=None,
-        )
+    def _same_repo_child_reference(self, parent_dep: DependencyReference) -> str | None:
+        """Return the ref a same-repository ``path:`` child of *parent_dep* is fetched at."""
+        refresh = None
+        if self._update_refs and self._reference_resolver is not None:
+            if self._update_keys is None or parent_dep.get_unique_key() in self._update_keys:
+                refresh = self._reference_resolver.resolve_git_reference
+        return same_repo_child_reference(parent_dep, self._existing_lockfile, refresh=refresh)
 
     @staticmethod
     def _is_absolute_local_path(local_path: str) -> bool:
@@ -545,9 +520,8 @@ class APMDependencyResolver:
         """Expand a remote package's relative ``path:`` dep to a same-repo virtual dep.
 
         The security boundary is the authenticated parent repository root: a
-        relative path must resolve inside that root. The returned dependency keeps
-        the parent's host/repo/ref fields so downstream download code reuses the
-        same origin and shared clone cache instead of treating the path as a
+        relative path must resolve inside that root. The child keeps the parent's
+        host and repo and is fetched at the parent's commit (#5525), never as a
         consumer-filesystem local dependency.
         """
         if not child_dep.local_path:
@@ -566,19 +540,19 @@ class APMDependencyResolver:
         resolved = ensure_path_within(parent_source / local_path, repo_root)
         virtual_path = resolved.relative_to(repo_root).as_posix()
         if virtual_path in ("", "."):
-            return self._inherit_remote_parent_fields(
+            return inherit_remote_parent_fields(
                 parent_dep,
                 child_dep,
                 virtual_path=None,
-                reference=parent_dep.reference,
+                reference=self._same_repo_child_reference(parent_dep),
                 is_virtual=False,
             )
         validate_path_segments(virtual_path, context="same-repo path")
-        return self._inherit_remote_parent_fields(
+        return inherit_remote_parent_fields(
             parent_dep,
             child_dep,
             virtual_path=virtual_path,
-            reference=parent_dep.reference,
+            reference=self._same_repo_child_reference(parent_dep),
             is_virtual=True,
         )
 

@@ -663,8 +663,10 @@ absolute or expanded `~/...` paths, and single-file symlinks are rejected.
 
 When the declaring package came from a remote repo, `path:` remains scoped to
 that same repo only. The resolved path must stay inside the parent's cloned repo
-root; APM expands it to the same remote host/repo/ref. Absolute paths, paths
-that escape the repo root, and cross-repo local paths are rejected.
+root; APM expands it to the same remote host/repo and fetches it at the commit
+the parent package resolved at, so the lockfile pins each such file to its
+parent's commit. Absolute paths, paths that escape the repo root, and cross-repo
+local paths are rejected.
 
 Monorepo sibling reference (`git: parent`):
 
