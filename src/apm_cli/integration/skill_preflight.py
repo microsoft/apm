@@ -78,6 +78,7 @@ def planned_skill_files(
     source_plan: DeployableSourcePlan | None,
     skill_pairing: SkillTargetSelection | None = None,
     skill_targets: Sequence[TargetProfile] | None = None,
+    skip_bin: bool = True,
 ) -> dict[Path, Path]:
     """Map each source file a promoted skill deploys for *target* to its destination.
 
@@ -121,7 +122,7 @@ def planned_skill_files(
     )
     mirror_root = resolve_path(package_info.install_path) / ".apm" / "skills"
     is_plugin = package_info.package_type is PackageType.MARKETPLACE_PLUGIN
-    ignore = _build_deployable_copy_ignore(skip_bin=True, source_plan=source_plan)
+    ignore = _build_deployable_copy_ignore(skip_bin=skip_bin, source_plan=source_plan)
     walker = BaseIntegrator()
     planned: dict[Path, Path] = {}
     for key, source in selection.children.items():

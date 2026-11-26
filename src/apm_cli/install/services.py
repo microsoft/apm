@@ -536,10 +536,11 @@ def integrate_package_primitives(  # noqa: PLR0913
             # is enforced by the gate above (canvas already skipped if
             # not approved and not is_first_party), so here we always
             # pass trust_canvas=True to let the integrator proceed.
-            # Agents link sibling skills where this pairing deploys them (#5523).
-            if _prim_name == "agents":
+            # Primitives link sibling skills where this pairing deploys them (#5523, #5531).
+            if _prim_name in ("agents", "instructions", "prompts", "commands"):
                 _call_kwargs["skill_pairing"] = skill_pairing
                 _call_kwargs["skill_targets"] = projection_targets
+                _call_kwargs["skip_bin"] = _skip_bin
             if _prim_name == "canvas":
                 _call_kwargs["trust_canvas"] = True
                 _call_kwargs["is_first_party"] = is_first_party

@@ -1417,6 +1417,7 @@ class BaseIntegrator:
         source_plan=None,
         skill_pairing=None,
         skill_targets=None,
+        skip_bin: bool = True,
     ) -> None:
         """Initialise and register the link resolver for a package.
 
@@ -1493,6 +1494,7 @@ class BaseIntegrator:
                             source_plan,
                             skill_pairing,
                             skill_targets,
+                            skip_bin=skip_bin,
                         )
         except Exception:
             self.link_resolver = None

@@ -587,6 +587,9 @@ class CommandIntegrator(BaseIntegrator):
         diagnostics=None,
         scope=None,
         source_plan=None,
+        skill_pairing=None,
+        skill_targets=None,
+        skip_bin: bool = True,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
@@ -632,7 +635,15 @@ class CommandIntegrator(BaseIntegrator):
         # file in the batch actually had dropped frontmatter keys.  This
         # avoids polluting the happy path on Cursor installs of packages
         # whose prompts only use the cross-tool subset.
-        self.init_link_resolver(package_info, project_root)
+        self.init_link_resolver(
+            package_info,
+            project_root,
+            target=target,
+            source_plan=source_plan,
+            skill_pairing=skill_pairing,
+            skill_targets=skill_targets,
+            skip_bin=skip_bin,
+        )
 
         commands_dir = target_root / mapping.subdir
         files_integrated = 0
