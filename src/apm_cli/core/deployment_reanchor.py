@@ -1,4 +1,7 @@
-"""Carry deployment receipts to a re-anchored local owner (#4889).
+"""Carry deployment receipts, ledger owners and apm_modules copies to a re-anchored owner.
+
+Shared by the uninstall re-anchor (#4889) and the install re-key of a legacy
+absolute local identity (#5418).
 
 Re-anchoring renames a kept local dependency's lock key (``./vendor/e`` ->
 ``local:vendor/e``). The bytes on disk and the writer are unchanged, so every
@@ -19,8 +22,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from ..utils.realpath_win import release_held
 from .deployment_ledger import DeploymentLedgerCodec, DeploymentMaterializationSession
-from .deployment_state import LocatorKind
+from .deployment_state import DeploymentLedger, LocatorKind
 
 
 def _renamed_claims(lockfile: Any, renames: Mapping[str, str]):
@@ -186,3 +190,179 @@ def rename_receipt_owners(
     renames = {old: new for old, new in renames.items() if old != new}
     if renames:
         _ReanchorSession(project_root, scope, committed).rename_owners(renames, carried)
+
+
+def rename_ledger_owners(lockfile, renames: dict[str, str], writers=None) -> None:
+    """Rename the lock's deployment-ledger owners and active owners by *renames*.
+
+    The one ledger rename map: an uninstall re-anchor (#4889) and the
+    install re-key of a legacy absolute local identity (#5418) both use it.
+    """
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    records = {}
+    for key, record in ledger.records.items():
+        owners = tuple(renames.get(owner, owner) for owner in record.owners)
+        active = renames.get(record.active_owner, record.active_owner)
+        value = DeploymentLedgerCodec.legacy_value(record.locator).rstrip("/")
+        if writer := (writers or {}).get(value):
+            owners, active = (writer,), writer  # the writer a fresh install records (#5048)
+        records[key] = (
+            replace(record, owners=owners, active_owner=active)
+            if owners != record.owners or active != record.active_owner
+            else record
+        )
+    lockfile.deployment_ledger = DeploymentLedger(records=records)
+
+
+def rekey_rows(lockfile: Any, renames: Mapping[str, str]) -> None:
+    """Re-key lock rows by *renames*, with every parent reference to a renamed key.
+
+    Each row's key, its ``declaring_parent`` and its ``resolved_by`` (a lock
+    key in a replacement-enabled lock) follow the map; order is kept. The one
+    rewrite the uninstall re-anchor (#4889) and the #5418 re-key share.
+    """
+    rows = list(lockfile.dependencies.items())
+    lockfile.dependencies.clear()
+    for key, row in rows:
+        if row.declaring_parent in renames:
+            row.declaring_parent = renames[row.declaring_parent]
+        if row.resolved_by in renames:
+            row.resolved_by = renames[row.resolved_by]
+        lockfile.dependencies[renames.get(key, key)] = row
+
+
+def rekey_requests(
+    binding: Any,
+    renames: dict[str, str],
+    dev: dict[str, bool] | None = None,
+    visit_order: dict[str, int] | None = None,
+) -> bool:
+    """Name each replacement request's parent by its re-anchored key (req-rpl-003).
+
+    A re-anchored parent's request also takes the parent's new dev status,
+    as install records the edge. Requests follow the post-uninstall resolver
+    order (*visit_order*, keyed by the old parent keys): a root request first,
+    then each parent as install visits it (#4999). Without *visit_order* (the
+    #5418 re-key, which changes no graph) the order is kept.
+    """
+    if binding is None or not binding.requests:
+        return False
+    dev = dev or {}
+    rank = visit_order or {}
+    ordered = (
+        list(binding.requests)
+        if visit_order is None
+        else sorted(
+            binding.requests,
+            key=lambda request: (
+                -1 if request.parent is None else rank.get(request.parent, len(rank))
+            ),
+        )
+    )
+    rekeyed = {
+        replace(
+            request,
+            parent=renames.get(request.parent, request.parent),
+            dev=dev.get(request.parent, request.dev),
+        ): None
+        for request in ordered
+    }
+    if list(rekeyed) == list(binding.requests):
+        return False
+    binding.requests = rekeyed
+    return True
+
+
+def move_materializations(
+    moves: tuple[tuple[Path, Path], ...], modules_dir: Path
+) -> tuple[tuple[Path, Path, tuple[Path, ...]], ...]:
+    """Move each install directory to its re-anchored path inside *modules_dir*.
+
+    Every path is checked before the first move. The journal records each move
+    with the parent directories it created; a failed move removes the parents
+    it made and undoes the earlier moves, then re-raises, so apm_modules is
+    left as it was and nothing outside it changes.
+    """
+    from ..utils.path_security import PathTraversalError, ensure_path_within
+
+    root = Path(modules_dir)
+    for path in (path for move in moves for path in move):
+        try:
+            ensure_path_within(path, root)
+        except PathTraversalError as exc:
+            raise ValueError(f"{path} is outside apm_modules") from exc
+    # Every destination's missing parents are found before the first rename, so
+    # an error inspecting them cannot strand a directory already moved.
+    planned = [
+        (
+            current,
+            target,
+            tuple(
+                parent
+                for parent in reversed(target.parents)
+                if parent != root and root in parent.parents and not parent.exists()
+            ),
+        )
+        for current, target in moves
+    ]
+    done: list[tuple[Path, Path, tuple[Path, ...]]] = []
+    for current, target, created in planned:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            release_held(current)
+            current.rename(target)
+        except BaseException:
+            _undo_failed_move(current, target, created, done, root)
+            raise
+        done.append((current, target, created))
+    return tuple(done)
+
+
+def _undo_failed_move(current, target, created, done: list, root: Path) -> None:
+    """Undo a failed or interrupted (Ctrl-C) move and every earlier one.
+
+    A rename that completed before the interrupt is moved back too; earlier
+    moves go back even when cleaning this move's parents fails.
+    """
+    try:
+        if target.is_dir() and not current.exists():
+            done.append((current, target, created))
+        else:
+            _remove_created(created)
+    finally:
+        if unrestored := restore_materializations(tuple(done), root):
+            raise OSError(f"could not move back {', '.join(unrestored)}")
+
+
+def _remove_created(created: tuple[Path, ...]) -> None:
+    """Remove the parents a move created, deepest first, while they stay empty."""
+    for parent in reversed(created):
+        if parent.is_dir() and not any(parent.iterdir()):
+            release_held(parent)
+            parent.rmdir()
+
+
+def restore_materializations(
+    moved: tuple[tuple[Path, Path, tuple[Path, ...]], ...], modules_dir: Path
+) -> list[str]:
+    """Put each moved directory back and remove only the parents its move created.
+
+    Every move is attempted; returns the ``apm_modules/...`` directories that
+    could not be moved back (empty when all were), never raising part way.
+    """
+    unrestored: list[str] = []
+    for current, target, created in reversed(moved):
+        try:
+            release_held(target)
+            target.rename(current)
+            _remove_created(created)
+        except OSError:
+            unrestored.append(modules_path(target, modules_dir))
+    return unrestored
+
+
+def modules_path(path: Path, modules_dir: Path) -> str:
+    try:
+        return f"apm_modules/{path.relative_to(modules_dir).as_posix()}"
+    except ValueError:
+        return str(path)

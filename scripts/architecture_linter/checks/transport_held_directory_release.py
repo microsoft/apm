@@ -72,6 +72,7 @@ _INVENTORY = (
     "src/apm_cli/commands/uninstall/engine.py",
     "src/apm_cli/commands/uninstall/local_reanchor.py",
     "src/apm_cli/commands/update.py",
+    "src/apm_cli/core/deployment_reanchor.py",
     "src/apm_cli/deps/plugin_parser.py",
     "src/apm_cli/deps/registry/resolver.py",
     "src/apm_cli/install/deploy_snapshot.py",

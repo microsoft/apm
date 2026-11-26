@@ -222,6 +222,20 @@ RESTORE_EDITED = _entry(
     "restore the locked content",
     before="move {subject} aside",
 )
+# One local package directory locked under two keys after the #5418 re-key.
+LOCAL_IDENTITY_DUPLICATE = _entry(
+    "local-identity-duplicate",
+    "apm install",
+    "record the package once",
+    before="remove the duplicate entry from apm.yml",
+)
+# An apm_modules copy a rolled-back #5418 re-key could not move back.
+LOCAL_SLOT_RESTORE = _entry(
+    "local-slot-restore",
+    "apm install",
+    "rebuild apm_modules",
+    before="close programs using it",
+)
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")

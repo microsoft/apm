@@ -30,6 +30,7 @@ from apm_cli.install.phases.lockfile_deploy_records import (
     stage_deployed_file,
     stage_package_records,
 )
+from apm_cli.install.phases.lockfile_rekey import with_portable_local_keys
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -789,7 +790,7 @@ class LockfileBuilder:
 
     def _maybe_merge_partial(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> LockFile:
         if self.ctx.only_packages:
-            existing = _LF.read(lockfile_path)
+            existing = with_portable_local_keys(_LF.read(lockfile_path), self.ctx.source_root)
             if existing:
                 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 

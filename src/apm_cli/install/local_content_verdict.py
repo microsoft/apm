@@ -187,7 +187,9 @@ def local_content_reasons(
                         root=root,
                         root_local_dirs=root_local_dirs,
                     )
-                    queue.append(locked_spelling(child, lockfile.dependencies, root))
+                    queue.append(
+                        locked_spelling(child, lockfile.dependencies, root, directory=anchored)
+                    )
         except (LocalResolutionError, OSError, ValueError) as exc:
             reasons.append(
                 f"  - local dependency {declared.local_path!r} cannot be verified: {exc}"

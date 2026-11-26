@@ -423,6 +423,7 @@ class InstallTransaction:
         self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
         self._migrated_lockfile: tuple[Path, Path, bytes] | None = None
+        self._materialization_moves: tuple[tuple[Path, Path, tuple[Path, ...]], ...] = ()
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -519,6 +520,7 @@ class InstallTransaction:
                         self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
+                    self._settle_materialization_moves()
                     self._ref_pins.commit()
                     self._verdicts.commit()
                     self._completed = True
@@ -690,6 +692,71 @@ class InstallTransaction:
             if not legacy.exists() and current.read_bytes() == snapshot:
                 current.rename(legacy)
 
+    def journal_materialization_moves(
+        self, moved: tuple[tuple[Path, Path, tuple[Path, ...]], ...]
+    ) -> None:
+        """Follow ``apm_modules`` copies this attempt moved (#5418 re-key).
+
+        A rollback, or a declined update, moves them back
+        (:func:`apm_cli.core.deployment_reanchor.restore_materializations`);
+        a commit removes the parent directories the moves left empty.
+        """
+        self._materialization_moves = (*self._materialization_moves, *moved)
+
+    def _restore_materialization_moves(self, moved: tuple = ()) -> None:
+        moved = moved or self._materialization_moves
+        self._materialization_moves = ()
+        if not moved:
+            return
+        if not self._lock_keeps_legacy_keys():
+            # Native registration flushed the re-keyed lock before this attempt
+            # ended: the slots stay where the lock on disk names them.
+            self._remove_emptied_parents(moved)
+            return
+        from apm_cli.core.deployment_reanchor import restore_materializations
+        from apm_cli.core.remediation import LOCAL_SLOT_RESTORE
+
+        for path in restore_materializations(moved, self.apm_modules_dir):
+            if self._logger is None:
+                continue
+            self._logger.warning(f"Could not move {path} back. {LOCAL_SLOT_RESTORE.sentence()}")
+
+    def _settle_materialization_moves(self) -> None:
+        """Keep the moves until the staged lockfile reaches disk.
+
+        An outer writer (``apm update``) commits after this transaction: a
+        failed or abandoned write moves the copies back, so the unchanged
+        lock still names them; a successful one removes the emptied parents.
+        """
+        moved, self._materialization_moves = self._materialization_moves, ()
+        if not moved:
+            return
+        from apm_cli.deps.lockfile_write_authority import (
+            after_lockfile_commit,
+            unless_lockfile_commits,
+        )
+
+        unless_lockfile_commits(lambda: self._restore_materialization_moves(moved))
+        after_lockfile_commit(lambda: self._remove_emptied_parents(moved))
+
+    def _remove_emptied_parents(self, moved: tuple) -> None:
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        BaseIntegrator.cleanup_empty_parents(
+            [current for current, _target, _created in moved], stop_at=self.apm_modules_dir
+        )
+
+    def _lock_keeps_legacy_keys(self) -> bool:
+        """Whether the lockfile on disk still records the re-keyed rows by legacy keys."""
+        from apm_cli.deps.lockfile import get_lockfile_path
+        from apm_cli.install.phases.lockfile_rekey import legacy_local_keys
+
+        try:
+            data = get_lockfile_path(self.apm_modules_dir.parent).read_bytes()
+        except OSError:
+            return True
+        return legacy_local_keys(data, self.manifest_path.parent) != set()
+
     def track_created_target_roots(self, roots: list[Path]) -> None:
         """Follow the target roots this attempt creates; rollback removes empty ones."""
         self._created_target_roots = roots
@@ -815,6 +882,7 @@ class InstallTransaction:
                         cleanup_issues = self._resolution.rollback() or []
                         self._report_resolution_cleanup_issues(cleanup_issues)
                     finally:
+                        self._restore_materialization_moves()
                         self._restore_manifest()
                         if self._manifest_restored():
                             self._discard_manifest_journal()

@@ -12,11 +12,19 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, TypeVar
 
 from ..models.dependency.reference import DependencyReference
-from ..utils.paths import portable_relpath, relative_posix, spelling_key, stored_spelling
+from ..utils.paths import (
+    bounded_common_ancestor,
+    portable_link_relpath,
+    portable_relpath,
+    relative_posix,
+    repository_root,
+    spelling_key,
+    stored_spelling,
+)
 from ..utils.realpath import resolve_path
 
 _T = TypeVar("_T")
@@ -29,22 +37,61 @@ def portable_anchor_identity(anchored: Path, base: Path | None) -> str:
     package. The returned value is the package's stable identity only --
     it feeds the ``local:`` cycle key, the lockfile
     ``dependencies[].anchored_local_path`` field, and (via that same owner
-    identity) the deployment-ledger owner rows. It is never re-opened as a
-    filesystem path.
+    identity) the deployment-ledger owner rows. Lookups never open a
+    relative identity to find a row (:func:`locked_spelling` compares
+    directories); a legacy absolute one is opened to confirm the directory
+    it names, and the one-time re-key reads the package manifest at
+    ``base / identity`` to rebind MCP evidence.
 
     A lockfile is a committed, cross-machine artifact, so this identity
     MUST NOT carry a developer's home directory or any absolute prefix.
     Packages inside ``base`` (the project root) are recorded relative to
     it in forward-slash POSIX form -- matching how directly-declared local
     owners already serialize -- which keeps a regenerated lockfile
-    deterministic across machines and CI. Packages outside ``base`` (or
-    when ``base`` is unknown) fall back to the resolved absolute POSIX
-    path: such out-of-project local deps are inherently non-committable,
-    and the fallback preserves a unique identity without inventing one.
+    deterministic across machines and CI. A package outside ``base`` is
+    recorded relative to ``base`` with ``../``, as direct rows are (#5418;
+    both sides resolved), when it is in the same repository (one
+    :func:`apm_cli.utils.paths.repository_root`), or, when neither ``base``
+    nor the package is in a repository, when their nearest common ancestor
+    is below every shared root, the home directory and its ancestors
+    (:func:`apm_cli.utils.paths.bounded_common_ancestor`). Anything else
+    (another repository, outside the repository, a common ancestor at
+    ``/``, a drive root, HOME or above, another drive, ``base`` unknown, a
+    resolution error) falls back to the resolved absolute POSIX path: the
+    fallback preserves a unique identity without inventing one.
     """
     if base is None:
         return anchored.resolve().as_posix()
-    return portable_relpath(anchored, base)
+    try:
+        resolved, resolved_base = resolve_path(anchored), resolve_path(base)
+    except (OSError, RuntimeError):
+        return portable_relpath(anchored, base)
+    inside = relative_posix(resolved, resolved_base)
+    if inside is not None:
+        return inside
+    repository = repository_root(resolved_base)
+    package_repository = repository_root(resolved)
+    if (
+        package_repository == repository
+        if repository is not None
+        else package_repository is None and bounded_common_ancestor(resolved, resolved_base)
+    ):
+        sibling = _sibling_relpath(resolved, resolved_base)
+        if sibling is not None:
+            return sibling
+    return resolved.as_posix()
+
+
+def _sibling_relpath(path: Path, base: Path) -> str | None:
+    """``../`` spelling of *path* from *base*; ``None`` across Windows drives.
+
+    POSIX keeps a literal backslash: it is part of a name, never a separator,
+    so ``a\\b`` and ``a/b`` stay two identities. Windows separators become
+    ``/``.
+    """
+    if os.sep == "/":
+        return os.path.relpath(path, base)
+    return portable_link_relpath(path, base)
 
 
 def stored_directory(anchored: Path, root: Path | None) -> Path:
@@ -87,35 +134,81 @@ def _below_root(anchor: str) -> bool:
     )
 
 
-def locked_spelling(
-    ref: DependencyReference, locked: Mapping[str, Any], root: Path | None
-) -> DependencyReference:
-    """*ref* keyed as a pre-#5424 lock row that names its directory another way.
+def _absolute_identity(anchor: str) -> bool:
+    """Whether an ``anchored_local_path`` is an absolute (pre-#5418 or out-of-repo) path."""
+    return PurePosixPath(anchor).is_absolute() or PureWindowsPath(anchor).is_absolute()
 
-    Before :func:`stored_directory`, a transitive row kept the declared
-    spelling (``vendor/f-pkg`` for a stored ``F-Pkg``). When *ref*'s key is not
-    locked, a row whose ``anchored_local_path`` has the same caseless key and
-    is the same directory below *root* (``samefile``) names it, so ``install
-    --frozen`` accepts such a lock, read-only, until a plain install re-keys
-    it. A case-sensitive volume never confirms two spellings. Scans the rows
-    only on a miss.
+
+def _same_entry(first: Path, second: Path) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def locked_spelling(
+    ref: DependencyReference,
+    locked: Mapping[str, Any],
+    root: Path | None,
+    directory: Path | None = None,
+) -> DependencyReference:
+    """*ref* keyed as a legacy lock row that names its directory another way.
+
+    The one read-only legacy lookup (``install --frozen``, ``audit --ci``),
+    used only when *ref*'s key is not locked, until a plain install re-keys
+    the lock. Scans the rows only on a miss. Two legacy forms name the
+    directory:
+
+    * pre-#5424: a row whose ``anchored_local_path`` has the same caseless
+      key and is the same directory below *root* (``samefile``); a
+      case-sensitive volume never confirms two spellings;
+    * pre-#5418: a row whose ``anchored_local_path`` is absolute and is the
+      same directory as *directory*, the resolved directory *ref* was
+      anchored from. A ``../`` identity is never opened as a path.
     """
     anchor = ref.anchored_local_path
-    if not anchor or root is None or ref.get_unique_key() in locked or not _below_root(anchor):
+    if not anchor or root is None or ref.get_unique_key() in locked:
         return ref
-    want = spelling_key(anchor)
+    want = spelling_key(anchor) if _below_root(anchor) else None
     for row in locked.values():
         legacy = getattr(row, "anchored_local_path", None)
-        if not legacy or legacy == anchor or spelling_key(legacy) != want:
+        if not legacy or legacy == anchor:
             continue
-        if not _below_root(legacy):
+        if want is not None and spelling_key(legacy) == want and _below_root(legacy):
+            if _same_entry(root / legacy, root / anchor):
+                return replace(ref, anchored_local_path=legacy)
+        elif directory is not None and _absolute_identity(legacy):
+            if _same_entry(Path(legacy), directory):
+                return replace(ref, anchored_local_path=legacy)
+    return ref
+
+
+def legacy_local_renames(locked: Mapping[str, Any], root: Path) -> dict[str, str]:
+    """Old lock key -> current identity of each row an absolute identity names (#5418).
+
+    A row recorded before #5418 keys a monorepo sibling by its absolute
+    path. Its current identity is :func:`portable_anchor_identity` of that
+    directory, so the write path re-keys the row in place, never as a new
+    owner. A single-file source (``.agent.md``, ``.instructions.md``,
+    ``.prompt.md``) is re-keyed like a directory. Rows whose source is gone
+    or whose identity is unchanged (a package outside the repository) are not
+    renamed.
+    """
+    renames: dict[str, str] = {}
+    for key, row in locked.items():
+        legacy = getattr(row, "anchored_local_path", None)
+        if not legacy or key != f"local:{legacy}" or not _absolute_identity(legacy):
             continue
         try:
-            if os.path.samefile(root / legacy, root / anchor):
-                return replace(ref, anchored_local_path=legacy)
-        except OSError:
+            anchored = resolve_path(Path(legacy))
+        except (OSError, RuntimeError):
             continue
-    return ref
+        if not anchored.exists():
+            continue
+        current = portable_anchor_identity(stored_directory(anchored, root), root)
+        if current != legacy:
+            renames[key] = current
+    return renames
 
 
 def root_local_dirs(
