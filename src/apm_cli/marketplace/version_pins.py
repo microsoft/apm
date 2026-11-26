@@ -600,12 +600,17 @@ def stage_ref_pin(
 def _same_commit(
     previous_ref: str, ref: str, commit_of: Callable[[str], str | None] | None
 ) -> str | None:
-    """Return the commit both refs select now, or ``None`` when that is not known.
+    """Return the commit SHA *ref* names when the recorded ref selects it now, else ``None``.
 
-    ``None`` keeps the refusal: a ref with no fixed commit, a lookup that
-    fails (offline, unreachable, no credentials) or two different commits.
+    Only a full commit SHA replaces a recorded ref: the download then fetches
+    exactly the commit checked here. A tag replacing a recorded SHA could
+    resolve differently at download time, so it is refused. ``None`` keeps
+    the refusal: a ref with no fixed commit, a lookup that fails (offline,
+    unreachable, no credentials) or two different commits.
     """
-    if commit_of is None:
+    from ..utils.github_host import is_full_commit_sha
+
+    if commit_of is None or not is_full_commit_sha(ref):
         return None
     try:
         recorded, current = commit_of(previous_ref), commit_of(ref)
@@ -635,14 +640,13 @@ def _migrate_same_commit_pin(
         return None
     if stage is not None:
         stage.remember_same_commit(refs, commit)
-    if previous_ref.lower() != commit:
-        from ..utils.console import _rich_info
+    from ..utils.console import _rich_info
 
-        _rich_info(
-            f"Plugin {plugin_name}@{marketplace_name}: recorded ref '{previous_ref}' is the "
-            f"same commit as '{ref}'; pin moved to commit {commit}.",
-            symbol="info",
-        )
+    _rich_info(
+        f"Plugin {plugin_name}@{marketplace_name}: recorded ref '{previous_ref}' is the "
+        f"same commit as '{ref}'; pin moved to commit {commit}.",
+        symbol="info",
+    )
     return commit
 
 
@@ -662,9 +666,10 @@ def enforce_ref_pin(
     A contradicting ref raises :class:`RefPinMismatchError` unless
     *accept_change* is set (an explicit ``apm update`` of that plugin) or the
     install attempt accepts changes (``apm install --accept-ref-change``).
-    When *commit_of* shows that the recorded ref and *ref* select the same
-    commit now (a tag peeled to the SHA a catalog adds), the pin moves to that
-    commit instead (#5526); a commit that cannot be determined still refuses.
+    When *ref* is a full commit SHA and *commit_of* shows the recorded ref
+    selects that commit now (a tag peeled to the SHA a catalog adds), the pin
+    moves to the SHA instead (#5526); a commit that cannot be determined
+    still refuses.
     A staged ref is written only when the install commits (#4400).
 
     Returns:
@@ -692,7 +697,7 @@ def enforce_ref_pin(
         )
         if commit is None:
             raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
-        stage_ref_pin(marketplace_name, plugin_name, commit, version, catalog)
+        stage_ref_pin(marketplace_name, plugin_name, ref, version, catalog)
         return None
     if previous_ref is not None and accept_change:
         repair = True

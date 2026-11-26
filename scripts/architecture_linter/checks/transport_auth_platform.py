@@ -672,16 +672,12 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
         (
             "src/apm_cli/marketplace/resolver.py",
             "_package_remote_access",
-            (
-                "transport_scheme = initial_transport_scheme(lookup)",
-                "access['port'] = lookup.port",
-            ),
+            ("transport_scheme = initial_transport_scheme(lookup)", "access['port'] = lookup.port"),
         ),
         (
             "src/apm_cli/marketplace/resolver.py",
             "_ref_commit_lookup.commit_of",
             (
-                "lookup = package_remote()",
                 "list_package_refs(lookup.repo_url, **_package_remote_access(lookup, auth_resolver))",
             ),
         ),

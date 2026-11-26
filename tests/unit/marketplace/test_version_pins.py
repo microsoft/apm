@@ -402,13 +402,17 @@ def test_a_tag_pin_and_the_sha_it_peels_to_migrate_the_pin_to_the_commit(tmp_pat
     assert lookup.calls.count("v0.2.1") == 1, "the second resolution reused the match"
 
 
-def test_a_sha_pin_and_a_tag_peeling_to_it_keep_the_commit_quietly(tmp_path, capsys):
+def test_a_sha_pin_is_never_replaced_by_a_tag_even_of_the_same_commit(tmp_path):
+    """A tag could resolve differently at download time; only a SHA replaces a pin."""
+    from apm_cli.marketplace.version_pins import RefPinMismatchError
+
     save_ref_pins({"atlas/okf/0.2.1": _TAG_COMMIT}, pins_dir=str(tmp_path))
+    lookup = _tag_lookup({"v0.2.1": _TAG_COMMIT})
 
-    _enforce_with_stage(tmp_path, "v0.2.1", _tag_lookup({"v0.2.1": _TAG_COMMIT}))
-
+    with pytest.raises(RefPinMismatchError):
+        _enforce_with_stage(tmp_path, "v0.2.1", lookup)
+    assert lookup.calls == [], "a non-SHA ref needs no remote lookup to be refused"
     assert load_ref_pins(pins_dir=str(tmp_path)) == {"atlas/okf/0.2.1": _TAG_COMMIT}
-    assert "same commit" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

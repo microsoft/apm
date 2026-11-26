@@ -1357,7 +1357,10 @@ def resolve_marketplace_plugin(
             version=resolved_version or plugin.version or "",
             accept_change=accept_ref_change,
             catalog=catalog_pin_identity(source),
-            commit_of=_ref_commit_lookup(
+            # A risky source is refused at admission; never contact its remote (#1326).
+            commit_of=None
+            if cross_repo_misconfig_risk is not None
+            else _ref_commit_lookup(
                 lambda: _package_version_remote(
                     plugin, source, dep_ref, canonical, manifest.plugin_root
                 ),
