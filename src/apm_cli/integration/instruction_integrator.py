@@ -410,6 +410,9 @@ class InstructionIntegrator(BaseIntegrator):
         *,
         force: bool = False,
         diagnostics=None,
+        skill_pairing=None,
+        skill_targets=None,
+        skip_bin: bool = True,
     ) -> None:
         """Validate authorized instructions and prepare conversions before writes."""
         self._prepared_rule_plans.clear()
@@ -430,7 +433,6 @@ class InstructionIntegrator(BaseIntegrator):
         if not instruction_files:
             return
 
-        self.init_link_resolver(package_info, project_root)
         package_name = getattr(getattr(package_info, "package", None), "name", "")
         prepared_instructions = {
             source_file: self._prepare_instruction(
@@ -445,6 +447,15 @@ class InstructionIntegrator(BaseIntegrator):
         for target, mapping in eligible_targets:
             if not mapping.output_compare:
                 continue
+            self.init_link_resolver(
+                package_info,
+                project_root,
+                target=target,
+                source_plan=source_plan,
+                skill_pairing=skill_pairing,
+                skill_targets=skill_targets,
+                skip_bin=skip_bin,
+            )
             effective_root = mapping.deploy_root or target.root_dir
             deploy_dir = project_root / effective_root / mapping.subdir
             key = self._plan_key(

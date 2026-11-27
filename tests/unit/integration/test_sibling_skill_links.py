@@ -14,6 +14,8 @@ from apm_cli.integration.skill_preflight import planned_skill_files
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-skills-root-derivation")]
+
 
 def _make_package(tmp_path: Path, *, with_bin: bool = False) -> tuple[Path, PackageInfo]:
     project_root = tmp_path / "project"
@@ -142,6 +144,10 @@ def test_command_links_to_sibling_deployed_skill(tmp_path: Path, selected: bool)
 def test_planned_skill_files_respects_skip_bin(tmp_path: Path) -> None:
     project_root, package_info = _make_package(tmp_path, with_bin=True)
     target = KNOWN_TARGETS["copilot"]
+    (package_info.install_path / ".apm" / "instructions" / "bin.instructions.md").write_text(
+        "---\napplyTo: '**'\n---\nSee [demo-skill](../skills/demo-skill/bin/run.sh).\n",
+        encoding="utf-8",
+    )
     source_plan = DeployableSourcePlan.create(
         package_info,
         [target],
@@ -161,3 +167,113 @@ def test_planned_skill_files_respects_skip_bin(tmp_path: Path) -> None:
     assert (
         included[bin_file] == project_root / ".agents" / "skills" / "demo-skill" / "bin" / "run.sh"
     )
+
+    integrator = InstructionIntegrator()
+    integrator.integrate_instructions_for_target(
+        target,
+        package_info,
+        project_root,
+        source_plan=source_plan,
+        skill_targets=[target],
+        skip_bin=True,
+    )
+    deployed = project_root / ".github" / "instructions" / "bin.instructions.md"
+    assert "apm_modules/" in _link_target(deployed.read_text(encoding="utf-8"))
+
+    integrator.integrate_instructions_for_target(
+        target,
+        package_info,
+        project_root,
+        force=True,
+        source_plan=source_plan,
+        skill_targets=[target],
+        skip_bin=False,
+    )
+    assert (
+        _link_target(deployed.read_text(encoding="utf-8"))
+        == "../../.agents/skills/demo-skill/bin/run.sh"
+    )
+
+
+@pytest.mark.parametrize("selected", [True, False], ids=["deployed", "not-selected"])
+def test_gemini_command_links_to_sibling_deployed_skill_and_adopts(
+    tmp_path: Path, selected: bool
+) -> None:
+    project_root, package_info = _make_package(tmp_path)
+    (project_root / ".gemini").mkdir(parents=True)
+    target = KNOWN_TARGETS["gemini"]
+    source_plan = DeployableSourcePlan.create(
+        package_info,
+        [target],
+        skill_subset=None if selected else ("other-skill",),
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+    )
+    integrator = CommandIntegrator()
+    result = integrator.integrate_commands_for_target(
+        target,
+        package_info,
+        project_root,
+        source_plan=source_plan,
+        skill_targets=[target],
+    )
+    assert result.files_integrated == 1
+    assert result.links_resolved == 1
+    deployed = project_root / ".gemini" / "commands" / "review.toml"
+    link = _link_target(deployed.read_text(encoding="utf-8"))
+    if selected:
+        assert link == "../../.agents/skills/demo-skill/SKILL.md"
+    else:
+        assert "apm_modules/" in link
+
+    adopt_result = integrator.integrate_commands_for_target(
+        target,
+        package_info,
+        project_root,
+        source_plan=source_plan,
+        skill_targets=[target],
+    )
+    assert adopt_result.files_adopted == 1
+    assert adopt_result.files_integrated == 0
+
+
+@pytest.mark.parametrize("selected", [True, False], ids=["deployed", "not-selected"])
+def test_preflight_then_integrate_converted_instruction_links_to_sibling_skill(
+    tmp_path: Path, selected: bool
+) -> None:
+    project_root, package_info = _make_package(tmp_path)
+    (project_root / ".claude").mkdir(parents=True)
+    target = KNOWN_TARGETS["claude"]
+    source_plan = DeployableSourcePlan.create(
+        package_info,
+        [target],
+        skill_subset=None if selected else ("other-skill",),
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+    )
+    integrator = InstructionIntegrator()
+    integrator.preflight_instructions_for_targets(
+        [target],
+        package_info,
+        project_root,
+        source_plan,
+        skill_targets=[target],
+        skip_bin=True,
+    )
+    result = integrator.integrate_instructions_for_target(
+        target,
+        package_info,
+        project_root,
+        source_plan=source_plan,
+        skill_targets=[target],
+        skip_bin=True,
+    )
+    assert result.files_integrated == 1
+    deployed = project_root / ".claude" / "rules" / "style.md"
+    link = _link_target(deployed.read_text(encoding="utf-8"))
+    if selected:
+        assert link == "../skills/demo-skill/SKILL.md"
+    else:
+        assert "apm_modules/" in link

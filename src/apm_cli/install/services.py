@@ -401,6 +401,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             source_plan,
             force=force,
             diagnostics=diagnostics,
+            skill_pairing=skill_pairing,
+            skill_targets=projection_targets,
+            skip_bin=_skip_bin,
         )
 
     _reconcile_excluded_targets()

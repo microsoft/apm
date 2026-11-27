@@ -27,6 +27,8 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_frontmatter
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -741,7 +743,9 @@ class CommandIntegrator(BaseIntegrator):
             prior_bytes = target_path.read_bytes() if target_path.is_file() else None
             if mapping.format_id == "gemini_command":
                 try:
-                    self._write_gemini_command(prompt_file, target_path)
+                    raw_links = self._write_gemini_command(
+                        prompt_file, target_path, resolve_links=self.resolve_links
+                    )
                 except yaml.YAMLError as exc:
                     if diagnostics is not None:
                         diagnostics.warn(
@@ -753,7 +757,11 @@ class CommandIntegrator(BaseIntegrator):
                         )
                     files_skipped += 1
                     continue
-                links_resolved = 0
+                links_resolved = (
+                    raw_links
+                    if isinstance(raw_links, int) and not isinstance(raw_links, bool)
+                    else 0
+                )
                 written = True
                 had_dropped = False
             else:
@@ -880,7 +888,9 @@ class CommandIntegrator(BaseIntegrator):
             return None
         try:
             if mapping.format_id == "gemini_command":
-                return self._gemini_command_text(source)
+                return self._gemini_command_text(
+                    source, target=target, resolve_links=self.resolve_links
+                )
             _name, post, _warnings, _dropped = self._transform_prompt_to_command(
                 source, target_name
             )
@@ -890,28 +900,22 @@ class CommandIntegrator(BaseIntegrator):
             return None
 
     @staticmethod
-    def _write_gemini_command(source: Path, target: Path) -> None:
-        """Transform a ``.prompt.md`` file to Gemini CLI ``.toml`` format.
-
-        Parses YAML frontmatter for ``description``, uses the markdown
-        body as the ``prompt`` field.  Replaces ``$ARGUMENTS`` with
-        ``{{args}}`` (Gemini CLI's argument interpolation syntax).
-
-        Ref: https://geminicli.com/docs/cli/gemini-md/
-        """
-        text = CommandIntegrator._gemini_command_text(source)
-        write_seam.mkdir(target.parent, parents=True, exist_ok=True)
-        BaseIntegrator.write_text_if_changed(target, text)
-
-    @staticmethod
-    def _gemini_command_text(source: Path) -> str:
-        """Render a ``.prompt.md`` file as Gemini CLI ``.toml`` command text."""
+    def _render_gemini_command(
+        source: Path,
+        target: Path | None = None,
+        resolve_links: Callable[[str, Path, Path], tuple[str, int]] | None = None,
+    ) -> tuple[str, int]:
+        """Render a ``.prompt.md`` file as Gemini CLI ``.toml`` command text and link count."""
         import toml as _toml
 
         post = load_frontmatter(source)
 
         description = post.metadata.get("description", "")
-        prompt_text = post.content.strip()
+        prompt_text = post.content
+        links_resolved = 0
+        if resolve_links is not None and target is not None:
+            prompt_text, links_resolved = resolve_links(prompt_text, source, target)
+        prompt_text = prompt_text.strip()
         prompt_text = prompt_text.replace("$ARGUMENTS", "{{args}}")
 
         if re.search(r"(?<!\d)\$\d+", prompt_text):
@@ -921,7 +925,40 @@ class CommandIntegrator(BaseIntegrator):
         if description:
             doc = {"description": description, "prompt": prompt_text}
 
-        return _toml.dumps(doc)
+        return _toml.dumps(doc), links_resolved
+
+    @staticmethod
+    def _write_gemini_command(
+        source: Path,
+        target: Path,
+        resolve_links: Callable[[str, Path, Path], tuple[str, int]] | None = None,
+    ) -> int:
+        """Transform a ``.prompt.md`` file to Gemini CLI ``.toml`` format.
+
+        Parses YAML frontmatter for ``description``, uses the markdown
+        body as the ``prompt`` field.  Replaces ``$ARGUMENTS`` with
+        ``{{args}}`` (Gemini CLI's argument interpolation syntax).
+
+        Ref: https://geminicli.com/docs/cli/gemini-md/
+        """
+        text, links_resolved = CommandIntegrator._render_gemini_command(
+            source, target=target, resolve_links=resolve_links
+        )
+        write_seam.mkdir(target.parent, parents=True, exist_ok=True)
+        BaseIntegrator.write_text_if_changed(target, text)
+        return links_resolved
+
+    @staticmethod
+    def _gemini_command_text(
+        source: Path,
+        target: Path | None = None,
+        resolve_links: Callable[[str, Path, Path], tuple[str, int]] | None = None,
+    ) -> str:
+        """Render a ``.prompt.md`` file as Gemini CLI ``.toml`` command text."""
+        text, _ = CommandIntegrator._render_gemini_command(
+            source, target=target, resolve_links=resolve_links
+        )
+        return text
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)
