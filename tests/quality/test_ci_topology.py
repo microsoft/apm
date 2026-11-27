@@ -2088,13 +2088,18 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
 # every selected node exactly once.
 SHARD_SEED_DIR = ".github/ci-durations/"
 # Sharded jobs whose shard count is planned at run time: check the planner's cap.
-PLANNED_SHARD_COUNTS = {"integration-linux-x86": 8, "integration-linux-arm": 6}
+PLANNED_SHARD_COUNTS = {
+    "integration-linux-x86": 8,
+    "integration-linux-arm": 6,
+    "integration-tests-shard": 16,
+}
 SHARD_FILE_LIST_JOBS = (
     ("ci.yml", "windows-compat-gate-1"),
     ("ci.yml", "build-and-test-shard"),
     ("ci.yml", "lifecycle-smoke-shard-1"),
     ("build-release.yml", "integration-linux-x86"),
     ("build-release.yml", "integration-linux-arm"),
+    ("ci-integration.yml", "integration-tests-shard"),
 )
 SHARDED_ROOTS = (
     "tests/unit",
@@ -2132,30 +2137,43 @@ def _resolved_index(args: Sequence[str]) -> list[str]:
     return tokens
 
 
-def _resolve_job_tokens(args: Sequence[str], job: WorkflowNode, job_id: str) -> list[str]:
+def _resolve_job_tokens(
+    args: Sequence[str], job: WorkflowNode, job_id: str, workflow: WorkflowNode
+) -> list[str]:
     """Bind the workflow expressions an emitter command uses to checkable values."""
-    env = {key: str(value) for key, value in (job.get("env") or {}).items()}
+    env = {key: str(value) for key, value in effective_env(workflow, job, {}).items()}
     resolved: list[str] = []
     for token in _resolved_index(args):
         for key in sorted(env, key=len, reverse=True):
             token = token.replace("${{env." + key + "}}", env[key]).replace("$" + key, env[key])
-        if token.startswith("${{ needs.integration-plan.outputs."):
+        if token.replace("${{ ", "${{").startswith("${{needs.integration-plan.outputs."):
             token = str(PLANNED_SHARD_COUNTS[job_id])
         # scripts/ci-shard-durations.sh seeds shard-plan/ from the committed seeds.
+        if token == "shard-plan/merge-queue.json":
+            token = "shard-plan/linux-x86_64.json"
         resolved.append(token.replace("shard-plan/", SHARD_SEED_DIR))
     return resolved
 
 
 def _job_shards(workflow: str, job_id: str) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
     """Every shard's file list for one sharded job, through the canonical emitter."""
-    job = workflow_job(load_workflow(REPO_ROOT / ".github/workflows" / workflow), job_id)
+    workflow_data = load_workflow(REPO_ROOT / ".github/workflows" / workflow)
+    job = workflow_job(workflow_data, job_id)
     raw = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
-    args = ci_sharding._files_parser().parse_args(_resolve_job_tokens(raw, job, job_id))
+    args = ci_sharding._files_parser().parse_args(
+        _resolve_job_tokens(raw, job, job_id, workflow_data)
+    )
+    durations = ci_sharding.load_durations(REPO_ROOT / args.shard_durations)
+    if job_id == "integration-tests-shard":
+        durations = {
+            node: seconds * 3 if node.startswith("tests/integration/test_architecture") else seconds
+            for node, seconds in durations.items()
+        }
     plan = ci_sharding.shard_test_files(
         args.targets,
         args.marker_expression,
         args.shard_count,
-        ci_sharding.load_durations(REPO_ROOT / args.shard_durations),
+        durations,
         REPO_ROOT,
     )
     return args, [tuple(shard) for shard in plan.shards]
@@ -2540,8 +2558,17 @@ def _assert_merge_time_integration_authority(
     shard_step = workflow_step(shard_job, MERGE_GROUP_INTEGRATION_STEP)
     shard_env = effective_env(integration, shard_job, shard_step)
     assert shard_env["PYTEST_MARK_EXPR"] == release["env"]["HERMETIC_MARK_EXPR"]
+    assert shard_env["PYTEST_TARGETS"] == "@shard-files.txt"
     shard_args = " ".join(str(shard_env["PYTEST_EXTRA_ARGS"]).split())
-    for needle in (MERGE_TIME_SHARD_COUNT, "--shard-index ${{ matrix.shard }}", "--cov"):
+    select_args = " ".join(shard_file_list_args(workflow_step(shard_job, SHARD_SELECT_STEP)))
+    for needle in (
+        MERGE_TIME_SHARD_COUNT.replace("${{ ", "${{").replace(" }}", "}}"),
+        "--shard-index ${{matrix.shard}}",
+        "--shard-durations shard-plan/merge-queue.json",
+        "-m $HERMETIC_MARK_EXPR",
+    ):
+        assert needle in select_args, f"merge-time shard selection lost {needle!r}"
+    for needle in ("--cov", "-n 4", "--dist loadgroup"):
         assert needle in shard_args, f"merge-time shard lost {needle!r}"
 
     network_job = workflow_job(integration, MERGE_TIME_NETWORK_JOB)
@@ -2875,6 +2902,29 @@ def test_merge_time_static_shard_matrix_fails(
     job = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_GROUP_INTEGRATION_JOB)
     job["strategy"]["matrix"]["shard"] = [1, 2, 3, 4]
 
+    with pytest.raises(AssertionError):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+@pytest.mark.parametrize("drift", ["target", "durations", "marker", "index"])
+def test_merge_time_file_shard_selection_drift_fails(
+    mutable_workflows: dict[str, WorkflowNode], drift: str
+) -> None:
+    job = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_GROUP_INTEGRATION_JOB)
+    if drift == "target":
+        workflow_step(job, MERGE_GROUP_INTEGRATION_STEP)["env"]["PYTEST_TARGETS"] = (
+            "tests/integration"
+        )
+    else:
+        step = workflow_step(job, SHARD_SELECT_STEP)
+        old = {
+            "durations": "shard-plan/merge-queue.json",
+            "marker": "$HERMETIC_MARK_EXPR",
+            "index": "${{ matrix.shard }}",
+        }[drift]
+        step["run"] = step["run"].replace(old, "wrong")
     with pytest.raises(AssertionError):
         _assert_merge_time_integration_authority(
             mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
