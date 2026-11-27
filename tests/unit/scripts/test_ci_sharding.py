@@ -205,6 +205,19 @@ def test_hook_writes_a_plan_without_deselecting(tmp_path: Path) -> None:
     config.hook.pytest_deselected.assert_not_called()
 
 
+def test_hook_writes_collected_xdist_groups(tmp_path: Path) -> None:
+    out = tmp_path / "groups.json"
+    items = [
+        _item("grouped", pytest.mark.xdist_group("home"), pytest.mark.xdist_group(name="env")),
+        _item("plain"),
+    ]
+
+    ci_sharding.pytest_collection_modifyitems(_config(shard_group_inventory_out=str(out)), items)
+
+    assert json.loads(out.read_text(encoding="utf-8")) == {"grouped": "env_home"}
+    assert _ids(items) == ["grouped", "plain"]
+
+
 def test_hook_is_inert_without_shard_options() -> None:
     items = [_item("only")]
     config = _config()

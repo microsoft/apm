@@ -6,9 +6,7 @@ A sharded pytest command that collects whole roots and deselects (the node
 level ``--shard-index`` plugin, pytest-split ``--splits``) is a second
 selection authority. The drift guard in ``tests/quality/test_ci_topology.py``
 compares every job's file lists with a full collect on the same SHA; this
-rule keeps that comparison wired. ci-integration.yml is out of scope: its
-merge-time lanes shard through the build-release planner, guarded by
-``contracts-tooling-ci-merge-time-topology``.
+rule keeps that comparison wired, including merge-time integration.
 """
 
 from __future__ import annotations
@@ -23,6 +21,7 @@ DRIFT_GUARD = "tests/quality/test_ci_topology.py"
 WORKFLOWS = (
     ".github/workflows/ci.yml",
     ".github/workflows/build-release.yml",
+    ".github/workflows/ci-integration.yml",
 )
 EMITTER = "scripts.ci_sharding files"
 REQUIRED: dict[str, tuple[str, ...]] = {
@@ -30,15 +29,18 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "def shard_test_files(",
         "plan = shard_test_files(",
         "def _write_shard_files(",
+        '"--shard-group-inventory-out",',
     ),
     "scripts/ci_selections.py": ("shard_test_files(",),
     DRIFT_GUARD: (
         "def test_shard_file_lists_match_full_collection(",
         "def test_windows_unit_shard_file_lists_match_full_collection(",
         '"--shard-inventory-out",',
+        '"--shard-group-inventory-out",',
         "ci_sharding.shard_test_files(",
         "assert not dropped, (",
         "assert not duplicated,",
+        "assert not split_groups,",
     ),
 }
 # A shard selector belongs to the nearest command line above it.

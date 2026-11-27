@@ -357,6 +357,13 @@ jobs:
             apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-
             apm-cache-shard${{ matrix.shard }}-
 
+      - name: Select shard test files
+        run: >-
+          uv run --frozen python -m scripts.ci_sharding files
+          --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
+          --shard-durations shard-plan/merge-queue.json
+          -m "$HERMETIC_MARK_EXPR" --out shard-files.txt tests/integration
+
       - name: Run integration tests (sharded + parallelized)
         env:
           APM_E2E_TESTS: "1"
@@ -367,17 +374,9 @@ jobs:
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
           PYTEST_MARK_EXPR: ${{ env.HERMETIC_MARK_EXPR }}
-          # Sharded + parallel pytest invocation passed through to
-          # scripts/test-integration.sh, which still owns runtime setup
-          # (apm runtime setup copilot/codex/llm) and token resolution.
-          # Every shard computes the planner's partition from the same
-          # durations. --dist loadgroup is required: it is the only xdist
-          # scheduler that honors pytest.mark.xdist_group, which keeps
-          # HOME-mutating tests serialized on a single worker.
+          # --dist loadgroup keeps HOME-mutating xdist groups on one worker.
+          PYTEST_TARGETS: "@shard-files.txt"
           PYTEST_EXTRA_ARGS: >-
-            -p scripts.ci_sharding
-            --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
-            --shard-durations shard-plan/merge-queue.json
             -n 4 --dist loadgroup --cov --cov-fail-under=0 --durations=15
         run: |
           chmod +x scripts/test-integration.sh

@@ -2088,13 +2088,18 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
 # every selected node exactly once.
 SHARD_SEED_DIR = ".github/ci-durations/"
 # Sharded jobs whose shard count is planned at run time: check the planner's cap.
-PLANNED_SHARD_COUNTS = {"integration-linux-x86": 8, "integration-linux-arm": 6}
+PLANNED_SHARD_COUNTS = {
+    "integration-linux-x86": 8,
+    "integration-linux-arm": 6,
+    "integration-tests-shard": 16,
+}
 SHARD_FILE_LIST_JOBS = (
     ("ci.yml", "windows-compat-gate-1"),
     ("ci.yml", "build-and-test-shard"),
     ("ci.yml", "lifecycle-smoke-shard-1"),
     ("build-release.yml", "integration-linux-x86"),
     ("build-release.yml", "integration-linux-arm"),
+    ("ci-integration.yml", "integration-tests-shard"),
 )
 SHARDED_ROOTS = (
     "tests/unit",
@@ -2132,30 +2137,47 @@ def _resolved_index(args: Sequence[str]) -> list[str]:
     return tokens
 
 
-def _resolve_job_tokens(args: Sequence[str], job: WorkflowNode, job_id: str) -> list[str]:
+def _resolve_job_tokens(
+    args: Sequence[str], job: WorkflowNode, job_id: str, workflow: WorkflowNode
+) -> list[str]:
     """Bind the workflow expressions an emitter command uses to checkable values."""
-    env = {key: str(value) for key, value in (job.get("env") or {}).items()}
+    env = {key: str(value) for key, value in effective_env(workflow, job, {}).items()}
     resolved: list[str] = []
     for token in _resolved_index(args):
         for key in sorted(env, key=len, reverse=True):
             token = token.replace("${{env." + key + "}}", env[key]).replace("$" + key, env[key])
-        if token.startswith("${{ needs.integration-plan.outputs."):
+        if token.replace("${{ ", "${{").startswith("${{needs.integration-plan.outputs."):
             token = str(PLANNED_SHARD_COUNTS[job_id])
         # scripts/ci-shard-durations.sh seeds shard-plan/ from the committed seeds.
+        if token == "shard-plan/merge-queue.json":
+            token = "shard-plan/linux-x86_64.json"
         resolved.append(token.replace("shard-plan/", SHARD_SEED_DIR))
     return resolved
 
 
-def _job_shards(workflow: str, job_id: str) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
+def _job_shards(
+    workflow: str, job_id: str, shard_count: int | None = None
+) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
     """Every shard's file list for one sharded job, through the canonical emitter."""
-    job = workflow_job(load_workflow(REPO_ROOT / ".github/workflows" / workflow), job_id)
+    workflow_data = load_workflow(REPO_ROOT / ".github/workflows" / workflow)
+    job = workflow_job(workflow_data, job_id)
     raw = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
-    args = ci_sharding._files_parser().parse_args(_resolve_job_tokens(raw, job, job_id))
+    args = ci_sharding._files_parser().parse_args(
+        _resolve_job_tokens(raw, job, job_id, workflow_data)
+    )
+    if shard_count is not None:
+        args.shard_count = shard_count
+    durations = ci_sharding.load_durations(REPO_ROOT / args.shard_durations)
+    if job_id == "integration-tests-shard":
+        durations = {
+            node: seconds * 3 if node.startswith("tests/integration/test_architecture") else seconds
+            for node, seconds in durations.items()
+        }
     plan = ci_sharding.shard_test_files(
         args.targets,
         args.marker_expression,
         args.shard_count,
-        ci_sharding.load_durations(REPO_ROOT / args.shard_durations),
+        durations,
         REPO_ROOT,
     )
     return args, [tuple(shard) for shard in plan.shards]
@@ -2199,6 +2221,7 @@ def _assert_shard_entries_partition(
     collected: set[str],
     shards: Sequence[Sequence[str]],
     label: str,
+    groups: Mapping[str, str] | None = None,
 ) -> None:
     """Every selected node runs on exactly one shard; every node ID entry exists."""
     owners: dict[str, list[int]] = {}
@@ -2214,6 +2237,7 @@ def _assert_shard_entries_partition(
                 ), f"{label}: shard {index} names {entry}, which pytest does not collect"
     dropped: list[str] = []
     duplicated: list[str] = []
+    group_owners: dict[str, set[int]] = defaultdict(set)
     for node in sorted(selected):
         module, _, rest = node.partition("::")
         top = re.split(r"::|\[", rest, maxsplit=1)[0]
@@ -2222,17 +2246,26 @@ def _assert_shard_entries_partition(
             dropped.append(node)
         elif len(hits) > 1:
             duplicated.append(node)
+        elif groups and node in groups:
+            group_owners[groups[node]].update(hits)
     assert not dropped, (
         f"{label}: shard file lists drop {len(dropped)} selected tests a full collect "
         f"finds, e.g. {dropped[:3]}; add their modules to the selection"
     )
     assert not duplicated, f"{label}: tests run on two shards, e.g. {duplicated[:3]}"
+    split_groups = {
+        group: sorted(owners) for group, owners in group_owners.items() if len(owners) > 1
+    }
+    assert not split_groups, f"{label}: xdist groups span shards: {split_groups}"
 
 
 @pytest.fixture(scope="module")
-def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[str]]:
+def full_collection(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, list[str]], dict[str, str]]:
     """One full collect of every sharded root on this SHA, with each node's markers."""
     out = tmp_path_factory.mktemp("shard-inventory") / "inventory.json"
+    groups = out.with_name("groups.json")
     result = subprocess.run(
         [
             sys.executable,
@@ -2246,6 +2279,8 @@ def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[
             "scripts.ci_sharding",
             "--shard-inventory-out",
             str(out),
+            "--shard-group-inventory-out",
+            str(groups),
             # Override addopts' -m so every job's own expression is evaluated here.
             "-m",
             "",
@@ -2262,30 +2297,51 @@ def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[
         },
     )
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
-    return json.loads(out.read_text(encoding="utf-8"))
+    return (
+        json.loads(out.read_text(encoding="utf-8")),
+        json.loads(groups.read_text(encoding="utf-8")),
+    )
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), SHARD_FILE_LIST_JOBS)
 def test_shard_file_lists_match_full_collection(
-    full_collection: dict[str, list[str]], workflow: str, job_id: str
+    full_collection: tuple[dict[str, list[str]], dict[str, str]], workflow: str, job_id: str
 ) -> None:
+    inventory, groups = full_collection
     args, shards = _job_shards(workflow, job_id)
     _assert_shard_entries_partition(
-        _selected_nodes(full_collection, args.targets, args.marker_expression),
-        set(full_collection),
+        _selected_nodes(inventory, args.targets, args.marker_expression),
+        set(inventory),
         shards,
         f"{workflow}:{job_id}",
+        groups if job_id == "integration-tests-shard" else None,
+    )
+
+
+@pytest.mark.parametrize("shard_count", range(1, 16))
+def test_integration_shards_preserve_selection_and_groups_at_each_planned_count(
+    full_collection: tuple[dict[str, list[str]], dict[str, str]], shard_count: int
+) -> None:
+    inventory, groups = full_collection
+    args, shards = _job_shards("ci-integration.yml", "integration-tests-shard", shard_count)
+    _assert_shard_entries_partition(
+        _selected_nodes(inventory, args.targets, args.marker_expression),
+        set(inventory),
+        shards,
+        f"ci-integration.yml:integration-tests-shard:{shard_count}",
+        groups,
     )
 
 
 def test_windows_unit_shard_file_lists_match_full_collection(
-    full_collection: dict[str, list[str]],
+    full_collection: tuple[dict[str, list[str]], dict[str, str]],
 ) -> None:
     from scripts.ci_selections import selection_roots
 
+    inventory, _groups = full_collection
     _assert_shard_entries_partition(
-        _selected_nodes(full_collection, selection_roots("windows-unit"), None),
-        set(full_collection),
+        _selected_nodes(inventory, selection_roots("windows-unit"), None),
+        set(inventory),
         _windows_unit_shards(),
         "ci_selections:windows-unit",
     )
@@ -2342,6 +2398,18 @@ def test_shard_file_list_drift_fails(drift: str) -> None:
         shards.append([])
     with pytest.raises(AssertionError):
         _assert_shard_entries_partition(selected, collected, shards, "drift")
+
+
+def test_integration_shards_cannot_split_a_collected_xdist_group() -> None:
+    selected = {"tests/a.py::test_a", "tests/b.py::test_b", "tests/c.py::test_c"}
+    groups = {"tests/a.py::test_a": "home", "tests/b.py::test_b": "home"}
+    _assert_shard_entries_partition(
+        selected, selected, [["tests/a.py", "tests/b.py"], ["tests/c.py"]], "same", groups
+    )
+    with pytest.raises(AssertionError, match="xdist groups span shards"):
+        _assert_shard_entries_partition(
+            selected, selected, [["tests/a.py"], ["tests/b.py", "tests/c.py"]], "split", groups
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2540,8 +2608,17 @@ def _assert_merge_time_integration_authority(
     shard_step = workflow_step(shard_job, MERGE_GROUP_INTEGRATION_STEP)
     shard_env = effective_env(integration, shard_job, shard_step)
     assert shard_env["PYTEST_MARK_EXPR"] == release["env"]["HERMETIC_MARK_EXPR"]
+    assert shard_env["PYTEST_TARGETS"] == "@shard-files.txt"
     shard_args = " ".join(str(shard_env["PYTEST_EXTRA_ARGS"]).split())
-    for needle in (MERGE_TIME_SHARD_COUNT, "--shard-index ${{ matrix.shard }}", "--cov"):
+    select_args = " ".join(shard_file_list_args(workflow_step(shard_job, SHARD_SELECT_STEP)))
+    for needle in (
+        MERGE_TIME_SHARD_COUNT.replace("${{ ", "${{").replace(" }}", "}}"),
+        "--shard-index ${{matrix.shard}}",
+        "--shard-durations shard-plan/merge-queue.json",
+        "-m $HERMETIC_MARK_EXPR",
+    ):
+        assert needle in select_args, f"merge-time shard selection lost {needle!r}"
+    for needle in ("--cov", "-n 4", "--dist loadgroup"):
         assert needle in shard_args, f"merge-time shard lost {needle!r}"
 
     network_job = workflow_job(integration, MERGE_TIME_NETWORK_JOB)
@@ -2875,6 +2952,29 @@ def test_merge_time_static_shard_matrix_fails(
     job = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_GROUP_INTEGRATION_JOB)
     job["strategy"]["matrix"]["shard"] = [1, 2, 3, 4]
 
+    with pytest.raises(AssertionError):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+@pytest.mark.parametrize("drift", ["target", "durations", "marker", "index"])
+def test_merge_time_file_shard_selection_drift_fails(
+    mutable_workflows: dict[str, WorkflowNode], drift: str
+) -> None:
+    job = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_GROUP_INTEGRATION_JOB)
+    if drift == "target":
+        workflow_step(job, MERGE_GROUP_INTEGRATION_STEP)["env"]["PYTEST_TARGETS"] = (
+            "tests/integration"
+        )
+    else:
+        step = workflow_step(job, SHARD_SELECT_STEP)
+        old = {
+            "durations": "shard-plan/merge-queue.json",
+            "marker": "$HERMETIC_MARK_EXPR",
+            "index": "${{ matrix.shard }}",
+        }[drift]
+        step["run"] = step["run"].replace(old, "wrong")
     with pytest.raises(AssertionError):
         _assert_merge_time_integration_authority(
             mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
