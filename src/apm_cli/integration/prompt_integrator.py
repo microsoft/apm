@@ -154,6 +154,9 @@ class PromptIntegrator(BaseIntegrator):
         diagnostics=None,
         scope=None,
         source_plan=None,
+        skill_pairing=None,
+        skill_targets=None,
+        skip_bin: bool = True,
     ) -> IntegrationResult:
         """Integrate prompts for a single *target*."""
         mapping = target.primitives.get("prompts")
@@ -197,6 +200,9 @@ class PromptIntegrator(BaseIntegrator):
             diagnostics=diagnostics,
             target=target,
             source_plan=source_plan,
+            skill_pairing=skill_pairing,
+            skill_targets=skill_targets,
+            skip_bin=skip_bin,
         )
 
     def sync_for_target(
@@ -300,6 +306,9 @@ class PromptIntegrator(BaseIntegrator):
         logger=None,
         target: TargetProfile | None = None,
         source_plan=None,
+        skill_pairing=None,
+        skill_targets=None,
+        skip_bin: bool = True,
     ) -> IntegrationResult:
         """Integrate all prompts from a package into the target prompts directory.
 
@@ -317,12 +326,19 @@ class PromptIntegrator(BaseIntegrator):
         Returns:
             IntegrationResult: Results of the integration operation
         """
-        self.init_link_resolver(package_info, project_root)
-
         if target is None:
             from apm_cli.integration.targets import KNOWN_TARGETS
 
             target = KNOWN_TARGETS["copilot"]
+        self.init_link_resolver(
+            package_info,
+            project_root,
+            target=target,
+            source_plan=source_plan,
+            skill_pairing=skill_pairing,
+            skill_targets=skill_targets,
+            skip_bin=skip_bin,
+        )
         mapping = target.primitives.get("prompts")
         if mapping is None:
             return IntegrationResult(0, 0, 0, [])

@@ -254,6 +254,7 @@ class AgentIntegrator(BaseIntegrator):
         source_plan=None,
         skill_pairing=None,
         skill_targets=None,
+        skip_bin: bool = True,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -275,6 +276,7 @@ class AgentIntegrator(BaseIntegrator):
             source_plan=source_plan,
             skill_pairing=skill_pairing,
             skill_targets=skill_targets,
+            skip_bin=skip_bin,
         )
         agent_files = self.find_agent_files(
             package_info.install_path,

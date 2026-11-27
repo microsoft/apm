@@ -410,6 +410,9 @@ class InstructionIntegrator(BaseIntegrator):
         *,
         force: bool = False,
         diagnostics=None,
+        skill_pairing=None,
+        skill_targets=None,
+        skip_bin: bool = True,
     ) -> None:
         """Validate authorized instructions and prepare conversions before writes."""
         self._prepared_rule_plans.clear()
@@ -430,7 +433,6 @@ class InstructionIntegrator(BaseIntegrator):
         if not instruction_files:
             return
 
-        self.init_link_resolver(package_info, project_root)
         package_name = getattr(getattr(package_info, "package", None), "name", "")
         prepared_instructions = {
             source_file: self._prepare_instruction(
@@ -445,6 +447,15 @@ class InstructionIntegrator(BaseIntegrator):
         for target, mapping in eligible_targets:
             if not mapping.output_compare:
                 continue
+            self.init_link_resolver(
+                package_info,
+                project_root,
+                target=target,
+                source_plan=source_plan,
+                skill_pairing=skill_pairing,
+                skill_targets=skill_targets,
+                skip_bin=skip_bin,
+            )
             effective_root = mapping.deploy_root or target.root_dir
             deploy_dir = project_root / effective_root / mapping.subdir
             key = self._plan_key(
@@ -477,6 +488,9 @@ class InstructionIntegrator(BaseIntegrator):
         diagnostics=None,
         scope=None,
         source_plan=None,
+        skill_pairing=None,
+        skill_targets=None,
+        skip_bin: bool = True,
     ) -> IntegrationResult:
         """Integrate instructions for a single *target*.
 
@@ -500,7 +514,15 @@ class InstructionIntegrator(BaseIntegrator):
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
-        self.init_link_resolver(package_info, project_root)
+        self.init_link_resolver(
+            package_info,
+            project_root,
+            target=target,
+            source_plan=source_plan,
+            skill_pairing=skill_pairing,
+            skill_targets=skill_targets,
+            skip_bin=skip_bin,
+        )
         package_path = Path(package_info.install_path)
         prepared_instructions = self._prepared_instructions.get(self._package_key(package_path))
         instruction_files = (
