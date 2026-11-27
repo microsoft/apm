@@ -3082,7 +3082,7 @@ def _assert_pr_runs_cancel_superseded_pushes_only(workflow: WorkflowNode, name: 
 def test_heavy_pr_workflows_spare_the_shared_actions_api_quota() -> None:
     """Gate polling and superseded PR runs share one installation API quota."""
     workflows = REPO_ROOT / ".github" / "workflows"
-    for name in ("ci.yml", "codeql.yml"):
+    for name in ("ci.yml", "codeql.yml", SPEC_WORKFLOW):
         workflow = load_workflow(workflows / name)
         _assert_pr_runs_cancel_superseded_pushes_only(workflow, name)
 

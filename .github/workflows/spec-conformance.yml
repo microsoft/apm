@@ -23,6 +23,12 @@ on:
         required: false
         type: string
 
+# Superseded PR pushes cancel their old run. Merge-group and called train
+# runs keep a unique group so every exact-SHA proof can finish.
+concurrency:
+  group: spec-conformance-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
