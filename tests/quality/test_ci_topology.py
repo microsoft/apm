@@ -56,8 +56,6 @@ RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
 # A job that hits its cap ends "cancelled", which hides the ratchet result.
 RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 10}
-MAIN_PUSH_RATCHET_WORKFLOW = "main-architecture-ratchets.yml"
-MAIN_PUSH_RATCHET_CHECK = "Architecture Ratchet Contracts (main)"
 RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
 RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGETS = (
@@ -436,27 +434,33 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
                 ratchet_callers.append((workflow_path.name, job_name))
     assert ratchet_callers == [
         ("ci.yml", RATCHET_CONTRACT_JOB),
-        (MAIN_PUSH_RATCHET_WORKFLOW, RATCHET_CONTRACT_JOB),
         (MERGE_TRAIN_WORKFLOW, TRAIN_GUARD_JOB),
     ]
-    _assert_main_push_ratchets(load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW), ci)
+    _assert_main_push_ratchets(load_workflow(workflows / MAIN_PUSH_GATE_WORKFLOW), ci, inventory)
     _assert_train_guard_ratchets(load_workflow(workflows / MERGE_TRAIN_WORKFLOW), ci, root)
 
 
-def _assert_main_push_ratchets(main_push: WorkflowNode, ci: WorkflowNode) -> None:
-    """Every push to main re-runs ci.yml's exact ratchet contract job.
+def _assert_main_push_ratchets(
+    main_push: WorkflowNode, ci: WorkflowNode, inventory: dict[str, str]
+) -> None:
+    """Every push to main runs the canonical ratchet job through Tier 1.
 
-    Without it, a change that reaches main outside merge_group skips the
-    ratchet contracts and main goes red with no signal. The push copy must
-    never opt into provisional baselines.
+    The main push aggregate must require Tier 1, including its ratchet verdict,
+    without a second copy of the contract suite or provisional baselines.
     """
-    assert main_push["on"] == {"push": {"branches": ["main"]}}
-    assert main_push["env"] == {"PYTHON_VERSION": ci["env"]["PYTHON_VERSION"]}
-    assert list(main_push["jobs"]) == [RATCHET_CONTRACT_JOB]
-    expected = deepcopy(workflow_job(ci, RATCHET_CONTRACT_JOB))
-    expected["name"] = MAIN_PUSH_RATCHET_CHECK
-    expected["steps"][4].pop("env")
-    assert workflow_job(main_push, RATCHET_CONTRACT_JOB) == expected
+    assert main_push["on"] == {"push": {"branches": ["main"]}, "workflow_dispatch": None}
+    tier1 = workflow_job(main_push, "tier1")
+    assert tier1["uses"] == "./.github/workflows/ci.yml"
+    assert all(key not in tier1 for key in ("if", "continue-on-error"))
+    assert "workflow_call" in ci["on"]
+    _assert_ci_test_targets(ci, inventory)
+    _assert_ci_provisional_guard(ci)
+    gate = workflow_job(main_push, MAIN_PUSH_GATE_JOB)
+    assert "tier1" in gate["needs"]
+    assert gate["if"] == "always()" and "continue-on-error" not in gate
+    step = workflow_step(gate, MAIN_PUSH_GATE_STEP)
+    assert step["env"]["TIER1_RESULT"] == "${{ needs.tier1.result }}"
+    _assert_success_results(step, tuple(step["env"]))
 
 
 @pytest.fixture(scope="module")
@@ -694,19 +698,23 @@ def test_ratchet_execution_step_drift_fails(
 def _main_push_and_ci() -> tuple[WorkflowNode, WorkflowNode]:
     workflows = REPO_ROOT / ".github" / "workflows"
     return (
-        load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW),
+        load_workflow(workflows / MAIN_PUSH_GATE_WORKFLOW),
         load_workflow(workflows / "ci.yml"),
     )
 
 
-def test_main_push_reruns_the_ratchet_contracts() -> None:
-    _assert_main_push_ratchets(*_main_push_and_ci())
+def test_main_push_reruns_the_ratchet_contracts(
+    repository_inventory: dict[str, str],
+) -> None:
+    _assert_main_push_ratchets(*_main_push_and_ci(), repository_inventory)
 
 
-@pytest.mark.parametrize("mutation", ["trigger", "selection", "provisional", "skip"])
-def test_main_push_ratchet_drift_fails(mutation: str) -> None:
+@pytest.mark.parametrize(
+    "mutation", ["trigger", "selection", "provisional", "skip", "drop-tier1", "soften-gate"]
+)
+def test_main_push_ratchet_drift_fails(mutation: str, repository_inventory: dict[str, str]) -> None:
     main_push, ci = _main_push_and_ci()
-    job = workflow_job(main_push, RATCHET_CONTRACT_JOB)
+    job = workflow_job(ci, RATCHET_CONTRACT_JOB)
     if mutation == "trigger":
         main_push["on"] = {"pull_request": {"branches": ["main"]}}
     elif mutation == "selection":
@@ -715,10 +723,14 @@ def test_main_push_ratchet_drift_fails(mutation: str) -> None:
         )
     elif mutation == "provisional":
         job["steps"][4]["env"] = {ALLOW_PROVISIONAL_KEY: "1"}
+    elif mutation == "skip":
+        main_push["jobs"]["tier1"]["if"] = "false"
+    elif mutation == "drop-tier1":
+        main_push["jobs"][MAIN_PUSH_GATE_JOB]["needs"].remove("tier1")
     else:
-        job["if"] = "false"
+        main_push["jobs"][MAIN_PUSH_GATE_JOB]["continue-on-error"] = True
     with pytest.raises(AssertionError):
-        _assert_main_push_ratchets(main_push, ci)
+        _assert_main_push_ratchets(main_push, ci, repository_inventory)
 
 
 @pytest.mark.parametrize("job_id", RATCHET_EXECUTION_JOBS)
