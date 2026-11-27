@@ -12,7 +12,7 @@ run publishes a fresh one as an artifact, and a committed seed keeps the lanes
 balanced when no artifact is available. Node IDs missing from the file are
 weighted with the mean known duration. Without any file every test weighs 1.
 
-Five modes:
+Six modes:
 
 * ``--shard-plan-out PATH`` (with ``--collect-only``) estimates the work of the
   selection and writes ``{"shard_count": N, "shards": [1..N], ...}``. N is the
@@ -26,6 +26,8 @@ Five modes:
   nightly run can publish fresh durations.
 * ``--shard-inventory-out PATH`` writes every selected node ID with its marker
   names, so the drift guard can evaluate each job's ``-m`` from one collect.
+* ``--shard-group-inventory-out PATH`` records the actual xdist group of each
+  selected grouped test, for the drift guard's cross-shard isolation check.
 * ``python -m scripts.ci_sharding files`` (no pytest collection) writes the
   test modules of one shard to a pytest ``@argfile``. Each sharded CI job
   passes that file list instead of whole directories, so every shard imports
@@ -543,6 +545,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Write {node_id: [marker names]} of every selected test (drift guard input).",
     )
     group.addoption(
+        "--shard-group-inventory-out",
+        default=None,
+        help="Write {node_id: xdist group} of selected grouped tests (drift guard input).",
+    )
+    group.addoption(
         "--shard-store-durations",
         default=None,
         help="Write measured {node_id: seconds} for every test that ran.",
@@ -581,6 +588,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.nodeid: sorted({mark.name for mark in item.iter_markers()}) for item in items
         }
         Path(inventory_out).write_text(json.dumps(inventory, sort_keys=True), encoding="utf-8")
+    group_inventory_out = config.getoption("shard_group_inventory_out", default=None)
+    if group_inventory_out is not None:
+        groups = {item.nodeid: group for item in items if (group := _group_key(item)) is not None}
+        Path(group_inventory_out).write_text(json.dumps(groups, sort_keys=True), encoding="utf-8")
     plan_out = config.getoption("shard_plan_out")
     count = config.getoption("shard_count")
     index = config.getoption("shard_index")

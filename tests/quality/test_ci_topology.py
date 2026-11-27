@@ -2217,6 +2217,7 @@ def _assert_shard_entries_partition(
     collected: set[str],
     shards: Sequence[Sequence[str]],
     label: str,
+    groups: Mapping[str, str] | None = None,
 ) -> None:
     """Every selected node runs on exactly one shard; every node ID entry exists."""
     owners: dict[str, list[int]] = {}
@@ -2232,6 +2233,7 @@ def _assert_shard_entries_partition(
                 ), f"{label}: shard {index} names {entry}, which pytest does not collect"
     dropped: list[str] = []
     duplicated: list[str] = []
+    group_owners: dict[str, set[int]] = defaultdict(set)
     for node in sorted(selected):
         module, _, rest = node.partition("::")
         top = re.split(r"::|\[", rest, maxsplit=1)[0]
@@ -2240,17 +2242,26 @@ def _assert_shard_entries_partition(
             dropped.append(node)
         elif len(hits) > 1:
             duplicated.append(node)
+        elif groups and node in groups:
+            group_owners[groups[node]].update(hits)
     assert not dropped, (
         f"{label}: shard file lists drop {len(dropped)} selected tests a full collect "
         f"finds, e.g. {dropped[:3]}; add their modules to the selection"
     )
     assert not duplicated, f"{label}: tests run on two shards, e.g. {duplicated[:3]}"
+    split_groups = {
+        group: sorted(owners) for group, owners in group_owners.items() if len(owners) > 1
+    }
+    assert not split_groups, f"{label}: xdist groups span shards: {split_groups}"
 
 
 @pytest.fixture(scope="module")
-def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[str]]:
+def full_collection(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, list[str]], dict[str, str]]:
     """One full collect of every sharded root on this SHA, with each node's markers."""
     out = tmp_path_factory.mktemp("shard-inventory") / "inventory.json"
+    groups = out.with_name("groups.json")
     result = subprocess.run(
         [
             sys.executable,
@@ -2264,6 +2275,8 @@ def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[
             "scripts.ci_sharding",
             "--shard-inventory-out",
             str(out),
+            "--shard-group-inventory-out",
+            str(groups),
             # Override addopts' -m so every job's own expression is evaluated here.
             "-m",
             "",
@@ -2280,30 +2293,36 @@ def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[
         },
     )
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
-    return json.loads(out.read_text(encoding="utf-8"))
+    return (
+        json.loads(out.read_text(encoding="utf-8")),
+        json.loads(groups.read_text(encoding="utf-8")),
+    )
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), SHARD_FILE_LIST_JOBS)
 def test_shard_file_lists_match_full_collection(
-    full_collection: dict[str, list[str]], workflow: str, job_id: str
+    full_collection: tuple[dict[str, list[str]], dict[str, str]], workflow: str, job_id: str
 ) -> None:
+    inventory, groups = full_collection
     args, shards = _job_shards(workflow, job_id)
     _assert_shard_entries_partition(
-        _selected_nodes(full_collection, args.targets, args.marker_expression),
-        set(full_collection),
+        _selected_nodes(inventory, args.targets, args.marker_expression),
+        set(inventory),
         shards,
         f"{workflow}:{job_id}",
+        groups if job_id == "integration-tests-shard" else None,
     )
 
 
 def test_windows_unit_shard_file_lists_match_full_collection(
-    full_collection: dict[str, list[str]],
+    full_collection: tuple[dict[str, list[str]], dict[str, str]],
 ) -> None:
     from scripts.ci_selections import selection_roots
 
+    inventory, _groups = full_collection
     _assert_shard_entries_partition(
-        _selected_nodes(full_collection, selection_roots("windows-unit"), None),
-        set(full_collection),
+        _selected_nodes(inventory, selection_roots("windows-unit"), None),
+        set(inventory),
         _windows_unit_shards(),
         "ci_selections:windows-unit",
     )
@@ -2360,6 +2379,18 @@ def test_shard_file_list_drift_fails(drift: str) -> None:
         shards.append([])
     with pytest.raises(AssertionError):
         _assert_shard_entries_partition(selected, collected, shards, "drift")
+
+
+def test_integration_shards_cannot_split_a_collected_xdist_group() -> None:
+    selected = {"tests/a.py::test_a", "tests/b.py::test_b", "tests/c.py::test_c"}
+    groups = {"tests/a.py::test_a": "home", "tests/b.py::test_b": "home"}
+    _assert_shard_entries_partition(
+        selected, selected, [["tests/a.py", "tests/b.py"], ["tests/c.py"]], "same", groups
+    )
+    with pytest.raises(AssertionError, match="xdist groups span shards"):
+        _assert_shard_entries_partition(
+            selected, selected, [["tests/a.py"], ["tests/b.py", "tests/c.py"]], "split", groups
+        )
 
 
 # ---------------------------------------------------------------------------

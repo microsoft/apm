@@ -29,15 +29,18 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "def shard_test_files(",
         "plan = shard_test_files(",
         "def _write_shard_files(",
+        '"--shard-group-inventory-out",',
     ),
     "scripts/ci_selections.py": ("shard_test_files(",),
     DRIFT_GUARD: (
         "def test_shard_file_lists_match_full_collection(",
         "def test_windows_unit_shard_file_lists_match_full_collection(",
         '"--shard-inventory-out",',
+        '"--shard-group-inventory-out",',
         "ci_sharding.shard_test_files(",
         "assert not dropped, (",
         "assert not duplicated,",
+        "assert not split_groups,",
     ),
 }
 # A shard selector belongs to the nearest command line above it.
