@@ -2155,7 +2155,9 @@ def _resolve_job_tokens(
     return resolved
 
 
-def _job_shards(workflow: str, job_id: str) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
+def _job_shards(
+    workflow: str, job_id: str, shard_count: int | None = None
+) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
     """Every shard's file list for one sharded job, through the canonical emitter."""
     workflow_data = load_workflow(REPO_ROOT / ".github/workflows" / workflow)
     job = workflow_job(workflow_data, job_id)
@@ -2163,6 +2165,8 @@ def _job_shards(workflow: str, job_id: str) -> tuple[argparse.Namespace, list[tu
     args = ci_sharding._files_parser().parse_args(
         _resolve_job_tokens(raw, job, job_id, workflow_data)
     )
+    if shard_count is not None:
+        args.shard_count = shard_count
     durations = ci_sharding.load_durations(REPO_ROOT / args.shard_durations)
     if job_id == "integration-tests-shard":
         durations = {
@@ -2311,6 +2315,21 @@ def test_shard_file_lists_match_full_collection(
         shards,
         f"{workflow}:{job_id}",
         groups if job_id == "integration-tests-shard" else None,
+    )
+
+
+@pytest.mark.parametrize("shard_count", range(1, 16))
+def test_integration_shards_preserve_selection_and_groups_at_each_planned_count(
+    full_collection: tuple[dict[str, list[str]], dict[str, str]], shard_count: int
+) -> None:
+    inventory, groups = full_collection
+    args, shards = _job_shards("ci-integration.yml", "integration-tests-shard", shard_count)
+    _assert_shard_entries_partition(
+        _selected_nodes(inventory, args.targets, args.marker_expression),
+        set(inventory),
+        shards,
+        f"ci-integration.yml:integration-tests-shard:{shard_count}",
+        groups,
     )
 
 
