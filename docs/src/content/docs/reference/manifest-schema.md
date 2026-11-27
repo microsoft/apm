@@ -232,7 +232,7 @@ MCP-only and experimental `--target` values such as `intellij` and
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, and `.agents/skills/`. |
 | `opencode` | Emits `AGENTS.md`, `.opencode/agents/`, `.opencode/commands/`, and `.agents/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
-| `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.agents/skills/`, `.gemini/settings.json`. |
+| `gemini` | Emits `GEMINI.md` and deploys to `.gemini/agents/`, `.gemini/commands/`, `.agents/skills/`, `.gemini/settings.json`. |
 | `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |

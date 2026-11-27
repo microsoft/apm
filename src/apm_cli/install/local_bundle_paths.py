@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 # Target formats that need a primitive renderer; an opaque bundle copy would
 # write plugin-native Markdown under their extension (#3706).
-_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
+_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "gemini_agent"})
 # Target formats local bundle install renders from a packed Markdown source
 # instead of copying it (#3714); any other source for them is skipped.
 _RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})

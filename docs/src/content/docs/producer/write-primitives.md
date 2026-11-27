@@ -87,7 +87,11 @@ It lands in `.github/agents/security-review.agent.md` for Copilot,
 
 **Gotcha:** optional fields such as `model` and `tools` do not translate to every
 harness. Codex, for example, drops a field it cannot represent, and install
-prints a warning naming the agent. Read the warnings after `apm install`.
+prints a warning naming the agent. Gemini CLI skips the whole agent instead
+when a value would not load or a restriction would be lost: a Claude-style
+agent with `tools: [Read]` or `model: sonnet` is not deployed to Gemini at all.
+See the [Gemini target](../../reference/targets-matrix/#gemini) for the rules.
+Read the warnings after `apm install`.
 
 ## Prompts
 

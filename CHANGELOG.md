@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm install` deploys agents to Gemini CLI (`.gemini/agents/`, `~/.gemini/agents/`), skipping with a warning any agent whose tools, model or access restrictions Gemini cannot keep. -- by @mohitmishra786 (#4593)
+
 ## [0.39.0] - 2026-11-25
 
 ### Highlights

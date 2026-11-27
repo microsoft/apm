@@ -321,6 +321,7 @@ class TestExhaustivenessChecks:
             "agents_kiro",
             "agents_opencode",
             "agents_codex",
+            "agents_gemini",
             # NOTE: windsurf no longer exposes an 'agents' primitive
             # (its content deploys as skills under .agents/skills/).
             "commands",  # was commands_claude, aliased
